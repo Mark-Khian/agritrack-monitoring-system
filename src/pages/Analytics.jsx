@@ -1,16 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { useAuth } from '../context/AuthContext';
+import useAuth from '../context/useAuth';
 import {
     AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, Legend,
-    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList
 } from 'recharts';
 import {
-    Wheat, TrendingUp, Sprout, Award,
-    BarChart2, Home, Map as MapIcon, Tractor,
+    Wheat, TrendingUp, Sprout, Award, Activity,
+    BarChart2, Home, Tractor, Map as MapIcon,
     Shovel, Droplets, Bug, Scissors,
     FlaskConical, Package, ChevronRight
 } from 'lucide-react';
+import {
+    SkeletonPageHeader,
+    SkeletonStatCard,
+    SkeletonBox,
+    SkeletonTable,
+    SkeletonChartBars,
+    SkeletonDonutChart,
+    SkeletonHorizontalBarChart,
+    SkeletonText
+} from '../components/Skeleton';
 
 const API = 'http://localhost:5000/api/v1';
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
@@ -43,6 +53,19 @@ const harvestByMonth = (items) => {
     return entries
         .sort((a, b) => a._dt - b._dt)
         .map(({ month, yield_kg }) => ({ month, yield_kg: Number(yield_kg.toFixed(0)) }));
+};
+
+const getPlaceholderMonths = () => {
+    const data = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        data.push({
+            month: d.toLocaleString('default', { month: 'short', year: '2-digit' }),
+            yield_kg: 0
+        });
+    }
+    return data;
 };
 
 const getSuccessRate = (harvests) => {
@@ -83,7 +106,15 @@ const formatNumber = (n) => {
     return Math.round(num).toLocaleString();
 };
 
-const safeDate = (value) => (value ? new Date(String(value).slice(0, 10)) : null);
+const safeDate = (value) => {
+    if (!value) return null;
+    const s = String(value).slice(0, 10);
+    const parts = s.split('-');
+    if (parts.length === 3) {
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    }
+    return new Date(value);
+};
 
 const getMaturityDays = (planting) => {
     if (Number.isFinite(Number(planting?.maturity_days)) && Number(planting.maturity_days) > 0) {
@@ -169,8 +200,6 @@ const Analytics = () => {
         variety_null: false,
     });
     const [loading, setLoading] = useState(true);
-    const [farms, setFarms] = useState([]);
-    const [fields, setFields] = useState([]);
     const [plantings, setPlantings] = useState([]);
     const [harvests, setHarvests] = useState([]);
     const [activities, setActivities] = useState([]);
@@ -193,23 +222,17 @@ const Analytics = () => {
                     plantingQs.set('variety_null', '1');
                 }
 
-                const [farmsRes, fieldsRes, plantingsRes, harvestsRes, activitiesRes] = await Promise.all([
-                    axios.get(`${API}/farms?limit=100`, { headers }),
-                    axios.get(`${API}/fields?limit=100`, { headers }),
+                const [plantingsRes, harvestsRes, activitiesRes] = await Promise.all([
                     axios.get(`${API}/plantings?${plantingQs.toString()}`, { headers }),
                     axios.get(`${API}/harvests?limit=100`, { headers }),
                     axios.get(`${API}/activities?limit=100`, { headers })
                 ]);
 
-                setFarms(farmsRes.data.data || []);
-                setFields(fieldsRes.data.data || []);
                 setPlantings(plantingsRes.data.data || []);
                 setHarvests(harvestsRes.data.data || []);
                 setActivities(activitiesRes.data.data || []);
             } catch (err) {
                 console.error('Analytics fetch error:', err.message);
-                setFarms([]);
-                setFields([]);
                 setPlantings([]);
                 setHarvests([]);
                 setActivities([]);
@@ -219,7 +242,7 @@ const Analytics = () => {
         };
 
         fetchAll();
-    }, [token, dateRange, plantingFilters]);
+    }, [token, plantingFilters]);
 
     const filteredHarvests = useMemo(
         () => filterByDateRange(harvests, 'harvest_date', dateRange),
@@ -359,130 +382,81 @@ const Analytics = () => {
         return data;
     }, [filteredHarvests, plantings]);
 
-    const joinFarmData = (farmsInput, fieldsInput, plantingsInput, harvestsInput) => {
-        const fieldById = new Map((fieldsInput || []).map((f) => [f.id, f]));
-        const plantingsById = new Map((plantingsInput || []).map((p) => [p.id, p]));
+    const fieldRows = useMemo(() => {
+        const plantingsById = new Map((plantings || []).map((p) => [p.id, p]));
 
-        const fieldCountByFarm = {};
-        (fieldsInput || []).forEach((f) => {
-            const farmId = f?.farm_id;
-            if (!farmId) return;
-            fieldCountByFarm[farmId] = (fieldCountByFarm[farmId] || 0) + 1;
-        });
+        const byField = new Map();
 
-        const getFarmIdForPlanting = (p) => {
-            const farmIdDirect = p?.farm_id;
-            if (farmIdDirect) return farmIdDirect;
-            const fieldId = p?.field_id;
-            if (!fieldId) return null;
-            const field = fieldById.get(fieldId);
-            return field?.farm_id || null;
-        };
+        const getKey = (p) => String(p?.field_name || '').trim() || 'Unknown';
 
-        const plantingsCountByFarm = {};
-        const activePlantingsCountByFarm = {};
-        const varietyCountByFarm = {};
-        (plantingsInput || []).forEach((p) => {
-            const farmId = getFarmIdForPlanting(p);
-            if (!farmId) return;
-            plantingsCountByFarm[farmId] = (plantingsCountByFarm[farmId] || 0) + 1;
-
-            const status = String(p?.status || '').toLowerCase();
-            if (status === 'active') {
-                activePlantingsCountByFarm[farmId] = (activePlantingsCountByFarm[farmId] || 0) + 1;
+        (filteredPlantings || []).forEach((p) => {
+            const key = getKey(p);
+            if (!byField.has(key)) {
+                byField.set(key, {
+                    fieldId: key,
+                    fieldName: key,
+                    size: Number(p?.field_size || 0),
+                    plantingsCount: 0,
+                    harvestCount: 0,
+                    totalYield: 0,
+                    avgYield: 0,
+                    topVariety: '—',
+                    status: 'Idle',
+                    _varietyCounts: {},
+                    _hasActive: false,
+                });
             }
-
+            const row = byField.get(key);
+            row.plantingsCount += 1;
+            if (Number(p?.field_size || 0) > 0) row.size = Math.max(row.size || 0, Number(p.field_size));
+            const status = String(p?.status || '').toLowerCase();
+            if (status === 'active') row._hasActive = true;
             const variety = p?.variety || 'Unknown';
-            varietyCountByFarm[farmId] = varietyCountByFarm[farmId] || {};
-            varietyCountByFarm[farmId][variety] = (varietyCountByFarm[farmId][variety] || 0) + 1;
+            row._varietyCounts[variety] = (row._varietyCounts[variety] || 0) + 1;
         });
 
-        const harvestsCountByFarm = {};
-        const yieldByFarm = {};
-        (harvestsInput || []).forEach((h) => {
+        (filteredHarvests || []).forEach((h) => {
             const planting = plantingsById.get(h?.planting_id);
-            const farmId = planting ? getFarmIdForPlanting(planting) : null;
-            if (!farmId) return;
-            harvestsCountByFarm[farmId] = (harvestsCountByFarm[farmId] || 0) + 1;
-            yieldByFarm[farmId] = (yieldByFarm[farmId] || 0) + Number(h?.yield_kg || 0);
+            const key = getKey(planting || { field_name: h?.field_name });
+            if (!byField.has(key)) {
+                byField.set(key, {
+                    fieldId: key,
+                    fieldName: key,
+                    size: 0,
+                    plantingsCount: 0,
+                    harvestCount: 0,
+                    totalYield: 0,
+                    avgYield: 0,
+                    topVariety: '—',
+                    status: 'Idle',
+                    _varietyCounts: {},
+                    _hasActive: false,
+                });
+            }
+            const row = byField.get(key);
+            row.harvestCount += 1;
+            row.totalYield += Number(h?.yield_kg || 0);
         });
 
-        const rows = (farmsInput || []).map((farm) => {
-            const farmId = farm.id;
-            const fieldsCount = fieldCountByFarm[farmId] || 0;
-            const plantingsCount = plantingsCountByFarm[farmId] || 0;
-            const harvestCount = harvestsCountByFarm[farmId] || 0;
-            const totalYield = yieldByFarm[farmId] || 0;
-            const avgYield = harvestCount === 0 ? 0 : totalYield / harvestCount;
-
-            const varietyMap = varietyCountByFarm[farmId] || {};
-            const topVariety = Object.entries(varietyMap).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
-
-            const hasActive = (activePlantingsCountByFarm[farmId] || 0) > 0;
+        const rows = Array.from(byField.values()).map((row) => {
+            const varietyEntries = Object.entries(row._varietyCounts || {});
+            const topVariety = varietyEntries.sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+            const avgYield = row.harvestCount === 0 ? 0 : row.totalYield / row.harvestCount;
             return {
-                farmId,
-                farmName: farm.name || `Farm ${farmId}`,
-                fieldsCount,
-                plantingsCount,
-                harvestCount,
-                totalYield: Number(totalYield.toFixed(0)),
+                fieldId: row.fieldId,
+                fieldName: row.fieldName,
+                size: Number((row.size || 0).toFixed(2)),
+                plantingsCount: row.plantingsCount,
+                harvestCount: row.harvestCount,
+                totalYield: Number(row.totalYield.toFixed(0)),
                 avgYield: Number(avgYield.toFixed(1)),
                 topVariety,
-                status: hasActive ? 'Active' : 'Idle'
+                status: row._hasActive ? 'Active' : 'Idle'
             };
         });
 
         return rows.sort((a, b) => b.totalYield - a.totalYield);
-    };
-
-    const farmRows = useMemo(() => {
-        // Use ALL plantings for harvest -> farm mapping (harvests may fall in a window
-        // while the originating planting_date is outside the window).
-        const rows = joinFarmData(farms, fields, plantings, filteredHarvests);
-
-        const fieldById = new Map((fields || []).map((f) => [f.id, f]));
-        const getFarmIdForPlanting = (p) => {
-            const farmIdDirect = p?.farm_id;
-            if (farmIdDirect) return farmIdDirect;
-            const fieldId = p?.field_id;
-            if (!fieldId) return null;
-            const field = fieldById.get(fieldId);
-            return field?.farm_id || null;
-        };
-
-        const plantingsCountByFarm = {};
-        const activePlantingsCountByFarm = {};
-        const varietyCountByFarm = {};
-
-        (filteredPlantings || []).forEach((p) => {
-            const farmId = getFarmIdForPlanting(p);
-            if (!farmId) return;
-
-            plantingsCountByFarm[farmId] = (plantingsCountByFarm[farmId] || 0) + 1;
-            const status = String(p?.status || '').toLowerCase();
-            if (status === 'active') {
-                activePlantingsCountByFarm[farmId] = (activePlantingsCountByFarm[farmId] || 0) + 1;
-            }
-
-            const variety = p?.variety || 'Unknown';
-            varietyCountByFarm[farmId] = varietyCountByFarm[farmId] || {};
-            varietyCountByFarm[farmId][variety] = (varietyCountByFarm[farmId][variety] || 0) + 1;
-        });
-
-        return rows.map((row) => {
-            const farmId = row.farmId;
-            const plantingsCount = plantingsCountByFarm[farmId] || 0;
-            const hasActive = (activePlantingsCountByFarm[farmId] || 0) > 0;
-            const varietyMap = varietyCountByFarm[farmId] || {};
-            const topVariety = Object.entries(varietyMap).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
-            return {
-                ...row,
-                plantingsCount,
-                topVariety,
-                status: hasActive ? 'Active' : 'Idle'
-            };
-        });
-    }, [farms, fields, plantings, filteredPlantings, filteredHarvests]);
+    }, [plantings, filteredPlantings, filteredHarvests]);
 
     const recentHarvests = useMemo(() => {
         return (filteredHarvests || [])
@@ -491,14 +465,50 @@ const Analytics = () => {
             .slice(0, 5);
     }, [filteredHarvests]);
 
+    const ActivityCursor = (props) => {
+        const { x, y, width, height, payload } = props;
+        if (!payload || !payload[0]) return null;
+        const activeObject = payload[0]?.payload;
+        const color = activeObject?.color || '#22c55e';
+        return (
+            <rect
+                x={x}
+                y={y}
+                width={width}
+                height={height}
+                fill={color}
+                fillOpacity={0.07}
+                rx={6}
+            />
+        );
+    };
+
+    const SeasonCursor = (props) => {
+        const { x, y, width, height, payload } = props;
+        if (!payload || !payload[0]) return null;
+        const item = payload[0]?.payload;
+        const color = item?.season === 'Dry' ? '#f59e0b' : '#3b82f6';
+        return (
+            <rect
+                x={x}
+                y={y}
+                width={width}
+                height={height}
+                fill={color}
+                fillOpacity={0.07}
+                rx={6}
+            />
+        );
+    };
+
     const areaTooltip = ({ active, payload }) => {
         if (!active || !payload || payload.length === 0) return null;
         const item = payload[0]?.payload;
         return (
-            <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-2 text-sm">
-                <p className="text-gray-500 text-xs">{item?.month}</p>
-                <p className="font-semibold text-gray-900">
-                    {item?.yield_kg ?? 0} kg
+            <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
+                <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.month}</p>
+                <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">
+                    {item?.yield_kg ?? 0} <span className="text-xs font-normal text-gray-500">kg</span>
                 </p>
             </div>
         );
@@ -508,20 +518,89 @@ const Analytics = () => {
         if (!active || !payload || payload.length === 0) return null;
         const item = payload[0]?.payload;
         return (
-            <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-2 text-sm">
-                <p className="text-gray-500 text-xs">{item?.type}</p>
-                <p className="font-semibold text-gray-900">{item?.count ?? 0} activities</p>
+            <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
+                <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.type}</p>
+                <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">{item?.count ?? 0} <span className="text-xs font-normal text-gray-500">activities</span></p>
             </div>
         );
     };
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center min-h-[60vh]">
-                <div className="flex flex-col items-center gap-3">
-                    <div className="w-8 h-8 border-4 border-[#166534] border-t-transparent rounded-full animate-spin" />
-                    <p className="text-gray-400 text-sm">Loading analytics...</p>
+            <div className="space-y-6">
+                {/* Header Skeleton */}
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="space-y-3">
+                        <SkeletonBox width="w-64" height="h-8" rounded="rounded" />
+                        <SkeletonBox width="w-80" height="h-4" rounded="rounded" />
+                        <div className="flex gap-2 mt-3">
+                            <SkeletonBox width="w-24" height="h-6" rounded="rounded-full" />
+                            <SkeletonBox width="w-24" height="h-6" rounded="rounded-full" />
+                            <SkeletonBox width="w-24" height="h-6" rounded="rounded-full" />
+                        </div>
+                    </div>
+                    <div className="flex gap-2">
+                        {Array.from({ length: 4 }).map((_, i) => (
+                            <SkeletonBox key={i} width="w-20" height="h-9" rounded="rounded-xl" />
+                        ))}
+                    </div>
                 </div>
+
+                {/* Filter Skeleton */}
+                <div className="flex gap-2 text-xs text-gray-600">
+                    <SkeletonBox width="w-32" height="h-8" rounded="rounded-lg" />
+                    <SkeletonBox width="w-32" height="h-8" rounded="rounded-lg" />
+                    <SkeletonBox width="w-24" height="h-8" rounded="rounded-lg" />
+                </div>
+
+                {/* KPI Cards Skeleton */}
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                        <SkeletonStatCard key={i} />
+                    ))}
+                </div>
+
+                {/* Harvest Yield Chart Skeleton */}
+                <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5 space-y-4">
+                    <SkeletonBox width="w-48" height="h-6" rounded="rounded" />
+                    <SkeletonChartBars count={12} height="220px" />
+                </div>
+
+                {/* Two-column row: Donut + Horizontal Bar */}
+                <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5 space-y-4">
+                        <SkeletonBox width="w-48" height="h-6" rounded="rounded" />
+                        <SkeletonDonutChart />
+                    </div>
+                    <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5 space-y-4">
+                        <SkeletonBox width="w-48" height="h-6" rounded="rounded" />
+                        <SkeletonHorizontalBarChart rows={6} />
+                    </div>
+                </div>
+
+                {/* Three-column chart row */}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5 space-y-4">
+                            <SkeletonBox width="w-40" height="h-6" rounded="rounded" />
+                            <SkeletonChartBars count={8} height="200px" />
+                        </div>
+                    ))}
+                </div>
+
+                {/* Field Performance Table Skeleton */}
+                <SkeletonTable
+                    rows={4}
+                    cols={8}
+                    columnHeaders={['Field Name', 'Size (ha)', 'Plantings', 'Harvests', 'Yield', 'Avg Yield', 'Top Variety', 'Status']}
+                />
+
+                {/* Recent Harvests Table Skeleton */}
+                <SkeletonTable
+                    rows={5}
+                    cols={6}
+                    columnHeaders={['Planting', 'Field', 'Harvest Date', 'Yield (kg)', 'Quality Grade', 'Notes']}
+                />
             </div>
         );
     }
@@ -531,7 +610,7 @@ const Analytics = () => {
     const plantingById = new Map((plantings || []).map((p) => [p.id, p]));
 
     return (
-        <div className="bg-[#f8fafc] min-h-screen p-6 space-y-6">
+        <div className="space-y-6">
             {/* Header */}
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -567,11 +646,10 @@ const Analytics = () => {
                                 key={btn.id}
                                 type="button"
                                 onClick={() => setDateRange(btn.id)}
-                                className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors border ${
-                                    isActive
+                                className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors border ${isActive
                                         ? 'bg-[#166534] text-white border-[#166534]'
                                         : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                                }`}
+                                    }`}
                             >
                                 {btn.label}
                             </button>
@@ -685,35 +763,53 @@ const Analytics = () => {
                     <p className="text-xs text-gray-400 mt-1">Monthly yield in kilograms</p>
                 </div>
 
-                {harvestYieldOverTime.length === 0 ? (
-                    <EmptyChart message="No harvest data in this date range." />
-                ) : (
-                    <div className="h-[220px]">
-                        <ResponsiveContainer width="100%" height={220}>
-                            <AreaChart data={harvestYieldOverTime} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                                <defs>
-                                    <linearGradient id="yieldGradient" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#16a34a" stopOpacity={0.28} />
-                                        <stop offset="95%" stopColor="#16a34a" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} />
-                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} tickFormatter={(v) => `${v}kg`} />
-                                <Tooltip content={areaTooltip} />
-                                <Area
-                                    type="monotone"
-                                    dataKey="yield_kg"
-                                    stroke="#16a34a"
-                                    strokeWidth={2.2}
-                                    fill="url(#yieldGradient)"
-                                    name="Yield"
-                                    dot={{ r: 3.5, fill: '#16a34a', strokeWidth: 1, stroke: '#fff' }}
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
-                )}
+                {(() => {
+                    const isPlaceholder = harvestYieldOverTime.length === 0;
+                    const chartData = isPlaceholder ? getPlaceholderMonths() : harvestYieldOverTime;
+                    return (
+                        <div className="h-[220px] relative">
+                            <ResponsiveContainer width="100%" height={220}>
+                                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="yieldGradient" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.28} />
+                                            <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-800" vertical={false} />
+                                    <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 10.5 }} />
+                                    <YAxis
+                                        axisLine={false}
+                                        tickLine={false}
+                                        tick={{ fill: '#9ca3af', fontSize: 10.5 }}
+                                        tickFormatter={(v) => `${v}kg`}
+                                        domain={isPlaceholder ? [0, 10000] : undefined}
+                                    />
+                                    {!isPlaceholder && <Tooltip content={areaTooltip} />}
+                                    <Area
+                                        type="monotone"
+                                        dataKey="yield_kg"
+                                        stroke={isPlaceholder ? "#94a3b8" : "#22c55e"}
+                                        strokeWidth={isPlaceholder ? 1.5 : 2.5}
+                                        strokeDasharray={isPlaceholder ? "4 4" : undefined}
+                                        fill={isPlaceholder ? "none" : "url(#yieldGradient)"}
+                                        name="Yield"
+                                        dot={isPlaceholder ? false : { r: 4, fill: '#22c55e', strokeWidth: 1.5, stroke: '#fff' }}
+                                    />
+                                </AreaChart>
+                            </ResponsiveContainer>
+
+                            {isPlaceholder && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px] pointer-events-none">
+                                    <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
+                                        <Wheat size={16} className="text-emerald-600 animate-pulse" />
+                                        <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No harvest yield data in this range</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })()}
             </section>
 
             {/* Section 3: Two-column row */}
@@ -725,57 +821,76 @@ const Analytics = () => {
                         <p className="text-xs text-gray-400 mt-1">Distribution by quality grade</p>
                     </div>
 
-                    {harvestQualityDistribution.length === 0 ? (
-                        <EmptyChart message="No quality data in this date range." />
-                    ) : (
-                        <ResponsiveContainer width="100%" height={220}>
-                            <PieChart>
-                                <defs>
-                                    {/* keeps aria/gradients stable; actual colors come from slices */}
-                                </defs>
-                                <Tooltip
-                                    content={({ active, payload }) => {
-                                        if (!active || !payload || payload.length === 0) return null;
-                                        const item = payload[0]?.payload;
-                                        return (
-                                            <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-2 text-sm">
-                                                <p className="text-gray-500 text-xs">{item?.grade}</p>
-                                                <p className="font-semibold text-gray-900">{item?.count ?? 0} harvest(s)</p>
-                                            </div>
-                                        );
-                                    }}
-                                />
-                                <Pie
-                                    data={harvestQualityDistribution}
-                                    dataKey="count"
-                                    nameKey="grade"
-                                    innerRadius={35}
-                                    outerRadius={75}
-                                    paddingAngle={3}
-                                    cornerRadius={8}
-                                >
-                                    {harvestQualityDistribution.map((entry) => {
-                                        const gradeKey = String(entry.grade).toLowerCase();
-                                        const fill =
-                                            gradeKey === 'a' ? '#22c55e'
-                                                : gradeKey === 'b' ? '#3b82f6'
-                                                    : gradeKey === 'c' ? '#f59e0b'
-                                                        : '#ef4444';
-                                        return <Cell key={entry.grade} fill={fill} />;
-                                    })}
-                                </Pie>
-                                <Legend
-                                    verticalAlign="bottom"
-                                    align="center"
-                                    formatter={(value, entry) => {
-                                        const item = entry?.payload;
-                                        const count = item?.count;
-                                        return `${value} (${count})`;
-                                    }}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    )}
+                    {(() => {
+                        const isPlaceholder = harvestQualityDistribution.length === 0;
+                        const chartData = isPlaceholder
+                            ? [{ grade: 'Pending Records', count: 1 }]
+                            : harvestQualityDistribution;
+                        return (
+                            <div className="h-[220px] relative">
+                                <ResponsiveContainer width="100%" height={220}>
+                                    <PieChart>
+                                        {!isPlaceholder && (
+                                            <Tooltip
+                                                content={({ active, payload }) => {
+                                                    if (!active || !payload || payload.length === 0) return null;
+                                                    const item = payload[0]?.payload;
+                                                    return (
+                                                        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
+                                                            <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">Grade {item?.grade}</p>
+                                                            <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">{item?.count ?? 0} <span className="text-xs font-normal text-gray-500">harvest(s)</span></p>
+                                                        </div>
+                                                    );
+                                                }}
+                                            />
+                                        )}
+                                        <Pie
+                                            data={chartData}
+                                            dataKey="count"
+                                            nameKey="grade"
+                                            innerRadius={35}
+                                            outerRadius={75}
+                                            paddingAngle={isPlaceholder ? 0 : 3}
+                                            cornerRadius={isPlaceholder ? 0 : 8}
+                                        >
+                                            {chartData.map((entry) => {
+                                                if (isPlaceholder) {
+                                                    return <Cell key="placeholder" className="fill-gray-100 dark:fill-slate-800" />;
+                                                }
+                                                const gradeKey = String(entry.grade).toLowerCase();
+                                                const fill =
+                                                    gradeKey === 'a' ? '#22c55e'
+                                                        : gradeKey === 'b' ? '#3b82f6'
+                                                            : gradeKey === 'c' ? '#f59e0b'
+                                                                : '#ef4444';
+                                                return <Cell key={entry.grade} fill={fill} />;
+                                            })}
+                                        </Pie>
+                                        {!isPlaceholder && (
+                                            <Legend
+                                                verticalAlign="bottom"
+                                                align="center"
+                                                formatter={(value, entry) => {
+                                                    const item = entry?.payload;
+                                                    const count = item?.count;
+                                                    return `${value} (${count})`;
+                                                }}
+                                            />
+                                        )}
+                                    </PieChart>
+                                </ResponsiveContainer>
+
+                                {isPlaceholder && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px] pointer-events-none">
+                                        <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
+                                            <Award size={16} className="text-emerald-600 animate-pulse" />
+                                            <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No quality distribution data</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
                 </section>
 
                 {/* Activity Breakdown */}
@@ -785,33 +900,71 @@ const Analytics = () => {
                         <p className="text-xs text-gray-400 mt-1">Activities by type</p>
                     </div>
 
-                    {activityBreakdown.length === 0 ? (
-                        <EmptyChart message="No activities found in this date range." />
-                    ) : (
-                        <ResponsiveContainer width="100%" height={220}>
-                            <BarChart
-                                data={activityBreakdown}
-                                layout="vertical"
-                                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                            >
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={true} />
-                                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} />
-                                <YAxis
-                                    dataKey="type"
-                                    axisLine={false}
-                                    tickLine={false}
-                                    tick={{ fontSize: 12, fill: '#111827' }}
-                                    width={150}
-                                />
-                                <Tooltip content={activityTooltip} />
-                                <Bar dataKey="count" radius={[10, 10, 10, 10]}>
-                                    {activityBreakdown.map((entry, idx) => (
-                                        <Cell key={`cell-${idx}`} fill={entry.color} />
-                                    ))}
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
-                    )}
+                    {(() => {
+                        const isPlaceholder = activityBreakdown.length === 0;
+                        const chartData = isPlaceholder
+                            ? [
+                                { type: 'Irrigation', count: 0 },
+                                { type: 'Pest Control', count: 0 },
+                                { type: 'Fertilizing', count: 0 },
+                                { type: 'Crop Monitoring', count: 0 },
+                            ]
+                            : activityBreakdown;
+                        return (
+                            <div className="h-[220px] relative">
+                                <ResponsiveContainer width="100%" height={220}>
+                                    <BarChart
+                                        data={chartData}
+                                        layout="vertical"
+                                        margin={{ top: 10, right: 35, left: 0, bottom: 0 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-800" horizontal={true} />
+                                        <XAxis
+                                            type="number"
+                                            axisLine={false}
+                                            tickLine={false}
+                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }}
+                                            domain={isPlaceholder ? [0, 10] : undefined}
+                                            allowDecimals={false}
+                                        />
+                                        <YAxis
+                                            type="category"
+                                            dataKey="type"
+                                            axisLine={false}
+                                            tickLine={false}
+                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }}
+                                            width={130}
+                                        />
+                                        {!isPlaceholder && <Tooltip content={activityTooltip} cursor={<ActivityCursor />} />}
+                                        <Bar dataKey="count" radius={[0, 6, 6, 0]}>
+                                            {chartData.map((entry, idx) => (
+                                                <Cell key={`cell-${idx}`} fill={isPlaceholder ? 'transparent' : entry.color} />
+                                            ))}
+                                            {!isPlaceholder && (
+                                                <LabelList
+                                                    dataKey="count"
+                                                    position="right"
+                                                    fill="#9ca3af"
+                                                    fontSize={10.5}
+                                                    offset={8}
+                                                    formatter={(v) => `${v}`}
+                                                />
+                                            )}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+
+                                {isPlaceholder && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px] pointer-events-none">
+                                        <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
+                                            <Activity size={16} className="text-emerald-600 animate-pulse" />
+                                            <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No activity logs in this range</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
                 </section>
             </div>
 
@@ -824,30 +977,60 @@ const Analytics = () => {
                         <p className="text-xs text-gray-400 mt-1">Yield by crop variety</p>
                     </div>
 
-                    {varietyPerformance.length === 0 ? (
-                        <EmptyChart message="No variety yield found in this date range." />
-                    ) : (
-                        <ResponsiveContainer width="100%" height={220}>
-                            <BarChart data={varietyPerformance} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                                <XAxis dataKey="variety" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} interval={0} />
-                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} tickFormatter={(v) => `${v}kg`} />
-                                <Tooltip
-                                    content={({ active, payload }) => {
-                                        if (!active || !payload || payload.length === 0) return null;
-                                        const item = payload[0]?.payload;
-                                        return (
-                                            <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-2 text-sm">
-                                                <p className="text-gray-500 text-xs">{item?.variety}</p>
-                                                <p className="font-semibold text-gray-900">{item?.yield_kg ?? 0} kg</p>
-                                            </div>
-                                        );
-                                    }}
-                                />
-                                <Bar dataKey="yield_kg" fill="#16a34a" radius={[10, 10, 10, 10]} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    )}
+                    {(() => {
+                        const isPlaceholder = varietyPerformance.length === 0;
+                        const chartData = isPlaceholder
+                            ? [
+                                { variety: 'NSIC Rc222', yield_kg: 0 },
+                                { variety: 'NSIC Rc160', yield_kg: 0 },
+                                { variety: 'NSIC Rc216', yield_kg: 0 },
+                            ]
+                            : varietyPerformance;
+                        return (
+                            <div className="h-[220px] relative">
+                                <ResponsiveContainer width="100%" height={220}>
+                                    <BarChart data={chartData} margin={{ top: 15, right: 10, left: 0, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-800" vertical={false} />
+                                        <XAxis dataKey="variety" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 10.5 }} interval={0} />
+                                        <YAxis
+                                            axisLine={false}
+                                            tickLine={false}
+                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }}
+                                            tickFormatter={(v) => `${v}kg`}
+                                            domain={isPlaceholder ? [0, 8000] : undefined}
+                                        />
+                                        {!isPlaceholder && (
+                                            <Tooltip
+                                                cursor={{ fill: '#22c55e', fillOpacity: 0.06, rx: 6 }}
+                                                content={({ active, payload }) => {
+                                                    if (!active || !payload || payload.length === 0) return null;
+                                                    const item = payload[0]?.payload;
+                                                    return (
+                                                        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
+                                                            <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.variety}</p>
+                                                            <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">
+                                                                {item?.yield_kg ?? 0} <span className="text-xs font-normal text-gray-500">kg</span>
+                                                            </p>
+                                                        </div>
+                                                    );
+                                                }}
+                                            />
+                                        )}
+                                        <Bar dataKey="yield_kg" fill={isPlaceholder ? 'transparent' : '#22c55e'} radius={[6, 6, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+
+                                {isPlaceholder && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px] pointer-events-none">
+                                        <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
+                                            <Wheat size={16} className="text-emerald-600 animate-pulse" />
+                                            <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No variety yield found in this range</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
                 </section>
 
                 {/* Growth Stage Distribution */}
@@ -867,9 +1050,9 @@ const Analytics = () => {
                                         if (!active || !payload || payload.length === 0) return null;
                                         const item = payload[0]?.payload;
                                         return (
-                                            <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-2 text-sm">
-                                                <p className="text-gray-500 text-xs">{item?.stage}</p>
-                                                <p className="font-semibold text-gray-900">{item?.count ?? 0} plantings</p>
+                                            <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
+                                                <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.stage}</p>
+                                                <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">{item?.count ?? 0} <span className="text-xs font-normal text-gray-500">plantings</span></p>
                                             </div>
                                         );
                                     }}
@@ -908,60 +1091,90 @@ const Analytics = () => {
                         <p className="text-xs text-gray-400 mt-1">Wet vs Dry season yield</p>
                     </div>
 
-                    {seasonComparison.length === 0 ? (
-                        <EmptyChart message="No season yield data found." />
-                    ) : (
-                        <ResponsiveContainer width="100%" height={220}>
-                            <BarChart data={seasonComparison} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                                <XAxis dataKey="season" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} />
-                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} tickFormatter={(v) => `${v}kg`} />
-                                <Tooltip
-                                    content={({ active, payload }) => {
-                                        if (!active || !payload || payload.length === 0) return null;
-                                        const item = payload[0]?.payload;
-                                        return (
-                                            <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-2 text-sm">
-                                                <p className="text-gray-500 text-xs">{item?.season}</p>
-                                                <p className="font-semibold text-gray-900">{item?.yield_kg ?? 0} kg</p>
-                                            </div>
-                                        );
-                                    }}
-                                />
-                                <Bar
-                                    dataKey="yield_kg"
-                                    radius={[10, 10, 10, 10]}
-                                >
-                                    {seasonComparison.map((entry) => {
-                                        const fill = entry.season === 'Dry' ? '#f59e0b' : '#3b82f6';
-                                        return <Cell key={entry.season} fill={fill} />;
-                                    })}
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
-                    )}
+                    {(() => {
+                        const isPlaceholder = seasonComparison.length === 0;
+                        const chartData = isPlaceholder 
+                            ? [
+                                { season: 'Dry', yield_kg: 0 },
+                                { season: 'Wet', yield_kg: 0 },
+                              ] 
+                            : seasonComparison;
+                        return (
+                            <div className="h-[220px] relative">
+                                <ResponsiveContainer width="100%" height={220}>
+                                    <BarChart data={chartData} margin={{ top: 15, right: 10, left: 0, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-800" vertical={false} />
+                                        <XAxis dataKey="season" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 10.5 }} />
+                                        <YAxis 
+                                            axisLine={false} 
+                                            tickLine={false} 
+                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }} 
+                                            tickFormatter={(v) => `${v}kg`}
+                                            domain={isPlaceholder ? [0, 8000] : undefined}
+                                        />
+                                        {!isPlaceholder && (
+                                            <Tooltip
+                                                cursor={<SeasonCursor />}
+                                                content={({ active, payload }) => {
+                                                    if (!active || !payload || payload.length === 0) return null;
+                                                    const item = payload[0]?.payload;
+                                                    return (
+                                                        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
+                                                            <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.season} Season</p>
+                                                            <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">
+                                                                {item?.yield_kg ?? 0} <span className="text-xs font-normal text-gray-500">kg</span>
+                                                            </p>
+                                                        </div>
+                                                    );
+                                                }}
+                                            />
+                                        )}
+                                        <Bar
+                                            dataKey="yield_kg"
+                                            radius={[6, 6, 0, 0]}
+                                            fill={isPlaceholder ? 'transparent' : undefined}
+                                        >
+                                            {!isPlaceholder && seasonComparison.map((entry) => {
+                                                const fill = entry.season === 'Dry' ? '#f59e0b' : '#3b82f6';
+                                                return <Cell key={entry.season} fill={fill} />;
+                                            })}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+
+                                {isPlaceholder && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px] pointer-events-none">
+                                        <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
+                                            <Wheat size={16} className="text-emerald-600 animate-pulse" />
+                                            <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No season yield data found</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
                 </section>
             </div>
 
-            {/* Section 5: Farm performance table */}
+            {/* Section 5: Field performance table */}
             <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
                 <div className="mb-4">
-                    <h2 className="text-lg font-bold text-gray-800">Farm Performance Summary</h2>
-                    <p className="text-xs text-gray-400 mt-1">Detailed breakdown by farm</p>
+                    <h2 className="text-lg font-bold text-gray-800">Field Performance Summary</h2>
+                    <p className="text-xs text-gray-400 mt-1">Detailed breakdown by field</p>
                 </div>
 
-                {farmRows.length === 0 || farms.length === 0 ? (
+                {fieldRows.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 text-sm text-gray-400">
                         <BarChart2 size={34} className="text-gray-300 mb-2" />
-                        <p>No farm data yet.</p>
+                        <p>No field data yet.</p>
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-white">
-                                    <th className="px-5 py-3">FARM NAME</th>
-                                    <th className="px-5 py-3">FIELDS</th>
+                                    <th className="px-5 py-3">FIELD NAME</th>
+                                    <th className="px-5 py-3">SIZE (ha)</th>
                                     <th className="px-5 py-3">PLANTINGS</th>
                                     <th className="px-5 py-3">HARVESTS</th>
                                     <th className="px-5 py-3">TOTAL YIELD</th>
@@ -971,13 +1184,13 @@ const Analytics = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {farmRows.map((row) => (
+                                {fieldRows.map((row) => (
                                     <tr
-                                        key={row.farmId}
-                                        className="hover:bg-emerald-50/40 transition-colors"
+                                        key={row.fieldId}
+                                        className="hover:bg-emerald-50/40 dark:hover:bg-slate-800/50 transition-colors"
                                     >
-                                        <td className="px-5 py-3 font-semibold text-gray-900">{row.farmName}</td>
-                                        <td className="px-5 py-3 text-gray-700">{row.fieldsCount}</td>
+                                        <td className="px-5 py-3 font-semibold text-gray-900">{row.fieldName}</td>
+                                        <td className="px-5 py-3 text-gray-700">{row.size} ha</td>
                                         <td className="px-5 py-3 text-gray-700">{row.plantingsCount}</td>
                                         <td className="px-5 py-3 text-gray-700">{row.harvestCount}</td>
                                         <td className="px-5 py-3 text-gray-700 font-semibold">
@@ -989,11 +1202,10 @@ const Analytics = () => {
                                         <td className="px-5 py-3 text-gray-700">{formatVariant(row.topVariety)}</td>
                                         <td className="px-5 py-3">
                                             <span
-                                                className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold"
-                                                style={{
-                                                    backgroundColor: row.status === 'Active' ? '#dcfce7' : '#f3f4f6',
-                                                    color: row.status === 'Active' ? '#166534' : '#374151'
-                                                }}
+                                                className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${row.status === 'Active'
+                                                        ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
+                                                        : 'bg-gray-100 dark:bg-slate-800/60 text-gray-700 dark:text-slate-300'
+                                                    }`}
                                             >
                                                 {row.status}
                                             </span>
@@ -1041,26 +1253,26 @@ const Analytics = () => {
                                     const yieldClass = getYieldClass(h?.yield_kg);
                                     const lifecyclePct = getLifecycleProgressPercent(p);
                                     return (
-                                    <tr key={h.id} className="hover:bg-emerald-50/40 transition-colors">
-                                        <td className="px-5 py-3 font-semibold text-gray-900">{variety}</td>
-                                        <td className="px-5 py-3 text-gray-700">{fieldName}</td>
-                                        <td className="px-5 py-3 text-gray-700">{h.harvest_date?.slice(0, 10) || '—'}</td>
-                                        <td className="px-5 py-3 text-gray-700 font-semibold">{Number(h.yield_kg || 0).toLocaleString()}</td>
-                                        <td className="px-5 py-3">
-                                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${yieldClass.className}`}>
-                                                {yieldClass.label}
-                                            </span>
-                                        </td>
-                                        <td className="px-5 py-3 text-gray-700 font-semibold">
-                                            {lifecyclePct}%
-                                        </td>
-                                        <td className="px-5 py-3">
-                                            <QualityBadge grade={h.quality_grade} />
-                                        </td>
-                                        <td className="px-5 py-3 text-gray-600 text-xs max-w-[260px] truncate" title={h.remarks}>
-                                            {h.remarks || '—'}
-                                        </td>
-                                    </tr>
+                                        <tr key={h.id} className="hover:bg-emerald-50/40 dark:hover:bg-slate-800/50 transition-colors">
+                                            <td className="px-5 py-3 font-semibold text-gray-900">{variety}</td>
+                                            <td className="px-5 py-3 text-gray-700">{fieldName}</td>
+                                            <td className="px-5 py-3 text-gray-700">{h.harvest_date?.slice(0, 10) || '—'}</td>
+                                            <td className="px-5 py-3 text-gray-700 font-semibold">{Number(h.yield_kg || 0).toLocaleString()}</td>
+                                            <td className="px-5 py-3">
+                                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${yieldClass.className}`}>
+                                                    {yieldClass.label}
+                                                </span>
+                                            </td>
+                                            <td className="px-5 py-3 text-gray-700 font-semibold">
+                                                {lifecyclePct}%
+                                            </td>
+                                            <td className="px-5 py-3">
+                                                <QualityBadge grade={h.quality_grade} />
+                                            </td>
+                                            <td className="px-5 py-3 text-gray-600 text-xs max-w-[260px] truncate" title={h.remarks}>
+                                                {h.remarks || '—'}
+                                            </td>
+                                        </tr>
                                     );
                                 })}
                             </tbody>

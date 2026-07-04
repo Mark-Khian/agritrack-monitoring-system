@@ -6,7 +6,7 @@ const RAPID_REQUEST_LIMIT = 10; // max FAILED requests per window
 
 const captchaGuard = async (req, res, next) => {
     const ip = req.ip;
-    const email = req.body.email;
+    const loginIdentifier = req.body.username;
 
     try {
         // ── Check 1: Rapid FAILED requests from same IP ──
@@ -27,12 +27,12 @@ const captchaGuard = async (req, res, next) => {
             });
         }
 
-        // ── Check 2: Failed attempts for this specific email ──
-        if (email) {
+        // ── Check 2: Failed attempts for this specific login identifier ──
+        if (loginIdentifier) {
             const [user] = await db.query(
                 `SELECT failed_attempts, captcha_required
                  FROM users WHERE email = ?`,
-                [email]
+                [loginIdentifier]
             );
 
             if (user.length > 0) {

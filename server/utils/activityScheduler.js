@@ -7,13 +7,16 @@ const db = require('../config/db');
 const { addCalendarDays } = require('./plantingDates');
 
 const LIFECYCLE_ACTIVITY_TEMPLATES = [
-    { ratio: 0.03, activityType: 'seeding', notes: 'System: Initial seeding check and seedling care.' },
-    { ratio: 0.1, activityType: 'fertilizing', notes: 'System: First fertilizer application (basal dressing).' },
-    { ratio: 0.2, activityType: 'transplanting', notes: 'System: Transplanting irrigation and field check.' },
-    { ratio: 0.35, activityType: 'pest_control', notes: 'System: Pest monitoring — early tillering stage.' },
-    { ratio: 0.5, activityType: 'fertilizing', notes: 'System: Second fertilizer application (top dressing).' },
-    { ratio: 0.7, activityType: 'pest_control', notes: 'System: Pre-harvest pest and disease inspection.' },
-    { ratio: 0.85, activityType: 'irrigation', notes: 'System: Final irrigation cycle before ripening.' },
+    { ratio: 0.0, activityType: 'seeding', notes: 'System: Initial seedling preparation and monitoring.', status: 'pending' },
+    { ratio: 0.15, activityType: 'transplanting', notes: 'System: Transfer seedlings into the assigned plot/field.', status: 'pending' },
+    { ratio: 0.20, activityType: 'irrigation', notes: 'System: Begin continuous water management and irrigation checks.', status: 'pending' },
+    { ratio: 0.30, activityType: 'first_fertilizing', notes: 'System: First fertilizer application during early vegetative/tillering stage.', status: 'pending' },
+    { ratio: 0.45, activityType: 'pest_control', notes: 'System: Continuous crop inspection for pests and diseases.', status: 'pending' },
+    { ratio: 0.60, activityType: 'second_fertilizing', notes: 'System: Second/top dressing fertilizer application during later growth stage.', status: 'pending' },
+    { ratio: 0.75, activityType: 'crop_monitoring', notes: 'System: Monitor crop growth, field condition, weed presence, nutrient deficiencies, and overall plant health throughout the growing season.', status: 'pending' },
+    { ratio: 0.85, activityType: 'final_pest_inspection', notes: 'System: Final pest and disease inspection before harvest.', status: 'pending' },
+    { ratio: 0.92, activityType: 'drain_irrigation', notes: 'System: Drain excess water and prepare field for harvesting.', status: 'pending' },
+    { ratio: 1.0, activityType: 'harvesting', notes: 'System: Record harvest date, yield quantity, and harvest completion.', status: 'pending' }
 ];
 
 const TEMPLATE_COUNT = LIFECYCLE_ACTIVITY_TEMPLATES.length;
@@ -37,12 +40,13 @@ const insertSingleTemplate = async (q, plantingId, plantingDate, expectedGrowthD
     const egd = Math.max(1, Number(expectedGrowthDays) || 1);
     const offset = Math.max(0, Math.round(t.ratio * egd));
     const activityDate = addCalendarDays(plantingDate, offset);
+    const initialStatus = t.status || 'pending';
     await q.query(
         `INSERT INTO activities
          (planting_id, activity_type, activity_date, original_scheduled_date,
           notes, performed_by, status, is_system_generated, schedule_ratio, lifecycle_template_index)
-         VALUES (?, ?, ?, ?, ?, NULL, 'pending', 1, ?, ?)`,
-        [plantingId, t.activityType, activityDate, activityDate, t.notes, t.ratio, templateIndex]
+         VALUES (?, ?, ?, ?, ?, NULL, ?, 1, ?, ?)`,
+        [plantingId, t.activityType, activityDate, activityDate, t.notes, initialStatus, t.ratio, templateIndex]
     );
 };
 
@@ -91,7 +95,7 @@ const rescheduleFutureSystemActivities = async (plantingId, plantingDate, expect
         `SELECT id, activity_date, schedule_ratio, lifecycle_template_index FROM activities
          WHERE planting_id = ?
            AND is_system_generated = 1
-           AND status = 'pending'
+           AND status IN ('pending', 'ongoing')
            AND deleted_at IS NULL
          ORDER BY COALESCE(lifecycle_template_index, 255), id ASC`,
         [plantingId]
@@ -119,6 +123,47 @@ const rescheduleFutureSystemActivities = async (plantingId, plantingDate, expect
     }
 };
 
+/**
+ * Automatically transitions activity statuses based on today's date.
+ */
+const syncActivityStatuses = async (connection = null) => {
+    const q = connection || db;
+    // Get date helper today's date in YYYY-MM-DD format
+    const { utcTodayYmd } = require('./plantingDates');
+    const today = utcTodayYmd();
+
+    // 1. Continuous activities whose date has arrived/passed and are pending -> ongoing
+    await q.query(
+        `UPDATE activities
+         SET status = 'ongoing'
+         WHERE status = 'pending'
+           AND activity_type IN ('irrigation', 'pest_control', 'crop_monitoring')
+           AND activity_date <= ?
+           AND deleted_at IS NULL`,
+        [today]
+    );
+
+    // 2. Continuous activities whose date is in the future and are ongoing -> pending
+    await q.query(
+        `UPDATE activities
+         SET status = 'pending'
+         WHERE status = 'ongoing'
+           AND activity_type IN ('irrigation', 'pest_control', 'crop_monitoring')
+           AND activity_date > ?
+           AND deleted_at IS NULL`,
+        [today]
+    );
+
+    // 3. One-time activities that are ongoing -> pending (to align with the rule)
+    await q.query(
+        `UPDATE activities
+         SET status = 'pending'
+         WHERE status = 'ongoing'
+           AND activity_type NOT IN ('irrigation', 'pest_control', 'crop_monitoring')
+           AND deleted_at IS NULL`
+    );
+};
+
 module.exports = {
     LIFECYCLE_ACTIVITY_TEMPLATES,
     TEMPLATE_COUNT,
@@ -127,4 +172,5 @@ module.exports = {
     autoGenerateActivities,
     rescheduleFutureSystemActivities,
     getExistingTemplateIndices,
+    syncActivityStatuses,
 };

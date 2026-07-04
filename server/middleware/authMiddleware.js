@@ -22,12 +22,12 @@ const protect = async (req, res, next) => {
         // Verify with RS256 public key
         const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
 
-        // Check user still exists and is active
+        // Check admin still exists and is active
         const [users] = await db.query(
-            'SELECT id, role, is_active FROM users WHERE id = ?', [decoded.id]
+            'SELECT id, is_active FROM users WHERE id = ?', [decoded.id]
         );
         if (users.length === 0)
-            return res.status(401).json({ message: 'User no longer exists.' });
+            return res.status(401).json({ message: 'Account no longer exists.' });
         if (!users[0].is_active)
             return res.status(403).json({ message: 'Your account has been disabled.' });
 
@@ -42,14 +42,4 @@ const protect = async (req, res, next) => {
     }
 };
 
-const restrictTo = (...roles) => {
-    return (req, res, next) => {
-        if (!roles.includes(req.user.role))
-            return res.status(403).json({
-                message: 'Access denied. You do not have permission.'
-            });
-        next();
-    };
-};
-
-module.exports = { protect, restrictTo };
+module.exports = { protect };

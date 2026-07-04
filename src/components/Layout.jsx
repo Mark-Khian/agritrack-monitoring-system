@@ -6,7 +6,7 @@ const Layout = ({ children, title = 'AgriTrack' }) => {
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     return (
-        <div className="min-h-screen bg-gray-100 font-sans flex flex-col">
+        <div className="h-screen bg-gray-100 font-sans flex flex-col overflow-hidden">
             <Navbar
                 title={title}
                 onOpenSidebar={() => setSidebarOpen(true)}

@@ -7,17 +7,24 @@ const { calendarDaysBetween, utcTodayYmd } = require('../utils/plantingDates');
 
 const ATTENTION_OVERDUE_THRESHOLD = 3;
 
-/** Agronomic label for legacy UI when growth_stage_recorded is empty. */
-const legacyGrowthStageFromLifecycle = (lifecycleState) => {
-    const m = {
-        PLANNED: 'land_preparation',
-        ACTIVE: 'transplanting',
-        MATURING: 'booting',
-        READY_FOR_HARVEST: 'ripening',
-        HARVESTED: 'harvested',
-        ABANDONED: 'harvested',
-    };
-    return m[lifecycleState] || 'transplanting';
+const getGrowthStageForPlanting = (planting, harvestExists, progressEstimate) => {
+    if (planting.growth_stage_recorded) return planting.growth_stage_recorded;
+    if (harvestExists || planting.lifecycle_state === 'HARVESTED' || planting.status === 'completed') return 'Harvest Stage';
+    if (planting.lifecycle_state === 'ABANDONED' || planting.status === 'failed') return 'Abandoned';
+    if (planting.lifecycle_state === 'PLANNED') return 'Seedling Stage';
+
+    const progress = progressEstimate != null ? progressEstimate : 0;
+    if (progress < 0.15) {
+        return 'Seedling Stage';
+    } else if (progress < 0.50) {
+        return 'Vegetative Stage';
+    } else if (progress < 0.80) {
+        return 'Reproductive Stage';
+    } else if (progress < 1.00) {
+        return 'Ripening Stage';
+    } else {
+        return 'Harvest Stage';
+    }
 };
 
 /**
@@ -77,9 +84,23 @@ const getPlantingPresentation = (
     };
 };
 
-const legacyGrowthStageForApi = (planting) => {
+const legacyGrowthStageForApi = (planting, harvestExists = false, progressEstimate = null) => {
     if (planting.growth_stage_recorded) return planting.growth_stage_recorded;
-    return legacyGrowthStageFromLifecycle(planting.lifecycle_state || 'ACTIVE');
+
+    let pe = progressEstimate;
+    if (pe == null) {
+        const storedState = planting.lifecycle_state || 'ACTIVE';
+        const effectiveLifecycle = harvestExists ? 'HARVESTED' : storedState;
+        if (effectiveLifecycle === 'HARVESTED') {
+            pe = 1.0;
+        } else {
+            const duration = Number(planting.expected_growth_days || 0) + Number(planting.adjustment_days || 0);
+            const today = utcTodayYmd();
+            const elapsed = Math.max(0, calendarDaysBetween(planting.planting_date, today));
+            pe = duration > 0 ? Math.max(0, Math.min(1, elapsed / duration)) : 0;
+        }
+    }
+    return getGrowthStageForPlanting(planting, harvestExists, pe);
 };
 
 /**
@@ -124,7 +145,7 @@ const enrichPlantingRow = (planting, ctx, todayYmd = null) => {
 
     return {
         ...planting,
-        growth_stage: legacyGrowthStageForApi(planting),
+        growth_stage: legacyGrowthStageForApi(planting, harvestExists, presentation.progress_estimate),
         presentation,
         progress_estimate: presentation.progress_estimate,
         overdue_activity_count: presentation.overdue_activity_count,

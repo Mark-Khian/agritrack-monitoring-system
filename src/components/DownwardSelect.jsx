@@ -2,25 +2,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 
-/**
- * DownwardSelect
- * A custom <select>-like component that ALWAYS opens its option panel
- * below the trigger, regardless of overflow constraints on parent containers.
- *
- * It renders the dropdown panel via a React portal into document.body,
- * then positions it with position:fixed anchored to the trigger's bounding rect.
- *
- * Props mirror a standard <select>:
- *   - value         : currently selected value
- *   - onChange      : function(e) where e.target.value is the new value
- *   - options       : [{ value, label }] or [string] array
- *   - placeholder   : string shown when value is empty
- *   - disabled      : boolean
- *   - required      : boolean
- *   - className     : extra classes for the trigger button
- *   - id            : id for the trigger
- *   - maxDropdownH  : max height (px) of the dropdown panel (default 220)
- */
 const DownwardSelect = ({
     value,
     onChange,

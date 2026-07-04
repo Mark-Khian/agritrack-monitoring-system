@@ -1,4 +1,4 @@
-const { body, param, query, validationResult } = require('express-validator');
+const { body, param, validationResult } = require('express-validator');
 
 // ── Handle Validation Errors ──────────────
 const handleValidation = (req, res, next) => {
@@ -15,70 +15,25 @@ const handleValidation = (req, res, next) => {
     next();
 };
 
-// ── Farm Validation ───────────────────────
-const validateFarm = [
-    body('name')
-        .trim()
-        .notEmpty().withMessage('Farm name is required.')
-        .isLength({ min: 2, max: 100 })
-        .withMessage('Farm name must be 2-100 characters.')
-        .escape(),
-
-    body('location')
-        .trim()
-        .notEmpty().withMessage('Location is required.')
-        .isLength({ min: 2, max: 255 })
-        .withMessage('Location must be 2-255 characters.')
-        .escape(),
-
-    body('owner_id')
-        .notEmpty().withMessage('Owner ID is required.')
-        .isInt({ min: 1 }).withMessage('Owner ID must be a valid positive number.'),
-
-    handleValidation
-];
-
-// ── Field Validation ──────────────────────
-const validateField = [
-    body('farm_id')
-        .notEmpty().withMessage('Farm ID is required.')
-        .isInt({ min: 1 }).withMessage('Farm ID must be a valid positive number.'),
-
-    body('name')
-        .trim()
-        .notEmpty().withMessage('Field name is required.')
-        .isLength({ min: 2, max: 50 })
-        .withMessage('Field name must be 2-50 characters.')
-        .escape(),
-
-    body('size')
-        .notEmpty().withMessage('Field size is required.')
-        .isFloat({ min: 0.01 }).withMessage('Field size must be greater than 0.')
-        .custom(val => val <= 9999.99)
-        .withMessage('Field size cannot exceed 9999.99 hectares.'),
-
-    handleValidation
-];
-
 // ── Planting Validation ───────────────────
 const validatePlanting = [
-    body('field_id')
-        .notEmpty().withMessage('Field ID is required.')
-        .isInt({ min: 1 }).withMessage('Field ID must be a valid positive number.'),
+    body('field_name')
+        .trim()
+        .notEmpty().withMessage('Field name is required.')
+        .isLength({ min: 1, max: 120 })
+        .withMessage('Field name must be 1-120 characters.'),
 
     body('variety_class')
         .trim()
         .notEmpty().withMessage('Variety class is required.')
         .isLength({ min: 2, max: 100 })
         .withMessage('Variety class must be 2-100 characters.'),
-        // Note: no .escape() — value is validated against a server-side allowlist in the controller
 
     body('variety')
         .trim()
         .notEmpty().withMessage('Rice variety is required.')
         .isLength({ min: 2, max: 100 })
         .withMessage('Variety must be 2-100 characters.'),
-        // Note: no .escape() — value is validated against a server-side allowlist in the controller
 
     body('planting_date')
         .notEmpty().withMessage('Planting date is required.')
@@ -122,11 +77,11 @@ const validatePlanting = [
 
     body('generate_template_indices')
         .optional()
-        .isArray({ max: 7 })
-        .withMessage('generate_template_indices must be an array (max 7).')
+        .isArray({ max: 10 })
+        .withMessage('generate_template_indices must be an array (max 10).')
         .custom((arr) => {
             if (!Array.isArray(arr) || arr.length === 0) return true;
-            return arr.every((x) => Number.isInteger(Number(x)) && Number(x) >= 0 && Number(x) <= 6);
+            return arr.every((x) => Number.isInteger(Number(x)) && Number(x) >= 0 && Number(x) <= 9);
         }),
 
     body('season')
@@ -142,6 +97,13 @@ const validatePlanting = [
 ];
 
 const validatePlantingUpdate = [
+    body('field_name')
+        .optional()
+        .trim()
+        .notEmpty().withMessage('Field name cannot be empty.')
+        .isLength({ min: 1, max: 120 })
+        .withMessage('Field name must be 1-120 characters.'),
+
     body('variety_class')
         .optional()
         .trim()
@@ -216,11 +178,11 @@ const validatePlantingUpdate = [
 
     body('generate_template_indices')
         .optional()
-        .isArray({ max: 7 })
-        .withMessage('generate_template_indices must be an array (max 7).')
+        .isArray({ max: 10 })
+        .withMessage('generate_template_indices must be an array (max 10).')
         .custom((arr) => {
             if (!Array.isArray(arr) || arr.length === 0) return true;
-            return arr.every((x) => Number.isInteger(Number(x)) && Number(x) >= 0 && Number(x) <= 6);
+            return arr.every((x) => Number.isInteger(Number(x)) && Number(x) >= 0 && Number(x) <= 9);
         }),
 
     body('status')
@@ -241,7 +203,9 @@ const validateActivity = [
         .notEmpty().withMessage('Activity type is required.')
         .isIn([
             'land_preparation', 'seeding', 'transplanting',
-            'fertilizing', 'irrigation', 'pest_control',
+            'fertilizing', 'first_fertilizing', 'second_fertilizing',
+            'irrigation', 'drain_irrigation', 'pest_control',
+            'final_pest_inspection', 'crop_monitoring',
             'weeding', 'harvesting', 'other'
         ]).withMessage('Invalid activity type.'),
 
@@ -254,10 +218,6 @@ const validateActivity = [
         .trim()
         .isLength({ max: 1000 }).withMessage('Notes cannot exceed 1000 characters.')
         .escape(),
-
-    body('performed_by')
-        .optional()
-        .isInt({ min: 1 }).withMessage('Performed by must be a valid user ID.'),
 
     body('status')
         .optional()
@@ -305,8 +265,6 @@ const validateId = [
 ];
 
 module.exports = {
-    validateFarm,
-    validateField,
     validatePlanting,
     validatePlantingUpdate,
     validateActivity,

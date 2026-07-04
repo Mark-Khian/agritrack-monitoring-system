@@ -22,6 +22,7 @@ const https = require('https');
 // ── Internal weather helper (mirrors weatherController but headless) ──────────
 
 const API_KEY = process.env.OPENWEATHER_API_KEY;
+const DEFAULT_LOCATION = (process.env.DEFAULT_WEATHER_LOCATION || 'Cabanatuan').trim();
 const WEATHER_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours (scheduler runs every 12h)
 const _weatherCache = new Map();
 
@@ -51,11 +52,20 @@ const fetchRainStatus = async (location) => {
     }
 
     try {
-        const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(location)}&limit=1&appid=${API_KEY}`;
-        const geoData = await httpsGet(geoUrl);
-        if (!geoData || geoData.length === 0) return null;
+        const geocode = async (q) => {
+            const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(q)}&limit=1&appid=${API_KEY}`;
+            const geoData = await httpsGet(geoUrl);
+            if (!geoData || geoData.length === 0) return null;
+            return geoData[0];
+        };
 
-        const { lat, lon } = geoData[0];
+        let resolved = await geocode(location);
+        if (!resolved && DEFAULT_LOCATION && DEFAULT_LOCATION.toLowerCase() !== location.toLowerCase()) {
+            resolved = await geocode(DEFAULT_LOCATION);
+        }
+        if (!resolved) return null;
+
+        const { lat, lon } = resolved;
         const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric&cnt=6`;
         const forecastRes = await httpsGet(forecastUrl);
 
@@ -71,17 +81,32 @@ const fetchRainStatus = async (location) => {
     }
 };
 
-// ── Safe insert (uses INSERT IGNORE so the UNIQUE constraint silently deduplicates) ─
+// Single admin user — notifications are not per-user scoped.
+// The admin_id is fetched once at startup and reused by all generators.
+let ADMIN_ID = null;
 
-const insertNotification = async (userId, type, title, message, relatedId = null) => {
+const getAdminId = async () => {
+    if (ADMIN_ID) return ADMIN_ID;
+    try {
+        const [rows] = await db.query(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`);
+        ADMIN_ID = rows.length > 0 ? rows[0].id : 1;
+    } catch {
+        ADMIN_ID = 1;
+    }
+    return ADMIN_ID;
+};
+
+// ── Safe insert ───────────────────────────────────────────────────────────────
+
+const insertNotification = async (type, title, message, relatedId = null) => {
+    const adminId = await getAdminId();
     try {
         await db.query(
             `INSERT IGNORE INTO notifications (user_id, type, title, message, related_id, notif_date)
              VALUES (?, ?, ?, ?, ?, CURDATE())`,
-            [userId, type, title, message, relatedId]
+            [adminId, type, title, message, relatedId]
         );
     } catch (err) {
-        // Log but don't crash the scheduler
         console.error('[NotifService] Insert error:', err.message);
     }
 };
@@ -133,25 +158,21 @@ const STAGE_MESSAGES = {
 
 const generateActivityNotifications = async () => {
     try {
-        // Fetch all pending activities scheduled for today, joined to user via farms
+        // Fetch all pending activities scheduled for today (plantings owns field metadata)
         const [rows] = await db.query(
             `SELECT
                 a.id            AS activity_id,
                 a.activity_type,
                 a.activity_date,
                 a.notes,
-                fm.owner_id     AS user_id,
+                pl.user_id      AS user_id,
                 pl.variety,
-                fi.name         AS field_name
+                pl.field_name   AS field_name
              FROM activities a
              JOIN plantings pl ON a.planting_id = pl.id
-             JOIN fields    fi ON pl.field_id   = fi.id
-             JOIN farms     fm ON fi.farm_id    = fm.id
              WHERE a.deleted_at IS NULL
                AND pl.deleted_at IS NULL
-               AND fi.deleted_at IS NULL
-               AND fm.deleted_at IS NULL
-               AND a.status = 'pending'
+               AND a.status IN ('pending', 'ongoing')
                AND DATE(a.activity_date) = CURDATE()`
         );
 
@@ -159,7 +180,6 @@ const generateActivityNotifications = async () => {
             const actLabel = String(row.activity_type).replaceAll('_', ' ');
             const plotLabel = [row.variety, row.field_name].filter(Boolean).join(' · ');
             await insertNotification(
-                row.user_id,
                 'activity_due',
                 `${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)} Due Today`,
                 `Your ${actLabel} activity is scheduled for today${plotLabel ? ` on ${plotLabel}` : ''}. Complete it to stay on track with your crop lifecycle.`,
@@ -184,19 +204,15 @@ const generateOverdueNotifications = async () => {
                 a.id            AS activity_id,
                 a.activity_type,
                 a.activity_date,
-                fm.owner_id     AS user_id,
+                pl.user_id      AS user_id,
                 pl.variety,
-                fi.name         AS field_name,
+                pl.field_name   AS field_name,
                 DATEDIFF(CURDATE(), DATE(a.activity_date)) AS days_overdue
              FROM activities a
              JOIN plantings pl ON a.planting_id = pl.id
-             JOIN fields    fi ON pl.field_id   = fi.id
-             JOIN farms     fm ON fi.farm_id    = fm.id
              WHERE a.deleted_at IS NULL
                AND pl.deleted_at IS NULL
-               AND fi.deleted_at IS NULL
-               AND fm.deleted_at IS NULL
-               AND a.status = 'pending'
+               AND a.status IN ('pending', 'ongoing')
                AND DATE(a.activity_date) < CURDATE()`
         );
 
@@ -205,7 +221,6 @@ const generateOverdueNotifications = async () => {
             const plotLabel = [row.variety, row.field_name].filter(Boolean).join(' · ');
             const daysLabel = row.days_overdue === 1 ? '1 day' : `${row.days_overdue} days`;
             await insertNotification(
-                row.user_id,
                 'activity_overdue',
                 `Overdue: ${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)}`,
                 `Your ${actLabel} activity${plotLabel ? ` on ${plotLabel}` : ''} is ${daysLabel} overdue. Take action immediately to protect crop health.`,
@@ -232,15 +247,11 @@ const generateLifecycleNotifications = async () => {
                 pl.planting_date,
                 pl.expected_growth_days,
                 pl.variety,
-                fi.name                     AS field_name,
-                fm.owner_id                 AS user_id,
+                pl.field_name               AS field_name,
+                pl.user_id                  AS user_id,
                 DATEDIFF(CURDATE(), DATE(pl.planting_date)) AS days_elapsed
              FROM plantings pl
-             JOIN fields fi ON pl.field_id  = fi.id
-             JOIN farms  fm ON fi.farm_id   = fm.id
              WHERE pl.deleted_at IS NULL
-               AND fi.deleted_at IS NULL
-               AND fm.deleted_at IS NULL
                AND pl.status = 'active'
                AND pl.lifecycle_state NOT IN ('HARVESTED', 'ABANDONED')`
         );
@@ -257,7 +268,6 @@ const generateLifecycleNotifications = async () => {
             const title = `Lifecycle Update: ${label}${plotLabel ? ` — ${plotLabel}` : ''}`;
 
             await insertNotification(
-                row.user_id,
                 'lifecycle_update',
                 title,
                 message,
@@ -282,32 +292,31 @@ const generateWeatherNotifications = async () => {
     }
 
     try {
-        // Get distinct farm locations per user
-        const [farms] = await db.query(
+        // Get distinct plot locations per user (embedded in plantings)
+        const [fields] = await db.query(
             `SELECT DISTINCT
-                fm.owner_id  AS user_id,
-                fm.location,
-                fm.name      AS farm_name
-             FROM farms fm
-             WHERE fm.deleted_at IS NULL
-               AND fm.location IS NOT NULL
-               AND fm.location != ''`
+                pl.user_id   AS user_id,
+                COALESCE(pl.field_location, pl.field_name) AS location,
+                pl.field_name AS field_name
+             FROM plantings pl
+             WHERE pl.deleted_at IS NULL
+               AND COALESCE(pl.field_location, pl.field_name) IS NOT NULL
+               AND COALESCE(pl.field_location, pl.field_name) != ''`
         );
 
-        for (const farm of farms) {
-            const weather = await fetchRainStatus(farm.location);
+        for (const field of fields) {
+            const weather = await fetchRainStatus(field.location);
             if (!weather || !weather.rainExpected) continue;
 
             await insertNotification(
-                farm.user_id,
                 'weather_alert',
-                `Rain Expected at ${farm.farm_name || farm.location}`,
-                `Rain is forecast in the next 18 hours near ${farm.location}. Consider postponing pesticide applications, and check drainage in low-lying fields.`,
+                `Rain Expected at ${field.field_name || field.location}`,
+                `Rain is forecast in the next 18 hours near ${field.location}. Consider postponing pesticide applications, and check drainage in low-lying fields.`,
                 null  // weather alerts have no single related_id; null groups them per day
             );
         }
 
-        console.log(`[NotifService] weather_alert: checked ${farms.length} farm location(s)`);
+        console.log(`[NotifService] weather_alert: checked ${fields.length} field location(s)`);
     } catch (err) {
         console.error('[NotifService] generateWeatherNotifications error:', err.message);
     }

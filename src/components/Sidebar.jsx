@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import useAuth from '../context/useAuth';
 import { logoutUser } from '../services/api';
 import {
     LogOut,
     LayoutDashboard,
-    Home,
-    Map,
     Sprout,
     ClipboardList,
     Wheat,
-    BarChart2
+    BarChart2,
+    CheckCircle2
 } from 'lucide-react';
 
 const Sidebar = ({ onNavClick }) => {
@@ -42,7 +41,7 @@ const Sidebar = ({ onNavClick }) => {
 
         setTimeout(() => {
             logout();
-            navigate('/login');
+            navigate('/');
         }, 2000);
     };
 
@@ -50,8 +49,6 @@ const Sidebar = ({ onNavClick }) => {
 
     const navLinks = [
         { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-        { name: 'Farms', path: '/farms', icon: Home },
-        { name: 'Fields', path: '/fields', icon: Map },
         { name: 'Plantings', path: '/plantings', icon: Sprout },
         { name: 'Activities', path: '/activities', icon: ClipboardList },
         { name: 'Harvests', path: '/harvests', icon: Wheat },
@@ -60,22 +57,16 @@ const Sidebar = ({ onNavClick }) => {
 
     return (
         <>
-            {/* ✅ Success Screen via Portal */}
+            {/* Success screen via portal */}
             {showSuccess && createPortal(
-                <div className="fixed inset-0 z-9999 flex items-center justify-center overflow-hidden">
-                    <div className="absolute inset-0 bg-linear-to-br from-green-900 via-green-800 to-green-950"></div>
-                    <div className="absolute top-0 right-0 -translate-y-1/4 translate-x-1/4 w-[800px] h-[800px] bg-green-500 rounded-full blur-[120px] opacity-30 pointer-events-none"></div>
-                    <div className="absolute bottom-0 left-0 translate-y-1/4 -translate-x-1/4 w-[600px] h-[600px] bg-amber-500 rounded-full blur-[100px] opacity-20 pointer-events-none"></div>
-
+                <div className="fixed inset-0 z-9999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
                     <div className="relative z-10 flex flex-col items-center gap-6 text-center px-4">
                         <div className="w-24 h-24 bg-green-500 rounded-full flex items-center justify-center shadow-2xl shadow-green-500/40 animate-bounce">
-                            <svg className="w-12 h-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                            </svg>
+                            <CheckCircle2 className="w-12 h-12 text-white" />
                         </div>
                         <div>
                             <h2 className="text-2xl font-bold text-white mb-2">
-                                Logged Out Successfully! 👋
+                                Logged out successfully
                             </h2>
                             <p className="text-green-200 text-sm">
                                 See you next time,{' '}
@@ -84,7 +75,7 @@ const Sidebar = ({ onNavClick }) => {
                                 Redirecting to login...
                             </p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 justify-center">
                             <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
                             <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
                             <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>

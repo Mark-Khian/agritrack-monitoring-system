@@ -1,34 +1,19 @@
-/**
- * notificationController.js
- *
- * REST endpoints for the in-app notification system.
- * All routes require the `protect` middleware (user must be authenticated).
- */
-
 'use strict';
 
 const db = require('../config/db');
 
 // ── GET /api/v1/notifications ─────────────────────────────────────────────────
-// Returns the latest 20 notifications for the authenticated user, newest first.
-
 const getNotifications = async (req, res) => {
     try {
         const [rows] = await db.query(
             `SELECT id, type, title, message, related_id, is_read, created_at
              FROM notifications
-             WHERE user_id = ?
              ORDER BY created_at DESC
-             LIMIT 20`,
-            [req.user.id]
+             LIMIT 20`
         );
 
-        // Also return total unread count for the badge
         const [[{ unread }]] = await db.query(
-            `SELECT COUNT(*) AS unread
-             FROM notifications
-             WHERE user_id = ? AND is_read = 0`,
-            [req.user.id]
+            `SELECT COUNT(*) AS unread FROM notifications WHERE is_read = 0`
         );
 
         res.status(200).json({ data: rows, unread: Number(unread) });
@@ -39,20 +24,15 @@ const getNotifications = async (req, res) => {
 };
 
 // ── PATCH /api/v1/notifications/:id/read ─────────────────────────────────────
-// Mark a single notification as read (must belong to the requesting user).
-
 const markAsRead = async (req, res) => {
     try {
         const [result] = await db.query(
-            `UPDATE notifications
-             SET is_read = 1
-             WHERE id = ? AND user_id = ?`,
-            [req.params.id, req.user.id]
+            `UPDATE notifications SET is_read = 1 WHERE id = ?`,
+            [req.params.id]
         );
 
-        if (result.affectedRows === 0) {
+        if (result.affectedRows === 0)
             return res.status(404).json({ message: 'Notification not found.' });
-        }
 
         res.status(200).json({ message: 'Notification marked as read.' });
     } catch (err) {
@@ -62,17 +42,9 @@ const markAsRead = async (req, res) => {
 };
 
 // ── PATCH /api/v1/notifications/read-all ─────────────────────────────────────
-// Mark ALL unread notifications as read for the authenticated user.
-
 const markAllRead = async (req, res) => {
     try {
-        await db.query(
-            `UPDATE notifications
-             SET is_read = 1
-             WHERE user_id = ? AND is_read = 0`,
-            [req.user.id]
-        );
-
+        await db.query(`UPDATE notifications SET is_read = 1 WHERE is_read = 0`);
         res.status(200).json({ message: 'All notifications marked as read.' });
     } catch (err) {
         console.error('markAllRead error:', err.message);

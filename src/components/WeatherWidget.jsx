@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
     Wind, Droplets, Thermometer, CloudRain, MapPin, Sunset, Sun,
     Clock, CalendarDays, CloudSun, CloudLightning, CloudDrizzle,
     CloudSnow, CloudFog, Moon, Sunrise, RefreshCw
 } from 'lucide-react';
 
-const BACKEND_WEATHER = 'http://localhost:5000/api/v1/weather';
+import { getWeather } from '../services/api';
 
 
 let weatherCache = {
@@ -63,6 +63,52 @@ const getWeatherBg = (code, hour) => {
     if (code === 801 || code === 802) return 'linear-gradient(135deg, #0f4c2a 0%, #1a7a46 50%, #22a05a 100%)';
     if (code === 803 || code === 804) return 'linear-gradient(135deg, #374151 0%, #4b5563 50%, #6b7280 100%)';
     return 'linear-gradient(135deg, #0f4c2a 0%, #1a7a46 50%, #22a05a 100%)';
+};
+
+const getWeatherBgImage = (code, hour) => {
+    const isNight = hour >= 19 || hour < 6;
+    
+    // Night skies (100% pure sky/stars, no buildings/ground/trees)
+    if (isNight) {
+        // Rain/Thunderstorm/Drizzle at night (pure stormy dark night sky)
+        if (code >= 200 && code < 600) {
+            return 'https://images.unsplash.com/photo-1485594050903-8e8ee7b071a8?q=80&w=600&auto=format&fit=crop';
+        }
+        // Snow at night (falling snow on pure dark sky)
+        if (code >= 600 && code < 700) {
+            return 'https://images.unsplash.com/photo-1418985991508-e47386d96a71?q=80&w=600&auto=format&fit=crop';
+        }
+        // Fog/Mist at night (pure foggy night texture)
+        if (code >= 700 && code < 800) {
+            return 'https://images.unsplash.com/photo-1585506942812-e72b29cef712?q=80&w=600&auto=format&fit=crop';
+        }
+        // Clouds at night (pure dark night clouds)
+        if (code > 800) {
+            return 'https://images.unsplash.com/photo-1534274988757-a28bf1a57c17?q=80&w=600&auto=format&fit=crop';
+        }
+        // Clear night (pure starry sky, no trees)
+        return 'https://images.unsplash.com/photo-1538370965046-79c0d6907d47?q=80&w=600&auto=format&fit=crop';
+    }
+
+    // Day skies (100% pure sky/clouds, no buildings/ground/trees)
+    // Rain/Thunderstorm/Drizzle (pure grey rainy sky/clouds)
+    if (code >= 200 && code < 600) {
+        return 'https://images.unsplash.com/photo-1515694346937-94d85e41e6f0?q=80&w=600&auto=format&fit=crop';
+    }
+    // Snow (falling snow on pure winter sky)
+    if (code >= 600 && code < 700) {
+        return 'https://images.unsplash.com/photo-1418985991508-e47386d96a71?q=80&w=600&auto=format&fit=crop';
+    }
+    // Fog/Mist/Atmospheric (pure fog/mist)
+    if (code >= 700 && code < 800) {
+        return 'https://images.unsplash.com/photo-1585506942812-e72b29cef712?q=80&w=600&auto=format&fit=crop';
+    }
+    // Clear Day (pure blue sky and sun)
+    if (code === 800) {
+        return 'https://images.unsplash.com/photo-1509114397022-ed747cca3f65?q=80&w=600&auto=format&fit=crop';
+    }
+    // Cloudy Day (pure clouds looking up, no ground/trees)
+    return 'https://images.unsplash.com/photo-1517999144091-3d9dca6d1e43?q=80&w=600&auto=format&fit=crop';
 };
 
 const getTextColor = (code, hour) => {
@@ -163,7 +209,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
         return () => clearInterval(clock);
     }, []);
 
-    const fetchWeather = async (force = false) => {
+    const fetchWeather = useCallback(async (force = false) => {
         const isCacheFresh = weatherCache.lastFetched &&
             (Date.now() - weatherCache.lastFetched < CACHE_DURATION);
         if (isCacheFresh && !force) return;
@@ -175,13 +221,8 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
 
             if (location) {
                 // ── Backend proxy route (farm location) ──────────────────────
-                const token = localStorage.getItem('token');
-                const res = await fetch(
-                    `${BACKEND_WEATHER}?location=${encodeURIComponent(location)}`,
-                    { headers: { Authorization: `Bearer ${token}` } }
-                );
-                if (!res.ok) throw new Error('Failed to fetch weather from proxy.');
-                const data = await res.json();
+                const res = await getWeather(location);
+                const data = res.data;
                 current      = data.current;
                 forecastList = data.forecast || [];
                 uviValue     = data.uvIndex ?? null;
@@ -204,12 +245,12 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
             setDailyForecast(daily);
             setUvIndex(uviValue);
             setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        } catch (err) {
+        } catch {
             setError('Unable to load weather data.');
         } finally {
             setLoading(false);
         }
-    };
+    }, [location]);
 
     useEffect(() => {
         fetchWeather();
@@ -222,7 +263,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
             clearInterval(interval);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [location]); // re-fetch if farm location changes
+    }, [fetchWeather]); // re-fetch if farm location changes
 
     const formattedTime = now.toLocaleTimeString('en-PH', {
         hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
@@ -254,7 +295,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
     if (loading) return (
         <div style={{
             borderRadius: '20px', padding: '1.5rem 1.75rem',
-            background: 'linear-gradient(135deg, #0f4c2a 0%, #1a7a46 50%, #22a05a 100%)',
+            background: 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)',
             minHeight: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center'
         }}>
             <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '14px' }}>Loading weather...</p>
@@ -264,7 +305,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
     if (error) return (
         <div style={{
             borderRadius: '20px', padding: '1.5rem',
-            background: 'linear-gradient(135deg, #0f4c2a 0%, #1a7a46 50%, #22a05a 100%)',
+            background: 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between'
         }}>
             <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px' }}>{error}</p>
@@ -278,6 +319,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
     const code = weather.weather[0].id;
     const hour = now.getHours();
     const bg = getWeatherBg(code, hour);
+    const bgImage = getWeatherBgImage(code, hour);
     const textColor = getTextColor(code, hour);
 
     // Dashboard decision-support card — 3-level visual hierarchy.
@@ -319,7 +361,15 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
         }
 
         return (
-            <div className="rounded-2xl bg-[#16362a] text-white overflow-hidden shadow-md">
+            <div 
+                className="rounded-2xl text-white overflow-hidden shadow-md"
+                style={{
+                    background: `linear-gradient(135deg, rgba(15, 23, 42, 0.45) 0%, rgba(15, 23, 42, 0.65) 100%), url(${bgImage})`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                    backgroundRepeat: 'no-repeat',
+                }}
+            >
 
                 {/* ── SECTION 1: Primary weather summary ── */}
                 <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3">
@@ -429,7 +479,10 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
     return (
         <div style={{
             borderRadius: '20px', padding: '1.5rem 1.75rem',
-            background: bg,
+            background: `linear-gradient(135deg, rgba(15, 23, 42, 0.45) 0%, rgba(15, 23, 42, 0.65) 100%), url(${bgImage})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
             transition: 'background 1.5s ease',
             color: textColor, position: 'relative', overflow: 'hidden', fontFamily: 'inherit'
         }}>

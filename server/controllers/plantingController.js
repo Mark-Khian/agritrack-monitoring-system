@@ -60,6 +60,11 @@ const normalizeTemplateIndices = (raw) => {
 };
 
 const PLANTING_SELECT = `
+    plantings.user_id,
+    plantings.field_name,
+    plantings.field_location,
+    plantings.field_size,
+    plantings.field_category,
     plantings.id,
     plantings.variety_class,
     plantings.variety,
@@ -84,8 +89,6 @@ const PLANTING_SELECT = `
 
 const PLANTING_JOINS = `
     FROM plantings
-    JOIN fields ON plantings.field_id = fields.id
-    JOIN farms ON fields.farm_id = farms.id
     LEFT JOIN varieties v ON plantings.variety_id = v.id
 `;
 
@@ -142,7 +145,7 @@ const getAllPlantings = async (req, res) => {
             ? 'AND plantings.variety_id IS NULL'
             : '';
 
-        const listParams = [req.user.id];
+        const listParams = [];
         if (req.query.status) listParams.push(req.query.status);
         if (req.query.variety_id) listParams.push(Number(req.query.variety_id));
         if (req.query.variety_class) listParams.push(String(req.query.variety_class).trim());
@@ -150,15 +153,9 @@ const getAllPlantings = async (req, res) => {
 
         const [plantings] = await db.query(
             `SELECT
-                ${PLANTING_SELECT},
-                fields.id   AS field_id,
-                fields.name AS field_name,
-                fields.farm_id
+                ${PLANTING_SELECT}
              ${PLANTING_JOINS}
              WHERE plantings.deleted_at IS NULL
-               AND fields.deleted_at IS NULL
-               AND farms.deleted_at IS NULL
-               AND farms.owner_id = ?
                ${statusFilter}
                ${varietyIdFilter}
                ${varietyClassFilter}
@@ -168,7 +165,7 @@ const getAllPlantings = async (req, res) => {
             listParams
         );
 
-        const countParams = [req.user.id];
+        const countParams = [];
         if (req.query.status) countParams.push(req.query.status);
         if (req.query.variety_id) countParams.push(Number(req.query.variety_id));
         if (req.query.variety_class) countParams.push(String(req.query.variety_class).trim());
@@ -177,12 +174,7 @@ const getAllPlantings = async (req, res) => {
         const [[{ total }]] = await db.query(
             `SELECT COUNT(*) as total
              FROM plantings
-             JOIN fields ON plantings.field_id = fields.id
-             JOIN farms ON fields.farm_id = farms.id
              WHERE plantings.deleted_at IS NULL
-               AND fields.deleted_at IS NULL
-               AND farms.deleted_at IS NULL
-               AND farms.owner_id = ?
                ${countWhere}`,
             countParams
         );
@@ -205,15 +197,11 @@ const getPlantingById = async (req, res) => {
     try {
         const [plantings] = await db.query(
             `SELECT
-                ${PLANTING_SELECT},
-                fields.id   AS field_id,
-                fields.name AS field_name,
-                fields.farm_id
+                ${PLANTING_SELECT}
              ${PLANTING_JOINS}
              WHERE plantings.id = ?
-               AND plantings.deleted_at IS NULL
-               AND farms.owner_id = ?`,
-            [req.params.id, req.user.id]
+               AND plantings.deleted_at IS NULL`,
+            [req.params.id]
         );
         if (plantings.length === 0)
             return res.status(404).json({ message: 'Planting not found.' });
@@ -230,8 +218,9 @@ const getPlantingById = async (req, res) => {
 
 const createPlanting = async (req, res) => {
     const {
-        field_id, variety_class, variety, planting_date, season
+        field_name, variety_class, variety, planting_date, season
     } = req.body;
+    const normalizedFieldName = (field_name || '').trim();
     const normalizedVarietyClass = (variety_class || '').trim();
     const normalizedVariety = (variety || '').trim();
 
@@ -242,6 +231,9 @@ const createPlanting = async (req, res) => {
     const partialIndices = normalizeTemplateIndices(req.body.generate_template_indices || []);
 
     try {
+        if (!normalizedFieldName) {
+            return res.status(400).json({ message: 'Field name is required.' });
+        }
         if (!normalizedVarietyClass) {
             return res.status(400).json({ message: 'Variety class is required.' });
         }
@@ -274,37 +266,26 @@ const createPlanting = async (req, res) => {
         const { expectedGrowthDays, adjustmentDays, expectedHarvest } = plan;
         const varietyIdToStore = varietyRow ? varietyRow.id : null;
 
-        const [field] = await db.query(
-            `SELECT fields.id
-             FROM fields
-             JOIN farms ON fields.farm_id = farms.id
-             WHERE fields.id = ?
-               AND fields.deleted_at IS NULL
-               AND farms.deleted_at IS NULL
-               AND farms.owner_id = ?`,
-            [field_id, req.user.id]
-        );
-        if (field.length === 0)
-            return res.status(404).json({ message: 'Field not found.' });
-
         const [sameDate] = await db.query(
             `SELECT id FROM plantings
-             WHERE field_id = ? AND planting_date = ?`,
-            [field_id, planting_date]
+             WHERE field_name = ?
+               AND planting_date = ?
+               AND deleted_at IS NULL`,
+            [normalizedFieldName, planting_date]
         );
         if (sameDate.length > 0) {
             return res.status(409).json({
                 message:
-                    'A planting for this field on this planting date already exists. Use a different date or edit the existing record.',
+                    'A planting for this field name on this planting date already exists. Use a different date or edit the existing record.',
             });
         }
 
         const [active] = await db.query(
             `SELECT id FROM plantings
-             WHERE field_id = ?
+             WHERE field_name = ?
                AND status = 'active'
                AND deleted_at IS NULL`,
-            [field_id]
+            [normalizedFieldName]
         );
         if (active.length > 0)
             return res.status(409).json({
@@ -313,12 +294,13 @@ const createPlanting = async (req, res) => {
 
         const [result] = await db.query(
             `INSERT INTO plantings
-             (field_id, variety_class, variety, variety_id, planting_date, expected_harvest, season,
+             (user_id, field_name, variety_class, variety, variety_id, planting_date, expected_harvest, season,
               lifecycle_state, expected_growth_days, adjustment_days, growth_plan_manual_override,
               lifecycle_state_changed_at, lifecycle_state_reason)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
             [
-                field_id,
+                req.user.id, // admin user_id preserved in DB for data integrity
+                normalizedFieldName,
                 normalizedVarietyClass,
                 normalizedVariety,
                 varietyIdToStore,
@@ -386,12 +368,19 @@ const createPlanting = async (req, res) => {
                     'A planting for this field on this planting date already exists. Use a different date or edit the existing record.',
             });
         }
+        if (err.code === 'ER_DUP_ENTRY' && String(err.message || '').includes('uq_user_field_planting')) {
+            return res.status(409).json({
+                message:
+                    'A planting for this field name on this planting date already exists. Use a different date or edit the existing record.',
+            });
+        }
         res.status(500).json({ message: 'Server error.' });
     }
 };
 
 const updatePlanting = async (req, res) => {
     const {
+        field_name,
         variety_class, variety, status,
         expected_growth_days, adjustment_days, expected_harvest,
         lifecycle_state, lifecycle_state_reason,
@@ -407,17 +396,22 @@ const updatePlanting = async (req, res) => {
     try {
         const [currentRows] = await db.query(
             `SELECT plantings.* FROM plantings
-             JOIN fields ON plantings.field_id = fields.id
-             JOIN farms ON fields.farm_id = farms.id
-             WHERE plantings.id = ? AND plantings.deleted_at IS NULL
-               AND farms.owner_id = ?`,
-            [req.params.id, req.user.id]
+             WHERE plantings.id = ? AND plantings.deleted_at IS NULL`,
+            [req.params.id]
         );
         if (currentRows.length === 0) {
             return res.status(404).json({ message: 'Planting not found.' });
         }
 
         const cur = currentRows[0];
+
+        const nextFieldName =
+            field_name != null && String(field_name).trim() !== ''
+                ? String(field_name).trim()
+                : cur.field_name;
+        if (!nextFieldName) {
+            return res.status(400).json({ message: 'Field name is required.' });
+        }
 
         if (cur.lifecycle_state === 'HARVESTED' || cur.status === 'completed') {
             return res.status(400).json({
@@ -529,7 +523,8 @@ const updatePlanting = async (req, res) => {
 
         const [result] = await db.query(
             `UPDATE plantings
-             SET variety_class = ?, variety = ?, variety_id = ?,
+             SET field_name = ?,
+                 variety_class = ?, variety = ?, variety_id = ?,
                  planting_date = ?,
                  expected_harvest = ?,
                  expected_growth_days = ?, adjustment_days = ?,
@@ -542,6 +537,7 @@ const updatePlanting = async (req, res) => {
                  status = ?
              WHERE id = ? AND deleted_at IS NULL`,
             [
+                nextFieldName,
                 finalVarietyClass,
                 finalVariety,
                 nextVarietyId || null,
@@ -618,13 +614,10 @@ const updatePlanting = async (req, res) => {
 const deletePlanting = async (req, res) => {
     try {
         const [result] = await db.query(
-            `UPDATE plantings p
-             JOIN fields f ON p.field_id = f.id
-             JOIN farms fm ON f.farm_id = fm.id
-             SET p.deleted_at = NOW()
-             WHERE p.id = ? AND p.deleted_at IS NULL
-               AND fm.owner_id = ?`,
-            [req.params.id, req.user.id]
+            `UPDATE plantings
+             SET deleted_at = NOW()
+             WHERE id = ? AND deleted_at IS NULL`,
+            [req.params.id]
         );
         if (result.affectedRows === 0)
             return res.status(404).json({ message: 'Planting not found.' });

@@ -4,6 +4,7 @@ import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Badge from '../components/Badge';
 import { getHarvests, createHarvest, updateHarvest, deleteHarvest, getPlantings } from '../services/api';
+import { SkeletonTable } from '../components/Skeleton';
 
 const Harvests = () => {
     const [harvests, setHarvests] = useState([]);
@@ -156,12 +157,11 @@ const Harvests = () => {
             )}
 
             {loading ? (
-                <div className="flex items-center justify-center h-48">
-                    <div className="flex flex-col items-center gap-3">
-                        <div className="w-8 h-8 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
-                        <p className="text-gray-400 text-sm">Loading harvest records...</p>
-                    </div>
-                </div>
+                <SkeletonTable 
+                    rows={6} 
+                    cols={6}
+                    columnHeaders={['Variety', 'Harvest Date', 'Yield (kg)', 'Quality Grade', 'Remarks', 'Actions']}
+                />
             ) : (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <div className="overflow-x-auto">
@@ -240,8 +240,9 @@ const Harvests = () => {
                                     <option key={p.id} value={p.id}>{p.variety} ({p.field_name})</option>
                                 ))}
                             </select>
-                            <p className="text-xs text-gray-400 mt-1">
-                                ⚠️ Recording a harvest will mark the planting as completed and archive pending activities.
+                            <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3" />
+                                Recording a harvest will mark the planting as completed and archive pending activities.
                             </p>
                         </div>
                     )}

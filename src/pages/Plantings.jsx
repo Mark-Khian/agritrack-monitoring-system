@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, Edit2, Trash2, Sprout, AlertTriangle } from 'lucide-react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Badge from '../components/Badge';
 import DownwardSelect from '../components/DownwardSelect';
 import {
-    getPlantings, createPlanting, updatePlanting, deletePlanting, getFields, getFarms, getVarieties
+    getPlantings, createPlanting, updatePlanting, deletePlanting, getVarieties
 } from '../services/api';
+import { SkeletonTable } from '../components/Skeleton';
 
 const RICE_VARIETY_OPTIONS = {
     'Irrigated / Lowland Varieties': [
@@ -57,24 +57,22 @@ const LIFECYCLE_OPTIONS_EDIT = [
     { value: 'ABANDONED', label: 'Abandoned' },
 ];
 
-/** Matches server template indices 0–6 */
+/** Matches server template indices 0–9 */
 const SYSTEM_TEMPLATE_SLOTS = [
-    { i: 0, short: 'Seeding check' },
-    { i: 1, short: '1st fertilizer (basal)' },
-    { i: 2, short: 'Transplanting' },
-    { i: 3, short: 'Early pest monitoring' },
-    { i: 4, short: '2nd fertilizer' },
-    { i: 5, short: 'Pre-harvest pest' },
-    { i: 6, short: 'Final irrigation' },
+    { i: 0, short: 'Seeding' },
+    { i: 1, short: 'Transplanting' },
+    { i: 2, short: 'Irrigation' },
+    { i: 3, short: 'First Fertilizing' },
+    { i: 4, short: 'Pest Control' },
+    { i: 5, short: 'Second Fertilizing' },
+    { i: 6, short: 'Crop Monitoring' },
+    { i: 7, short: 'Final Pest Inspection' },
+    { i: 8, short: 'Drain Irrigation' },
+    { i: 9, short: 'Harvesting' },
 ];
 
 const Plantings = () => {
-    const navigate = useNavigate();
-    const [searchParams, setSearchParams] = useSearchParams();
     const [plantings, setPlantings] = useState([]);
-    const [fields, setFields] = useState([]);
-    const [farms, setFarms] = useState([]);
-    const [farmFields, setFarmFields] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [saving, setSaving] = useState(false);
@@ -90,7 +88,8 @@ const Plantings = () => {
     const [partialTemplateIndices, setPartialTemplateIndices] = useState([]);
 
     const [formData, setFormData] = useState({
-        farm_id: '', field_id: '', variety_class: '', variety: '', variety_id: '',
+        field_name: '',
+        variety_class: '', variety: '', variety_id: '',
         planting_date: '',
         expected_growth_days: '120',
         adjustment_days: '0',
@@ -132,21 +131,13 @@ const Plantings = () => {
             prev.includes(idx) ? prev.filter((x) => x !== idx) : [...prev, idx].sort((a, b) => a - b)
         );
     };
-    const fieldsForSelectedFarm = formData.farm_id
-        ? farmFields
-        : fields.filter((f) => String(f.farm_id) === String(formData.farm_id));
+
 
     const fetchData = useCallback(async () => {
         try {
             setError(null);
-            const [pRes, fRes, farmsRes] = await Promise.all([
-                getPlantings(),
-                getFields(),
-                getFarms(),
-            ]);
+            const pRes = await getPlantings();
             setPlantings(pRes.data.data || []);
-            setFields(fRes.data.data || []);
-            setFarms(farmsRes.data.data || []);
         } catch (err) {
             setError('Failed to load plantings. Please try again.');
             console.error(err);
@@ -170,98 +161,16 @@ const Plantings = () => {
         return () => { cancelled = true; };
     }, []);
 
-    // Deep link from Fields: /plantings?farm_id=…&field_id=… — open Add Planting with plot prefilled
-    useEffect(() => {
-        if (loading) return;
-        const fieldIdParam = searchParams.get('field_id');
-        const farmIdParam = searchParams.get('farm_id');
-        if (!fieldIdParam && !farmIdParam) return;
+    // Deep link removed: field_id no longer exists
 
-        const clearDeepLinkParams = () => {
-            const next = new URLSearchParams(searchParams);
-            next.delete('field_id');
-            next.delete('farm_id');
-            setSearchParams(next, { replace: true });
-        };
 
-        if (fieldIdParam) {
-            const fid = String(fieldIdParam);
-            const fieldRow = fields.find((f) => String(f.id) === fid);
-            if (!fieldRow) {
-                if (fields.length === 0) return;
-                clearDeepLinkParams();
-                return;
-            }
-            setFormError('');
-            setEditingItem(null);
-            setFormData({
-                farm_id: String(fieldRow.farm_id),
-                field_id: fid,
-                variety_class: '',
-                variety: '',
-                variety_id: '',
-                planting_date: '',
-                expected_growth_days: '120',
-                adjustment_days: '0',
-                growth_plan_manual_override: false,
-                lifecycle_state: 'ACTIVE',
-                season: 'wet',
-                status: 'active'
-            });
-            setEditVarietyBaseline(null);
-            setPartialTemplateIndices([]);
-            setIsModalOpen(true);
-            clearDeepLinkParams();
-            return;
-        }
-
-        const resolvedFarm = farmIdParam ? String(farmIdParam) : String(farms[0]?.id || '');
-        if (!resolvedFarm) return;
-        setFormError('');
-        setEditingItem(null);
-        setFormData({
-            farm_id: resolvedFarm,
-            field_id: '',
-            variety_class: '',
-            variety: '',
-            variety_id: '',
-            planting_date: '',
-            expected_growth_days: '120',
-            adjustment_days: '0',
-            growth_plan_manual_override: false,
-            lifecycle_state: 'ACTIVE',
-            season: 'wet',
-            status: 'active'
-        });
-        setEditVarietyBaseline(null);
-        setPartialTemplateIndices([]);
-        setIsModalOpen(true);
-        clearDeepLinkParams();
-    }, [loading, fields, farms, searchParams, setSearchParams]);
-
-    useEffect(() => {
-        const fetchFarmFields = async () => {
-            if (!isModalOpen || editingItem || !formData.farm_id) {
-                setFarmFields([]);
-                return;
-            }
-            try {
-                const res = await getFields({ farm_id: formData.farm_id });
-                setFarmFields(res.data.data || []);
-            } catch {
-                setFarmFields([]);
-            }
-        };
-        fetchFarmFields();
-    }, [formData.farm_id, isModalOpen, editingItem]);
 
     const handleOpenModal = (item = null) => {
         setFormError('');
         setPartialTemplateIndices([]);
         if (item) {
             setFormData({
-                farm_id: item.farm_id || '',
-                field_id: item.field_id,
+                field_name: item.field_name || '',
                 variety_class: item.variety_class || '',
                 variety: item.variety,
                 variety_id: item.variety_id != null ? String(item.variety_id) : '',
@@ -281,8 +190,7 @@ const Plantings = () => {
             setEditingItem(item);
         } else {
             setFormData({
-                farm_id: farms[0]?.id || '',
-                field_id: '',
+                field_name: '',
                 variety_class: '',
                 variety: '',
                 variety_id: '',
@@ -305,9 +213,15 @@ const Plantings = () => {
         setSaving(true);
         setFormError('');
         try {
+            const normalizedFieldName = String(formData.field_name || '').trim();
+            if (!normalizedFieldName) {
+                setFormError('Field name is required.');
+                return;
+            }
             const partialPayload = partialTemplateIndices.length > 0 ? partialTemplateIndices : undefined;
             if (editingItem) {
                 await updatePlanting(editingItem.id, {
+                    field_name: normalizedFieldName,
                     variety_class: formData.variety_class,
                     variety: formData.variety,
                     variety_id: formData.variety_id ? Number(formData.variety_id) : undefined,
@@ -321,7 +235,7 @@ const Plantings = () => {
                 });
             } else {
                 await createPlanting({
-                    field_id: formData.field_id,
+                    field_name: normalizedFieldName,
                     variety_class: formData.variety_class,
                     variety: formData.variety,
                     variety_id: formData.variety_id ? Number(formData.variety_id) : undefined,
@@ -393,21 +307,12 @@ const Plantings = () => {
                     </label>
                     <button
                         onClick={() => handleOpenModal()}
-                        disabled={fields.length === 0}
-                        className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                        className="flex items-center gap-2 bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                     >
                         <Plus size={16} /> Add Planting
                     </button>
                 </div>
             </div>
-
-            {/* Dependency guard */}
-            {!loading && fields.length === 0 && (
-                <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl text-sm">
-                    <AlertTriangle size={18} className="text-amber-500 shrink-0" />
-                    <span>You need to <strong>add Fields first</strong> before creating plantings.</span>
-                </div>
-            )}
 
             {error && (
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex items-center justify-between">
@@ -417,12 +322,11 @@ const Plantings = () => {
             )}
 
             {loading ? (
-                <div className="flex items-center justify-center h-48">
-                    <div className="flex flex-col items-center gap-3">
-                        <div className="w-8 h-8 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
-                        <p className="text-gray-400 text-sm">Loading plantings...</p>
-                    </div>
-                </div>
+                <SkeletonTable 
+                    rows={6} 
+                    cols={7}
+                    columnHeaders={['Variety', 'Field', 'Season', 'Growth Stage', 'Planting Date', 'Expected Harvest', 'Actions']}
+                />
             ) : (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <div className="overflow-x-auto">
@@ -449,7 +353,7 @@ const Plantings = () => {
                                                 </p>
                                                 <p className="text-gray-300 text-xs">
                                                     {plantings.length === 0
-                                                        ? 'Active plantings get seven ratio-based system activities; Planned plantings defer until you activate.'
+                                                        ? 'Active plantings get ten ratio-based system activities; Planned plantings defer until you activate.'
                                                         : 'Enable "Show completed plantings" to view archived records.'}
                                                 </p>
                                             </div>
@@ -531,52 +435,22 @@ const Plantings = () => {
                         </div>
                     )}
                     <div className="grid grid-cols-2 gap-4">
-                        {/* Field selector — only shown when creating */}
-                        {!editingItem && (
-                            <div className="col-span-2">
-                                <label className="text-sm font-medium text-gray-700 mb-1 block">Farm *</label>
-                                <select
-                                    required
-                                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow"
-                                    value={formData.farm_id}
-                                    onChange={e => setFormData({ ...formData, farm_id: e.target.value, field_id: '' })}
-                                >
-                                    <option value="">Select Farm</option>
-                                    {farms.map(f => (
-                                        <option key={f.id} value={f.id}>{f.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
-                        {!editingItem && (
-                            <div className="col-span-2">
-                                <label className="text-sm font-medium text-gray-700 mb-1 block">Field *</label>
-                                <div className="space-y-2">
-                                    <select
-                                        required
-                                        disabled={!formData.farm_id}
-                                        className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow disabled:bg-gray-50 disabled:text-gray-400"
-                                        value={formData.field_id}
-                                        onChange={e => setFormData({ ...formData, field_id: e.target.value })}
-                                    >
-                                        <option value="">{formData.farm_id ? 'Select Field' : 'Select Farm first'}</option>
-                                        {fieldsForSelectedFarm.map(f => (
-                                            <option key={f.id} value={f.id}>{f.name}</option>
-                                        ))}
-                                    </select>
-                                    <p className="text-xs text-gray-500">
-                                        You can reuse the same plot for a new crop cycle, even if it was used in a completed (archived) planting.
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={() => navigate('/fields')}
-                                        className="text-xs text-green-700 hover:text-green-800 font-medium hover:underline"
-                                    >
-                                        + Add New Field
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+                        {/* Field name (managed within Plantings; no separate Fields module) */}
+                        <div className="col-span-2">
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Field Name *</label>
+                            <input
+                                required
+                                type="text"
+                                maxLength={120}
+                                placeholder="e.g. North Plot, Block A, Barangay..."
+                                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow"
+                                value={formData.field_name}
+                                onChange={(e) => setFormData({ ...formData, field_name: e.target.value })}
+                            />
+                            <p className="text-xs text-gray-500 mt-1">
+                                Field details are tracked per planting record (Fields page removed).
+                            </p>
+                        </div>
                         <div className="col-span-2">
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Variety Class *</label>
                             <select
@@ -706,17 +580,17 @@ const Plantings = () => {
                             <p className="text-xs text-gray-500 mt-1">Planting date + growth days + adjustment. Saved by the server on submit.</p>
                         </div>
                         {(!editingItem || !isCompletedPlanting(editingItem)) && (
-                            <div className="col-span-2 border border-dashed border-gray-200 rounded-lg p-3 bg-slate-50/80">
-                                <p className="text-sm font-medium text-gray-800 mb-1">Generate selected system activities now (optional)</p>
-                                <p className="text-xs text-gray-600 mb-2">
+                            <div className="col-span-2 border border-dashed border-gray-200 dark:border-slate-700 rounded-lg p-3 bg-white dark:bg-slate-900">
+                                <p className="text-sm font-medium text-gray-900 dark:text-slate-100 mb-1">Generate selected system activities now (optional)</p>
+                                <p className="text-xs text-gray-600 dark:text-slate-300 mb-2">
                                     Inserts only <strong>missing</strong> template slots (idempotent). Useful for Planned plantings or early field work before setting lifecycle to Active.
                                 </p>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                     {SYSTEM_TEMPLATE_SLOTS.map(({ i, short }) => (
-                                        <label key={i} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                                        <label key={i} className="flex items-center gap-2 text-xs text-gray-700 dark:text-slate-200 cursor-pointer">
                                             <input
                                                 type="checkbox"
-                                                className="h-3.5 w-3.5 rounded border-gray-300 text-green-700"
+                                                className="h-3.5 w-3.5 rounded border-gray-300 dark:border-slate-600 text-green-700 bg-white dark:bg-slate-700"
                                                 checked={partialTemplateIndices.includes(i)}
                                                 onChange={() => togglePartialTemplate(i)}
                                             />
@@ -740,7 +614,7 @@ const Plantings = () => {
                                     ))}
                                 </select>
                                 <p className="text-xs text-gray-500 mt-1">
-                                    Choose <strong>Planned</strong> to defer the seven system activities until you move this planting to Active (edit later or on first field work).
+                                    Choose <strong>Planned</strong> to defer the ten system activities until you move this planting to Active (edit later or on first field work).
                                 </p>
                             </div>
                         ) : (

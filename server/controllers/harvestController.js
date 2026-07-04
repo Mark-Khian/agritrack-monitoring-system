@@ -17,37 +17,27 @@ const getAllHarvests = async (req, res) => {
                 harvests.created_at,
                 plantings.id      AS planting_id,
                 plantings.variety AS planting_variety,
-                plantings.season
+                plantings.season,
+                plantings.field_name AS field_name
              FROM harvests
              JOIN plantings ON harvests.planting_id = plantings.id
-             JOIN fields ON plantings.field_id = fields.id
-             JOIN farms ON fields.farm_id = farms.id
              WHERE harvests.deleted_at IS NULL
                AND plantings.deleted_at IS NULL
-               AND fields.deleted_at IS NULL
-               AND farms.deleted_at IS NULL
-               AND farms.owner_id = ?
                AND harvests.harvest_date IS NOT NULL
                AND harvests.yield_kg IS NOT NULL
              ORDER BY harvests.created_at DESC
              LIMIT ? OFFSET ?`,
-            [req.user.id, limit, offset]
+            [limit, offset]
         );
 
         const [[{ total }]] = await db.query(
             `SELECT COUNT(*) as total
              FROM harvests
              JOIN plantings ON harvests.planting_id = plantings.id
-             JOIN fields ON plantings.field_id = fields.id
-             JOIN farms ON fields.farm_id = farms.id
              WHERE harvests.deleted_at IS NULL
                AND plantings.deleted_at IS NULL
-               AND fields.deleted_at IS NULL
-               AND farms.deleted_at IS NULL
-               AND farms.owner_id = ?
                AND harvests.harvest_date IS NOT NULL
-               AND harvests.yield_kg IS NOT NULL`,
-            [req.user.id]
+               AND harvests.yield_kg IS NOT NULL`
         );
 
         res.status(200).json({
@@ -102,10 +92,10 @@ const createHarvest = async (req, res) => {
 
         // Check planting exists and is active
         const [planting] = await connection.query(
-            `SELECT id FROM plantings
-             WHERE id = ?
-               AND status = 'active'
-               AND deleted_at IS NULL`,
+            `SELECT p.id FROM plantings p
+             WHERE p.id = ?
+               AND p.status = 'active'
+               AND p.deleted_at IS NULL`,
             [planting_id]
         );
         if (planting.length === 0) {

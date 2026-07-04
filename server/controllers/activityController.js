@@ -1,8 +1,10 @@
 const db = require('../config/db');
 const logActivity = require('../middleware/logger');
+const { syncActivityStatuses } = require('../utils/activityScheduler');
 
 const getAllActivities = async (req, res) => {
     try {
+        await syncActivityStatuses(db);
         const page  = Math.max(1, parseInt(req.query.page)  || 1);
         const limit = Math.min(100, parseInt(req.query.limit) || 10);
         const offset = (page - 1) * limit;
@@ -27,40 +29,26 @@ const getAllActivities = async (req, res) => {
                 activities.created_at,
                 plantings.id      AS planting_id,
                 plantings.variety AS planting_variety,
-                fields.id         AS field_id,
-                farms.id          AS farm_id,
-                users.id          AS performed_by_id,
-                users.name        AS performed_by_name
+                plantings.field_name AS field_name
              FROM activities
              JOIN plantings ON activities.planting_id = plantings.id
-             JOIN fields ON plantings.field_id = fields.id
-             JOIN farms ON fields.farm_id = farms.id
-             LEFT JOIN users ON activities.performed_by = users.id
              WHERE activities.deleted_at IS NULL
                AND plantings.deleted_at IS NULL
-               AND fields.deleted_at IS NULL
-               AND farms.deleted_at IS NULL
-               AND farms.owner_id = ?
                ${plantingFilter}
                ${systemGeneratedFilter}
              ORDER BY activities.activity_date ASC, activities.created_at DESC
              LIMIT ? OFFSET ?`,
-            [req.user.id, ...filterParams, limit, offset]
+            [...filterParams, limit, offset]
         );
 
-        const countParams = [req.user.id, ...(req.query.planting_id ? [req.query.planting_id] : [])];
+        const countParams = req.query.planting_id ? [req.query.planting_id] : [];
         const countWhere = req.query.planting_id ? 'AND activities.planting_id = ?' : '';
         const [[{ total }]] = await db.query(
             `SELECT COUNT(*) as total
              FROM activities
              JOIN plantings ON activities.planting_id = plantings.id
-             JOIN fields ON plantings.field_id = fields.id
-             JOIN farms ON fields.farm_id = farms.id
              WHERE activities.deleted_at IS NULL
                AND plantings.deleted_at IS NULL
-               AND fields.deleted_at IS NULL
-               AND farms.deleted_at IS NULL
-               AND farms.owner_id = ?
                ${countWhere}
                ${includeSystemGenerated ? '' : 'AND activities.is_system_generated = 0'}`,
             countParams
@@ -78,6 +66,7 @@ const getAllActivities = async (req, res) => {
 
 const getActivityById = async (req, res) => {
     try {
+        await syncActivityStatuses(db);
         const [activities] = await db.query(
             `SELECT
                 activities.id,
@@ -92,15 +81,9 @@ const getActivityById = async (req, res) => {
                 activities.created_at,
                 plantings.id      AS planting_id,
                 plantings.variety AS planting_variety,
-                fields.id         AS field_id,
-                farms.id          AS farm_id,
-                users.id          AS performed_by_id,
-                users.name        AS performed_by_name
+                plantings.field_name AS field_name
              FROM activities
              JOIN plantings ON activities.planting_id = plantings.id
-             JOIN fields ON plantings.field_id = fields.id
-             JOIN farms ON fields.farm_id = farms.id
-             LEFT JOIN users ON activities.performed_by = users.id
              WHERE activities.id = ?
                AND activities.deleted_at IS NULL`,
             [req.params.id]
@@ -122,19 +105,14 @@ const createActivity = async (req, res) => {
     } = req.body;
 
     try {
-        // Check if planting exists, is active, and belongs to current user
+        // Check if planting exists and is active
         const [planting] = await db.query(
             `SELECT plantings.id
              FROM plantings
-             JOIN fields ON plantings.field_id = fields.id
-             JOIN farms ON fields.farm_id = farms.id
              WHERE plantings.id = ?
                AND plantings.status = 'active'
-               AND plantings.deleted_at IS NULL
-               AND fields.deleted_at IS NULL
-               AND farms.deleted_at IS NULL
-               AND farms.owner_id = ?`,
-            [planting_id, req.user.id]
+               AND plantings.deleted_at IS NULL`,
+            [planting_id]
         );
         if (planting.length === 0)
             return res.status(404).json({
@@ -171,6 +149,17 @@ const updateActivity = async (req, res) => {
     const { activity_type, activity_date, notes, status } = req.body;
 
     try {
+        // Enforce the completed activity lock rule
+        const [current] = await db.query(
+            'SELECT status FROM activities WHERE id = ? AND deleted_at IS NULL',
+            [req.params.id]
+        );
+        if (current.length > 0 && current[0].status === 'completed' && status !== 'completed') {
+            return res.status(400).json({
+                message: 'Completed activities cannot be changed back to pending or ongoing.'
+            });
+        }
+
         const [result] = await db.query(
             `UPDATE activities
              SET activity_type = ?, activity_date = ?,

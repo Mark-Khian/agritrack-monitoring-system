@@ -39,39 +39,39 @@ const TYPE_META = {
     },
     activity_overdue: {
         icon: AlertTriangle,
-        iconClass: 'text-red-600',
-        bgClass: 'bg-red-50',
-        borderClass: 'border-red-500',
+        iconClass: 'text-red-600 dark:text-red-400',
+        bgClass: 'bg-red-50 dark:bg-red-950/20',
+        borderClass: 'border-red-500 dark:border-red-600',
         label: 'Overdue',
     },
     weather_alert: {
         icon: CloudRain,
-        iconClass: 'text-blue-600',
-        bgClass: 'bg-blue-50',
-        borderClass: 'border-blue-400',
+        iconClass: 'text-blue-600 dark:text-blue-400',
+        bgClass: 'bg-blue-50 dark:bg-blue-950/20',
+        borderClass: 'border-blue-400 dark:border-blue-500',
         label: 'Weather',
     },
     lifecycle_update: {
         icon: Sprout,
-        iconClass: 'text-emerald-600',
-        bgClass: 'bg-emerald-50',
-        borderClass: 'border-emerald-500',
+        iconClass: 'text-emerald-600 dark:text-emerald-400',
+        bgClass: 'bg-emerald-50 dark:bg-emerald-950/20',
+        borderClass: 'border-emerald-500 dark:border-emerald-600',
         label: 'Lifecycle',
     },
     system_guidance: {
         icon: Cpu,
-        iconClass: 'text-purple-600',
-        bgClass: 'bg-purple-50',
-        borderClass: 'border-purple-400',
+        iconClass: 'text-purple-600 dark:text-purple-400',
+        bgClass: 'bg-purple-50 dark:bg-purple-950/20',
+        borderClass: 'border-purple-400 dark:border-purple-500',
         label: 'Guidance',
     },
 };
 
 const DEFAULT_META = {
     icon: Bell,
-    iconClass: 'text-gray-500',
-    bgClass: 'bg-gray-50',
-    borderClass: 'border-gray-300',
+    iconClass: 'text-gray-500 dark:text-slate-400',
+    bgClass: 'bg-gray-50 dark:bg-slate-800/40',
+    borderClass: 'border-gray-300 dark:border-slate-700',
     label: 'Notification',
 };
 
@@ -195,18 +195,18 @@ const NotificationBell = () => {
             {open && (
                 <div
                     id="notification-dropdown"
-                    className="absolute right-0 top-12 z-50 w-96 max-w-[calc(100vw-1rem)]
-                               rounded-2xl border border-gray-100 bg-white shadow-2xl
+                    className="fixed right-2 left-2 sm:absolute sm:right-0 sm:left-auto top-14 sm:top-12 z-50 w-auto sm:w-96 max-w-[calc(100vw-1rem)]
+                               rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl
                                overflow-hidden flex flex-col"
                     style={{ maxHeight: '520px' }}
                 >
                     {/* Header */}
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 shrink-0">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-slate-800 shrink-0">
                         <div className="flex items-center gap-2">
-                            <Bell size={16} className="text-emerald-700" />
-                            <span className="text-sm font-bold text-gray-900">Notifications</span>
+                            <Bell size={16} className="text-emerald-700 dark:text-emerald-500" />
+                            <span className="text-sm font-bold text-gray-900 dark:text-slate-100">Notifications</span>
                             {unread > 0 && (
-                                <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                                <span className="inline-flex items-center rounded-full bg-red-100 dark:bg-red-950/40 px-2 py-0.5 text-[10px] font-bold text-red-700 dark:text-red-300">
                                     {unread} unread
                                 </span>
                             )}
@@ -218,8 +218,8 @@ const NotificationBell = () => {
                                     type="button"
                                     onClick={handleMarkAllRead}
                                     disabled={markingAll}
-                                    className="flex items-center gap-1 text-xs text-emerald-700 font-semibold
-                                               hover:text-emerald-900 transition-colors disabled:opacity-50"
+                                    className="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-500 font-semibold
+                                               hover:text-emerald-900 dark:hover:text-emerald-400 transition-colors disabled:opacity-50"
                                     title="Mark all as read"
                                 >
                                     <CheckCheck size={13} />
@@ -229,7 +229,7 @@ const NotificationBell = () => {
                             <button
                                 type="button"
                                 onClick={() => setOpen(false)}
-                                className="rounded-lg p-1 hover:bg-gray-100 transition-colors text-gray-400"
+                                className="rounded-lg p-1 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors text-gray-400 dark:text-slate-500"
                                 aria-label="Close"
                             >
                                 <X size={14} />
@@ -259,16 +259,16 @@ const NotificationBell = () => {
                                         type="button"
                                         onClick={() => isUnread && handleMarkRead(notif.id)}
                                         className={`w-full text-left flex items-start gap-3 px-4 py-3
-                                                   border-b border-gray-50 last:border-0
+                                                   border-b border-gray-50 dark:border-slate-800 last:border-0
                                                    transition-colors group
                                                    ${isUnread
                                                         ? `${meta.bgClass} hover:opacity-90 cursor-pointer border-l-[3px] ${meta.borderClass}`
-                                                        : 'bg-white hover:bg-gray-50/60 cursor-default border-l-[3px] border-transparent'
+                                                        : 'bg-white dark:bg-slate-900 hover:bg-gray-50/60 dark:hover:bg-slate-800/40 cursor-default border-l-[3px] border-transparent'
                                                    }`}
                                     >
                                         {/* Icon */}
                                         <span className={`mt-0.5 shrink-0 rounded-lg p-1.5
-                                            ${isUnread ? 'bg-white/70' : 'bg-gray-100'}`}>
+                                            ${isUnread ? 'bg-white/70 dark:bg-slate-800/50' : 'bg-gray-100 dark:bg-slate-800/30'}`}>
                                             <Icon size={15} className={meta.iconClass} />
                                         </span>
 
@@ -276,19 +276,19 @@ const NotificationBell = () => {
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-start justify-between gap-2">
                                                 <p className={`text-[13px] font-semibold leading-tight truncate
-                                                    ${isUnread ? 'text-gray-900' : 'text-gray-600'}`}>
+                                                    ${isUnread ? 'text-gray-900 dark:text-slate-100' : 'text-gray-600 dark:text-slate-400'}`}>
                                                     {notif.title}
                                                 </p>
-                                                <span className="shrink-0 text-[10px] text-gray-400 whitespace-nowrap mt-0.5">
+                                                <span className="shrink-0 text-[10px] text-gray-400 dark:text-slate-500 whitespace-nowrap mt-0.5">
                                                     {relativeTime(notif.created_at)}
                                                 </span>
                                             </div>
-                                            <p className="mt-1 text-[12px] text-gray-500 leading-snug line-clamp-2">
+                                            <p className="mt-1 text-[12px] text-gray-500 dark:text-slate-400 leading-snug line-clamp-2">
                                                 {notif.message}
                                             </p>
                                             <span className={`mt-1.5 inline-flex items-center rounded-full px-2 py-0.5
                                                 text-[10px] font-semibold
-                                                ${isUnread ? 'bg-white/60 text-gray-600' : 'bg-gray-100 text-gray-500'}`}>
+                                                ${isUnread ? 'bg-white/60 dark:bg-slate-800/60 text-gray-600 dark:text-slate-300' : 'bg-gray-100 dark:bg-slate-800/40 text-gray-500 dark:text-slate-400'}`}>
                                                 {meta.label}
                                             </span>
                                         </div>
@@ -299,8 +299,8 @@ const NotificationBell = () => {
                     </div>
 
                     {/* Footer */}
-                    <div className="shrink-0 px-4 py-2.5 border-t border-gray-100 bg-gray-50/60">
-                        <p className="text-[11px] text-gray-400 text-center">
+                    <div className="shrink-0 px-4 py-2.5 border-t border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-900/50">
+                        <p className="text-[11px] text-gray-400 dark:text-slate-500 text-center">
                             Notifications refresh automatically every 60 seconds
                         </p>
                     </div>

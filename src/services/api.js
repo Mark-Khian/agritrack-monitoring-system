@@ -13,32 +13,15 @@ API.interceptors.request.use((config) => {
     return config;
 });
 
+// ── Dashboard ────────────────────────────
+export const getLifecycleMonitoring = () => API.get('/dashboard/lifecycle-monitoring');
+
 // ── Auth ──────────────────────────────────
-export const registerUser        = (data) => API.post('/auth/register', data);
 export const loginUser           = (data) => API.post('/auth/login', data);
 export const logoutUser          = ()     => API.post('/auth/logout');
-export const forgotPasswordUser  = (data) => API.post('/auth/forgot-password', data);
-export const resetPasswordUser   = (data) => API.post('/auth/reset-password', data);
-export const resendVerificationUser = (data) => API.post('/auth/resend-verification', data);
 export const getSessionsUser     = ()     => API.get('/auth/sessions');
 export const logoutAllUser       = ()     => API.post('/auth/logout-all');
 export const refreshTokenUser    = (data) => API.post('/auth/refresh', data);
-
-// ── Farms ─────────────────────────────────
-// params: { page, limit } — defaults to limit=100 for dropdowns
-export const getFarms   = (params = {}) => API.get('/farms',      { params: { limit: 100, ...params } });
-export const getFarmById = (id)          => API.get(`/farms/${id}`);
-export const createFarm = (data)         => API.post('/farms', data);
-export const updateFarm = (id, data)     => API.put(`/farms/${id}`, data);
-export const deleteFarm = (id)           => API.delete(`/farms/${id}`);
-
-// ── Fields ────────────────────────────────
-// params: { farm_id, limit }
-export const getFields   = (params = {}) => API.get('/fields',     { params: { limit: 100, ...params } });
-export const getFieldById = (id)          => API.get(`/fields/${id}`);
-export const createField  = (data)        => API.post('/fields', data);
-export const updateField  = (id, data)    => API.put(`/fields/${id}`, data);
-export const deleteField  = (id)          => API.delete(`/fields/${id}`);
 
 // ── Plantings ─────────────────────────────
 // params: { status, limit } — use status='active' for harvest/activity dropdowns

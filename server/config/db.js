@@ -20,6 +20,8 @@ const pool = mysql.createPool({
     dateStrings: true,     // return dates as strings
 });
 
+const runMigrations = require('./migration');
+
 // Test connection on startup
 pool.getConnection((err, connection) => {
     if (err) {
@@ -28,6 +30,9 @@ pool.getConnection((err, connection) => {
     }
     console.log('✅ Connected to MySQL database!');
     connection.release();
+    
+    // Run database schema migrations
+    runMigrations(pool.promise());
 });
 
 // ── DB Health Check ───────────────────────

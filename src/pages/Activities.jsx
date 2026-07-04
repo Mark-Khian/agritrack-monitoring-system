@@ -4,20 +4,27 @@ import {
     Plus,
     Shovel, Sprout, FlaskConical,
     Droplets, Bug, Scissors,
-    Wheat, Package, Tractor, AlertTriangle, Cpu, ChevronRight
+    Wheat, Package, Tractor, AlertTriangle, Cpu, ChevronRight, Eye, CheckCircle
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import Badge from '../components/Badge';
-import { getActivities, createActivity, updateActivity, getPlantings, getFields, getFarms } from '../services/api';
+import { getActivities, createActivity, updateActivity, getPlantings } from '../services/api';
+import { SkeletonTable } from '../components/Skeleton';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 // ── Activity Type Icon + Color Map ────────
 const ACTIVITY_ICONS = {
     'land preparation': { icon: Shovel,       color: '#d97706', bg: '#fffbeb' },
     'seeding':          { icon: Sprout,        color: '#16a34a', bg: '#f0fdf4' },
-    'transplanting':    { icon: Sprout,        color: '#0d9488', bg: '#f0fdfa' },
+    'transplanting':    { icon: Sprout,        color: '#0d9488', bg: '#f0f9ff' },
     'fertilizing':      { icon: FlaskConical,  color: '#2563eb', bg: '#eff6ff' },
+    'first fertilizing': { icon: FlaskConical, color: '#2563eb', bg: '#eff6ff' },
+    'second fertilizing': { icon: FlaskConical, color: '#1d4ed8', bg: '#eff6ff' },
     'irrigation':       { icon: Droplets,      color: '#0891b2', bg: '#ecfeff' },
+    'drain irrigation': { icon: Droplets,      color: '#0284c7', bg: '#f0f9ff' },
     'pest control':     { icon: Bug,           color: '#dc2626', bg: '#fef2f2' },
+    'final pest inspection': { icon: Bug,      color: '#b91c1c', bg: '#fef2f2' },
+    'crop monitoring':  { icon: Eye,           color: '#7c3aed', bg: '#f5f3ff' },
     'weeding':          { icon: Scissors,      color: '#7c3aed', bg: '#f5f3ff' },
     'harvesting':       { icon: Wheat,         color: '#ca8a04', bg: '#fefce8' },
     'other':            { icon: Package,       color: '#6b7280', bg: '#f9fafb' },
@@ -49,9 +56,6 @@ const Activities = () => {
     const navigate = useNavigate();
     const [activities, setActivities] = useState([]);
     const [plantings, setPlantings] = useState([]);  // active plantings for dropdown
-    const [fields, setFields] = useState([]);
-    const [farms, setFarms] = useState([]);
-    const [farmFields, setFarmFields] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [saving, setSaving] = useState(false);
@@ -62,34 +66,26 @@ const Activities = () => {
     const [statusUpdatingId, setStatusUpdatingId] = useState(null);
     const [expandedPlantingId, setExpandedPlantingId] = useState(null);
     const [showArchivedActivities, setShowArchivedActivities] = useState(false);
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+    const [activityToComplete, setActivityToComplete] = useState(null);
 
     const [formData, setFormData] = useState({
-        farm_id: '',
-        field_id: '',
         planting_id: '',
         activity_type: 'land preparation',
         activity_date: '',
         notes: '',
         status: 'pending'
     });
-    const fieldsForSelectedFarm = formData.farm_id
-        ? farmFields
-        : fields.filter((f) => String(f.farm_id) === String(formData.farm_id));
-    const plantingsForSelectedField = plantings.filter((p) => String(p.field_id) === String(formData.field_id));
 
     const fetchData = useCallback(async () => {
         try {
             setError(null);
-            const [aRes, pRes, fRes, farmsRes] = await Promise.all([
+            const [aRes, pRes] = await Promise.all([
                 getActivities(),
                 getPlantings({ status: 'active' }),
-                getFields(),
-                getFarms(),
             ]);
             setActivities(aRes.data.data || []);
             setPlantings(pRes.data.data || []);
-            setFields(fRes.data.data || []);
-            setFarms(farmsRes.data.data || []);
         } catch (err) {
             setError('Failed to load activities. Please try again.');
             console.error(err);
@@ -99,28 +95,12 @@ const Activities = () => {
     }, []);
 
     useEffect(() => { fetchData(); }, [fetchData]);
-    useEffect(() => {
-        const fetchFarmFields = async () => {
-            if (!isModalOpen || editingItem || !formData.farm_id) {
-                setFarmFields([]);
-                return;
-            }
-            try {
-                const res = await getFields({ farm_id: formData.farm_id });
-                setFarmFields(res.data.data || []);
-            } catch {
-                setFarmFields([]);
-            }
-        };
-        fetchFarmFields();
-    }, [formData.farm_id, isModalOpen, editingItem]);
+
 
     const handleOpenModal = (item = null) => {
         setFormError('');
         if (item) {
             setFormData({
-                farm_id: item.farm_id || '',
-                field_id: item.field_id || '',
                 planting_id: item.planting_id,
                 activity_type: item.activity_type,
                 activity_date: item.activity_date?.slice(0, 10) || '',
@@ -130,8 +110,6 @@ const Activities = () => {
             setEditingItem(item);
         } else {
             setFormData({
-                farm_id: '',
-                field_id: '',
                 planting_id: '',
                 activity_type: 'land preparation',
                 activity_date: '',
@@ -183,14 +161,21 @@ const Activities = () => {
         const currentStatus = String(act?.status || '').toLowerCase();
         // One-way completion from checkbox UI: completed activities cannot be unchecked back.
         if (!checked || currentStatus === 'completed') return;
+        
+        setActivityToComplete(act);
+        setIsConfirmOpen(true);
+    };
+
+    const confirmCompleteActivity = async () => {
+        if (!activityToComplete) return;
         const nextStatus = 'completed';
         try {
-            setStatusUpdatingId(act.id);
-            await updateActivity(act.id, {
-                planting_id: act.planting_id,
-                activity_type: toApiActivityType(act.activity_type),
-                activity_date: act.activity_date?.slice(0, 10) || act.activity_date,
-                notes: act.notes,
+            setStatusUpdatingId(activityToComplete.id);
+            await updateActivity(activityToComplete.id, {
+                planting_id: activityToComplete.planting_id,
+                activity_type: toApiActivityType(activityToComplete.activity_type),
+                activity_date: activityToComplete.activity_date?.slice(0, 10) || activityToComplete.activity_date,
+                notes: activityToComplete.notes,
                 status: nextStatus
             });
             await fetchData();
@@ -199,6 +184,7 @@ const Activities = () => {
             setError(err.response?.data?.message || err.response?.data || 'Failed to update activity status. Please try again.');
         } finally {
             setStatusUpdatingId(null);
+            setActivityToComplete(null);
         }
     };
 
@@ -264,12 +250,11 @@ const Activities = () => {
             )}
 
             {loading ? (
-                <div className="flex items-center justify-center h-48">
-                    <div className="flex flex-col items-center gap-3">
-                        <div className="w-8 h-8 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
-                        <p className="text-gray-400 text-sm">Loading activities...</p>
-                    </div>
-                </div>
+                <SkeletonTable 
+                    rows={6} 
+                    cols={7}
+                    columnHeaders={['Activity Type', 'Planting', 'Activity Date', 'Performed By', 'Notes', 'Status', 'Actions']}
+                />
             ) : (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
                     {visibleActivities.length === 0 ? (
@@ -313,7 +298,6 @@ const Activities = () => {
                                             acc[key] = {
                                                 plantingId: act.planting_id,
                                                 plantingVariety: act.planting_variety || 'Unassigned Plot',
-                                                fieldId: act.field_id,
                                                 activities: []
                                             };
                                         }
@@ -323,8 +307,8 @@ const Activities = () => {
                                 ).map((group) => {
                                     const isExpanded = expandedPlantingId === group.plantingId;
                                     const headerLabel = group.plantingVariety;
-                                    const subLabel = group.fieldId ? `Field #${group.fieldId}` : 'Unlinked field';
                                     const isArchivedGroup = group.activities.length > 0 && group.activities.every(isCompletedActivity);
+                                    const subLabel = group.activities[0]?.field_name || 'Unassigned Field';
 
                                     return (
                                         <div
@@ -397,25 +381,22 @@ const Activities = () => {
                                                                     <p className="text-xs text-gray-500 whitespace-nowrap">
                                                                         {act.activity_date?.slice(0, 10) || '—'}
                                                                     </p>
-                                                                </div>
-                                                                <div className="mt-2 flex items-center justify-end">
-                                                                    <label
-                                                                        className={`inline-flex items-center gap-2 text-[11px] ${
-                                                                            isCompleted ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 cursor-pointer'
-                                                                        }`}
-                                                                    >
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked={isCompleted}
-                                                                            disabled={statusUpdatingId === act.id || isCompleted}
-                                                                            onChange={(e) =>
-                                                                                handleToggleStatus(act, e.target.checked)
-                                                                            }
-                                                                            className="h-3.5 w-3.5 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700"
-                                                                        />
-                                                                        <span>{isCompleted ? 'Completed (locked)' : 'Mark as completed'}</span>
-                                                                    </label>
-                                                                </div>
+                                                                                                                <div className="mt-2 flex items-center justify-end">
+                                                                    {!isCompleted && (
+                                                                        <label className="inline-flex items-center gap-2 text-[11px] text-gray-600 cursor-pointer">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={isCompleted}
+                                                                                disabled={statusUpdatingId === act.id}
+                                                                                onChange={(e) =>
+                                                                                    handleToggleStatus(act, e.target.checked)
+                                                                                }
+                                                                                className="h-3.5 w-3.5 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700"
+                                                                            />
+                                                                            <span>Mark as completed</span>
+                                                                        </label>
+                                                                    )}
+                                                                </div>                  </div>
                                                             </div>
                                                         );
                                                     })}
@@ -438,58 +419,15 @@ const Activities = () => {
                     {/* Only show planting selector on create */}
                     {!editingItem && (
                         <div>
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Farm *</label>
-                            <select
-                                required
-                                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow"
-                                value={formData.farm_id}
-                                onChange={e => setFormData({ ...formData, farm_id: e.target.value, field_id: '', planting_id: '' })}
-                            >
-                                <option value="">Select Farm</option>
-                                {farms.map((farm) => (
-                                    <option key={farm.id} value={farm.id}>{farm.name}</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-                    {!editingItem && (
-                        <div>
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Field *</label>
-                            <div className="space-y-2">
-                                <select
-                                    required
-                                    disabled={!formData.farm_id}
-                                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow disabled:bg-gray-50 disabled:text-gray-400"
-                                    value={formData.field_id}
-                                    onChange={e => setFormData({ ...formData, field_id: e.target.value, planting_id: '' })}
-                                >
-                                    <option value="">{formData.farm_id ? 'Select Field' : 'Select Farm first'}</option>
-                                    {fieldsForSelectedFarm.map((f) => (
-                                        <option key={f.id} value={f.id}>{f.name}</option>
-                                    ))}
-                                </select>
-                                <button
-                                    type="button"
-                                    onClick={() => navigate('/fields')}
-                                    className="text-xs text-green-700 hover:text-green-800 font-medium hover:underline"
-                                >
-                                    + Add New Field
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                    {!editingItem && (
-                        <div>
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Target Planting *</label>
                             <select
                                 required
-                                disabled={!formData.field_id}
                                 className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow"
                                 value={formData.planting_id}
                                 onChange={e => setFormData({ ...formData, planting_id: e.target.value })}
                             >
-                                <option value="">{formData.field_id ? 'Select Active Planting' : 'Select Field first'}</option>
-                                {plantingsForSelectedField.map(p => (
+                                <option value="">Select Active Planting</option>
+                                {plantings.map(p => (
                                     <option key={p.id} value={p.id}>{p.variety} ({p.field_name})</option>
                                 ))}
                             </select>
@@ -524,7 +462,8 @@ const Activities = () => {
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Status *</label>
                             <select
                                 required
-                                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow"
+                                disabled={editingItem && editingItem.status === 'completed'}
+                                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow disabled:bg-gray-50 disabled:text-gray-500"
                                 value={formData.status}
                                 onChange={e => setFormData({ ...formData, status: e.target.value })}
                             >
@@ -552,6 +491,21 @@ const Activities = () => {
                     </div>
                 </form>
             </Modal>
+
+            <ConfirmDialog
+                isOpen={isConfirmOpen}
+                onClose={() => {
+                    setIsConfirmOpen(false);
+                    setActivityToComplete(null);
+                }}
+                onConfirm={confirmCompleteActivity}
+                title="Complete Activity"
+                message={`Are you sure you want to mark "${activityToComplete?.activity_type?.replaceAll('_', ' ')}" as completed? This action is locked and cannot be undone.`}
+                confirmText="Confirm"
+                confirmColor="bg-green-700 hover:bg-green-800 shadow-green-700/30 text-white"
+                iconBg="bg-green-100 text-green-700"
+                icon={<CheckCircle size={32} />}
+            />
         </div>
     );
 };

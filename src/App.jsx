@@ -1,14 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './context/AuthContext';
+import useAuth from './context/useAuth';
 import Layout from './components/Layout';
 import Landing from './pages/Landing';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import ResetPassword from './pages/ResetPassword';
-import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
-import Farms from './pages/Farms';
-import Fields from './pages/Fields';
 import Plantings from './pages/Plantings';
 import Activities from './pages/Activities';
 import Harvests from './pages/Harvests';
@@ -17,38 +11,20 @@ import Analytics from './pages/Analytics';
 const ProtectedRoute = ({ children }) => {
   const { token, isInitializing } = useAuth();
   if (isInitializing) return null;
-  return token ? children : <Navigate to="/login" />;
+  return token ? children : <Navigate to="/" />;
 };
 
 function App() {
   return (
     <Routes>
-      {/* Public Routes */}
+      {/* Admin Login Landing Page */}
       <Route path="/" element={<Landing />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Protected Routes */}
       <Route path="/dashboard" element={
         <ProtectedRoute>
           <Layout title="Dashboard">
             <Dashboard />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/farms" element={
-        <ProtectedRoute>
-          <Layout title="Farms Management">
-            <Farms />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/fields" element={
-        <ProtectedRoute>
-          <Layout title="Fields Management">
-            <Fields />
           </Layout>
         </ProtectedRoute>
       } />
@@ -81,7 +57,7 @@ function App() {
         </ProtectedRoute>
       } />
 
-      {/* Fallback */}
+      {/* Fallback - redirect unknown routes to home */}
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
