@@ -4,6 +4,7 @@ import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Badge from '../components/Badge';
 import DownwardSelect from '../components/DownwardSelect';
+import MonthPicker from '../components/MonthPicker';
 import {
     getPlantings, createPlanting, updatePlanting, deletePlanting, getVarieties
 } from '../services/api';
@@ -322,8 +323,8 @@ const Plantings = () => {
             )}
 
             {loading ? (
-                <SkeletonTable 
-                    rows={6} 
+                <SkeletonTable
+                    rows={6}
                     cols={7}
                     columnHeaders={['Variety', 'Field', 'Season', 'Growth Stage', 'Planting Date', 'Expected Harvest', 'Actions']}
                 />
@@ -365,13 +366,13 @@ const Plantings = () => {
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2">
                                                     <div className="font-bold text-gray-900 flex flex-wrap items-center gap-1.5">
-                                                    {p.variety}
-                                                    {!!Number(p.growth_plan_manual_override) && (
-                                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-800 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
-                                                            Manual plan
-                                                        </span>
-                                                    )}
-                                                </div>
+                                                        {p.variety}
+                                                        {!!Number(p.growth_plan_manual_override) && (
+                                                            <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-800 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
+                                                                Manual plan
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                     {showCompletedPlantings && isCompletedPlanting(p) && (
                                                         <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
                                                             Archived
@@ -421,7 +422,12 @@ const Plantings = () => {
                 </div>
             )}
 
-            <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingItem ? 'Edit Planting' : 'Log New Planting'}>
+            <Modal 
+                isOpen={isModalOpen} 
+                onClose={() => setIsModalOpen(false)} 
+                title={editingItem ? 'Edit Planting' : 'Log New Planting'}
+                maxWidth="max-w-md md:max-w-4xl"
+            >
                 <form onSubmit={handleSave} className="space-y-4">
                     {formError && (
                         <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">{formError}</div>
@@ -434,9 +440,9 @@ const Plantings = () => {
                             </span>
                         </div>
                     )}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         {/* Field name (managed within Plantings; no separate Fields module) */}
-                        <div className="col-span-2">
+                        <div className="col-span-1 md:col-span-2">
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Field Name *</label>
                             <input
                                 required
@@ -451,7 +457,7 @@ const Plantings = () => {
                                 Field details are tracked per planting record (Fields page removed).
                             </p>
                         </div>
-                        <div className="col-span-2">
+                        <div className="col-span-1">
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Variety Class *</label>
                             <select
                                 required
@@ -475,7 +481,7 @@ const Plantings = () => {
                                 </p>
                             )}
                         </div>
-                        <div className="col-span-2">
+                        <div className="col-span-1 md:col-span-2">
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Rice Variety *</label>
                             {/* DownwardSelect always opens below — scoped fix for Irrigated/Lowland flipping */}
                             <DownwardSelect
@@ -507,13 +513,12 @@ const Plantings = () => {
                         {/* Planting date */}
                         <div>
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Planting Date *</label>
-                            <input
-                                required
-                                type="date"
-                                disabled={!!editingItem && isCompletedPlanting(editingItem)}
-                                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow disabled:bg-gray-50"
+                            <MonthPicker
+                                id="planting-date-picker"
                                 value={formData.planting_date}
                                 onChange={e => setFormData({ ...formData, planting_date: e.target.value })}
+                                disabled={!!editingItem && isCompletedPlanting(editingItem)}
+                                required
                             />
                         </div>
                         <div>
@@ -553,7 +558,7 @@ const Plantings = () => {
                             />
                             <p className="text-xs text-gray-500 mt-1">Delays or advances (e.g. weather): shifts expected harvest.</p>
                         </div>
-                        <div className="col-span-2 flex items-start gap-2">
+                        <div className="col-span-1 md:col-span-3 flex items-start gap-2">
                             <input
                                 id="growth-manual-override"
                                 type="checkbox"
@@ -569,7 +574,7 @@ const Plantings = () => {
                                 </span>
                             </label>
                         </div>
-                        <div className="col-span-2">
+                        <div className="col-span-1">
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Expected harvest (computed)</label>
                             <input
                                 type="text"
@@ -580,7 +585,7 @@ const Plantings = () => {
                             <p className="text-xs text-gray-500 mt-1">Planting date + growth days + adjustment. Saved by the server on submit.</p>
                         </div>
                         {(!editingItem || !isCompletedPlanting(editingItem)) && (
-                            <div className="col-span-2 border border-dashed border-gray-200 dark:border-slate-700 rounded-lg p-3 bg-white dark:bg-slate-900">
+                            <div className="col-span-1 md:col-span-3 border border-dashed border-gray-200 dark:border-slate-700 rounded-lg p-3 bg-white dark:bg-slate-900">
                                 <p className="text-sm font-medium text-gray-900 dark:text-slate-100 mb-1">Generate selected system activities now (optional)</p>
                                 <p className="text-xs text-gray-600 dark:text-slate-300 mb-2">
                                     Inserts only <strong>missing</strong> template slots (idempotent). Useful for Planned plantings or early field work before setting lifecycle to Active.
@@ -601,7 +606,7 @@ const Plantings = () => {
                             </div>
                         )}
                         {!editingItem ? (
-                            <div className="col-span-2">
+                            <div className="col-span-1 md:col-span-2">
                                 <label className="text-sm font-medium text-gray-700 mb-1 block">Lifecycle *</label>
                                 <select
                                     required
@@ -618,7 +623,7 @@ const Plantings = () => {
                                 </p>
                             </div>
                         ) : (
-                            <div className="col-span-2">
+                            <div className="col-span-1 md:col-span-2">
                                 <label className="text-sm font-medium text-gray-700 mb-1 block">Lifecycle state *</label>
                                 <select
                                     required
@@ -666,7 +671,7 @@ const Plantings = () => {
                         </div>
                         {/* Growth stage info — read-only */}
                         {editingItem && (
-                            <div className="col-span-2">
+                            <div className="col-span-1 md:col-span-3">
                                 <p className="text-xs text-gray-400 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
                                     🌱 <strong>Growth stage</strong> (badge) is a display hint from lifecycle and optional recorded stage — not driven by calendar formulas alone.
                                 </p>

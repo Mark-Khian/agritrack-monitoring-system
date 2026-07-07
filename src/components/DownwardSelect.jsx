@@ -29,14 +29,33 @@ const DownwardSelect = ({
     const computePosition = useCallback(() => {
         if (!triggerRef.current) return;
         const rect = triggerRef.current.getBoundingClientRect();
-        setPanelStyle({
-            position: 'fixed',
-            top: rect.bottom + 4,          // 4px gap below trigger
-            left: rect.left,
-            width: rect.width,
-            zIndex: 9999,
-            maxHeight: maxDropdownH,
-        });
+        const viewportH = window.innerHeight;
+
+        const spaceBelow = viewportH - rect.bottom - 16; // 16px safety margin
+        const spaceAbove = rect.top - 16;
+
+        // Open upward if space below is limited AND space above is greater
+        const openUpward = spaceBelow < 150 && spaceAbove > spaceBelow;
+
+        if (openUpward) {
+            setPanelStyle({
+                position: 'fixed',
+                bottom: viewportH - rect.top + 4, // 4px gap above trigger
+                left: rect.left,
+                width: rect.width,
+                zIndex: 9999,
+                maxHeight: Math.min(spaceAbove, maxDropdownH),
+            });
+        } else {
+            setPanelStyle({
+                position: 'fixed',
+                top: rect.bottom + 4,             // 4px gap below trigger
+                left: rect.left,
+                width: rect.width,
+                zIndex: 9999,
+                maxHeight: Math.min(spaceBelow, maxDropdownH),
+            });
+        }
     }, [maxDropdownH]);
 
     const openPanel = () => {
@@ -140,10 +159,7 @@ const DownwardSelect = ({
                                     key={opt.value}
                                     role="option"
                                     aria-selected={String(opt.value) === String(value)}
-                                    onPointerDown={(e) => {
-                                        e.preventDefault(); // prevent blur before click
-                                        handleSelect(opt.value);
-                                    }}
+                                    onClick={() => handleSelect(opt.value)}
                                     className={[
                                         'px-4 py-2 cursor-pointer transition-colors duration-100',
                                         String(opt.value) === String(value)

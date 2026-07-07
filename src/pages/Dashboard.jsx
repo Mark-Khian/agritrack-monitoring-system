@@ -33,7 +33,8 @@ import {
     getWeather
 } from '../services/api';
 
-const API = 'http://localhost:5000/api/v1';
+const API_HOST = window.location.hostname;
+const API = `http://${API_HOST}:5000/api/v1`;
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
 
 const PLANTING_VARIETY_CLASS_FILTERS = [
@@ -335,29 +336,33 @@ const Dashboard = () => {
                 </div>
 
                 {/* Plot Overview Skeleton */}
-                <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm space-y-4">
-                    <div className="flex items-start justify-between">
-                        <div className="space-y-2">
-                            <SkeletonBox width="w-40" height="h-6" rounded="rounded" />
-                            <SkeletonBox width="w-96" height="h-3" rounded="rounded" />
-                        </div>
-                        <div className="flex gap-2">
-                            <SkeletonBox width="w-24" height="h-8" rounded="rounded-xl" />
-                            <SkeletonBox width="w-24" height="h-8" rounded="rounded-xl" />
-                        </div>
-                    </div>
+                <div className="grid gap-6 lg:grid-cols-3 mt-6">
+                    <div className="lg:col-span-3">
+                        <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm space-y-4">
+                            <div className="flex items-start justify-between">
+                                <div className="space-y-2">
+                                    <SkeletonBox width="w-40" height="h-6" rounded="rounded" />
+                                    <SkeletonBox width="w-96" height="h-3" rounded="rounded" />
+                                </div>
+                                <div className="flex gap-2">
+                                    <SkeletonBox width="w-24" height="h-8" rounded="rounded-xl" />
+                                    <SkeletonBox width="w-24" height="h-8" rounded="rounded-xl" />
+                                </div>
+                            </div>
 
-                    {/* Search and filters skeleton */}
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                        <SkeletonBox width="w-full sm:w-72" height="h-9" rounded="rounded-xl" />
-                        <SkeletonBox width="w-40" height="h-9" rounded="rounded-xl" />
-                    </div>
+                            {/* Search and filters skeleton */}
+                            <div className="flex flex-col gap-2 sm:flex-row">
+                                <SkeletonBox width="w-full sm:w-72" height="h-9" rounded="rounded-xl" />
+                                <SkeletonBox width="w-40" height="h-9" rounded="rounded-xl" />
+                            </div>
 
-                    {/* Plot cards grid skeleton */}
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 mt-4">
-                        {Array.from({ length: 6 }).map((_, i) => (
-                            <SkeletonDashboardPlotCard key={i} />
-                        ))}
+                            {/* Plot cards grid skeleton */}
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 mt-4">
+                                {Array.from({ length: 6 }).map((_, i) => (
+                                    <SkeletonDashboardPlotCard key={i} />
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -675,6 +680,36 @@ const Dashboard = () => {
         URL.revokeObjectURL(url);
     };
 
+    const statCards = [
+        { label: 'Active Plantings', value: stats.plantings, icon: Sprout, accent: '#16a34a', iconBg: '#f0fdf4', path: '/plantings', iconColor: '#16a34a' },
+        { label: 'Total Harvests', value: stats.harvests, icon: Wheat, accent: '#d97706', iconBg: '#fffbeb', path: '/harvests', iconColor: '#d97706' },
+        { label: 'Total Activities', value: stats.activities, icon: Tractor, accent: '#7c3aed', iconBg: '#f5f3ff', path: '/activities', iconColor: '#7c3aed' },
+    ];
+
+    const renderStatCard = (card) => {
+        const Icon = card.icon;
+        return (
+            <button
+                key={card.label}
+                type="button"
+                onClick={() => navigate(card.path)}
+                className="group relative flex flex-col items-center justify-center gap-2 rounded-2xl bg-white border border-gray-100 shadow-sm p-3 text-center transition-colors hover:bg-gray-50 md:flex-row md:items-center md:justify-start md:text-left md:gap-4 md:px-5 md:py-4 w-full"
+            >
+                <span
+                    className="absolute left-0 top-0 w-full h-[3px] rounded-t-2xl md:h-full md:w-[4px] md:rounded-l-2xl md:rounded-t-none"
+                    style={{ backgroundColor: card.accent }}
+                />
+                <span className="relative z-10 flex h-9 w-9 items-center justify-center rounded-xl md:h-10 md:w-10" style={{ backgroundColor: card.iconBg }}>
+                    <Icon size={18} className="md:size-[20px]" style={{ color: card.iconColor }} />
+                </span>
+                <span className="relative z-10 flex flex-col items-center md:items-start">
+                    <span className="block text-xl font-bold text-gray-900 leading-none md:text-2xl">{card.value}</span>
+                    <span className="mt-1 block text-[10px] font-medium text-gray-500 leading-tight md:text-xs md:text-gray-600 md:mt-2">{card.label}</span>
+                </span>
+            </button>
+        );
+    };
+
     return (
         <div className="space-y-6 lg:space-y-8 bg-[#f5f5f0] min-h-full text-gray-900">
             {/* Header */}
@@ -688,8 +723,8 @@ const Dashboard = () => {
                 </p>
             </div>
 
-            {/* Mobile-only Weather Widget */}
-            <div className="lg:hidden">
+            {/* Weather Widget (Horizontal on Desktop, Vertical on Mobile) */}
+            <div className="w-full">
                 <WeatherWidget
                     location={weatherLocation}
                     variant="dashboard"
@@ -722,35 +757,9 @@ const Dashboard = () => {
                 </div>
             )}
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
-                {[
-                    { label: 'Active Plantings', value: stats.plantings, icon: Sprout, accent: '#16a34a', iconBg: '#f0fdf4', path: '/plantings', iconColor: '#16a34a' },
-                    { label: 'Total Harvests', value: stats.harvests, icon: Wheat, accent: '#d97706', iconBg: '#fffbeb', path: '/harvests', iconColor: '#d97706' },
-                    { label: 'Total Activities', value: stats.activities, icon: Tractor, accent: '#7c3aed', iconBg: '#f5f3ff', path: '/activities', iconColor: '#7c3aed' },
-                ].map((card) => {
-                    const Icon = card.icon;
-                    return (
-                        <button
-                            key={card.label}
-                            type="button"
-                            onClick={() => navigate(card.path)}
-                            className="group relative flex items-start gap-4 rounded-2xl bg-white border border-gray-100 shadow-sm px-5 py-4 text-left transition-colors hover:bg-gray-50"
-                        >
-                            <span
-                                className="absolute left-0 top-0 h-full w-[4px] rounded-l-2xl"
-                                style={{ backgroundColor: card.accent }}
-                            />
-                            <span className="relative z-10 flex h-10 w-10 items-center justify-center rounded-xl" style={{ backgroundColor: card.iconBg }}>
-                                <Icon size={20} style={{ color: card.iconColor }} />
-                            </span>
-                            <span className="relative z-10">
-                                <span className="block text-2xl font-bold text-gray-900 leading-none">{card.value}</span>
-                                <span className="mt-2 block text-xs font-medium text-gray-600">{card.label}</span>
-                            </span>
-                        </button>
-                    );
-                })}
+            {/* Summary Cards (Mobile/Tablet Only) */}
+            <div className="grid grid-cols-3 gap-2 md:grid-cols-2 lg:hidden md:gap-4 lg:gap-6">
+                {statCards.map(renderStatCard)}
             </div>
 
 
@@ -876,9 +885,76 @@ const Dashboard = () => {
                             )}
                         </div>
                     </div>
+                </div>
 
+                {/* Right column of Grid 1: Crop Lifecycle */}
+                <div className="lg:col-span-1 space-y-6">
+
+                    {/* Crop Lifecycle */}
+                    <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <h2 className="text-lg font-bold">Active Planting</h2>
+                                <p className="mt-1 text-sm text-gray-600">
+                                    {mostRecentPlanting
+                                        ? `${mostRecentPlanting.variety || 'Variety'}${mostRecentPlanting.field_name ? ` • ${mostRecentPlanting.field_name}` : ''}`
+                                        : 'No active planting found'}
+                                </p>
+                            </div>
+                            <Layers className="h-6 w-6 text-emerald-700" />
+                        </div>
+
+                        {mostRecentPlanting && (
+                            <div className="mt-4">
+                                <div className="flex items-center justify-between text-[10px] lg:text-[9px] xl:text-[10px] font-bold uppercase tracking-wider text-gray-400 px-1">
+                                    {lifecycleStageLabels.map((label, idx) => {
+                                        const fullLabel = FULL_STAGE_NAMES[idx].toUpperCase();
+                                        const displayFullLabel = fullLabel === 'REPRODUCTIVE' ? 'REPROD.' : fullLabel;
+                                        return (
+                                            <span
+                                                key={label}
+                                                className={idx === lifecycleStageIndex ? 'text-emerald-700 dark:text-emerald-400 font-extrabold' : 'text-gray-400 dark:text-gray-600'}
+                                                title={FULL_STAGE_NAMES[idx]}
+                                            >
+                                                <span className="lg:hidden">{label}</span>
+                                                <span className="hidden lg:inline">{displayFullLabel}</span>
+                                            </span>
+                                        );
+                                    })}
+                                </div>
+                                <div className="mt-2 h-2 w-full rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden">
+                                    <div
+                                        className="h-full bg-emerald-600"
+                                        style={{ width: `${((lifecycleStageIndex + 1) / 5) * 100}%` }}
+                                    />
+                                </div>
+
+                                <div className="mt-3 flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                                    <div>
+                                        Stage: <span className="font-bold text-gray-900 dark:text-white capitalize">{FULL_STAGE_NAMES[lifecycleStageIndex]?.toLowerCase()}</span>
+                                    </div>
+                                    <div>
+                                        <span className="font-bold text-gray-900 dark:text-white">{Math.min(totalLifecycleDays, currentLifecycleDay)}</span> of{' '}
+                                        <span className="font-bold text-gray-900 dark:text-white">{totalLifecycleDays}</span> days
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    {/* Desktop-only Stat Cards Stack */}
+                    <div className="hidden lg:block space-y-6">
+                        {renderStatCard(statCards[0])} {/* Active Plantings */}
+                        {renderStatCard(statCards[2])} {/* Total Activities */}
+                        {renderStatCard(statCards[1])} {/* Total Harvests */}
+                    </div>
+                </div>
+            </div>
+
+            {/* Grid Row 2: Upcoming Activities and Critical Alerts side-by-side stretching to equal height */}
+            <div className="grid gap-6 lg:grid-cols-3 mt-6">
+                <div className="lg:col-span-2">
                     {/* Upcoming Activities */}
-                    <div className="rounded-2xl bg-white border border-gray-100 overflow-hidden">
+                    <div className="rounded-2xl bg-white border border-gray-100 overflow-hidden h-full">
                         <div className="px-5 py-4 border-b border-gray-100">
                             <h2 className="text-lg font-bold">Upcoming Activities</h2>
                         </div>
@@ -968,7 +1044,57 @@ const Dashboard = () => {
                             )}
                         </div>
                     </div>
+                </div>
 
+                {/* Right column of Grid 2: Critical Alerts */}
+                <div className="lg:col-span-1">
+                    <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm h-full">
+                        <h2 className="text-lg font-bold">Critical Alerts</h2>
+
+                        <div className="mt-4 space-y-3">
+                            <div className={`flex items-start gap-3 rounded-xl p-4 ${overdueHarvestCount > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+                                <AlertTriangle className={`mt-0.5 h-5 w-5 ${overdueHarvestCount > 0 ? 'text-red-600' : 'text-gray-500'}`} />
+                                <div>
+                                    <p className="font-bold text-gray-900">Overdue Harvest</p>
+                                    <p className={`mt-1 text-xs ${overdueHarvestCount > 0 ? 'text-red-700' : 'text-gray-600'}`}>
+                                        {overdueHarvestCount > 0
+                                            ? `${overdueHarvestCount} planting(s) are past their expected harvest date. Review field conditions and harvest plans.`
+                                            : 'No plantings are past expected harvest date.'}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-start gap-3 rounded-xl p-4 bg-gray-50">
+                                <Clock className="mt-0.5 h-5 w-5 text-gray-600" />
+                                <div>
+                                    <p className="font-bold text-gray-900">Pending Activities</p>
+                                    <p className="mt-1 text-xs text-gray-600">
+                                        {pendingActivitiesThisMonthCount} pending/ongoing activity(ies) scheduled for this month.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-start gap-3 rounded-xl p-4 bg-yellow-50">
+                                <Info className="mt-0.5 h-5 w-5 text-yellow-700" />
+                                <div>
+                                    <p className="font-bold text-gray-900">
+                                        {activitiesThisMonthCount === 0 ? 'Low Activity' : 'Monthly Activity'}
+                                    </p>
+                                    <p className="mt-1 text-xs text-yellow-900/80">
+                                        {activitiesThisMonthCount === 0
+                                            ? 'No activities logged this month. Schedule key field operations to stay on track.'
+                                            : `${activitiesThisMonthCount} activity(ies) logged this month. Keep planning future tasks.`}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Grid Row 3: Plot Overview */}
+            <div className="grid gap-6 lg:grid-cols-3 mt-6">
+                <div className="lg:col-span-3">
                     {/* Plot Overview */}
                     {plantingsList.length > 0 && (
                         <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
@@ -1158,7 +1284,7 @@ const Dashboard = () => {
                                                                         </span>
                                                                     </div>
 
-                                                                    <div className="mt-3 space-y-2 h-full overflow-y-auto overscroll-contain pr-1">
+                                                                    <div className="mt-3 flex gap-3 overflow-x-auto pb-3 pr-1 overscroll-x-contain scrollbar-thin">
                                                                         {filteredExpandedActivities.length === 0 ? (
                                                                             <div className="text-sm text-gray-400 py-2">
                                                                                 No activities found for this plot.
@@ -1168,9 +1294,9 @@ const Dashboard = () => {
                                                                                 const statusBadge = getActivityStatusBadge(act);
                                                                                 const isSystem = !!act.is_system_generated;
                                                                                 const rowClass = isSystem
-                                                                                    ? 'bg-gray-50'
-                                                                                    : 'bg-emerald-50/60';
-                                                                                const textClass = isSystem ? 'text-gray-700' : 'text-emerald-900';
+                                                                                    ? 'bg-gray-50 border-gray-100 dark:bg-slate-900/60 dark:border-slate-800'
+                                                                                    : 'bg-emerald-50/60 border-emerald-100/60 dark:bg-emerald-950/20 dark:border-emerald-900/30';
+                                                                                const textClass = isSystem ? 'text-gray-700 dark:text-slate-200' : 'text-emerald-900 dark:text-emerald-400';
 
                                                                                 const activityLabel = normalize(act?.activity_type)
                                                                                     ? normalize(act.activity_type).replaceAll('_', ' ')
@@ -1179,31 +1305,35 @@ const Dashboard = () => {
                                                                                 return (
                                                                                     <div
                                                                                         key={act.id}
-                                                                                        className={`rounded-lg border border-gray-100 px-3 py-2 ${rowClass}`}
+                                                                                        className={`flex-shrink-0 w-64 rounded-xl border p-4 flex flex-col justify-between ${rowClass}`}
                                                                                     >
-                                                                                        <div className="flex items-start justify-between gap-3">
-                                                                                            <p className={`text-sm font-semibold truncate ${textClass}`}>
-                                                                                                {activityLabel}
+                                                                                        <div>
+                                                                                            <div className="flex items-start justify-between gap-2">
+                                                                                                <p className={`text-sm font-bold capitalize truncate ${textClass}`} title={activityLabel}>
+                                                                                                    {activityLabel}
+                                                                                                </p>
+                                                                                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${statusBadge.className}`}>
+                                                                                                    {statusBadge.label}
+                                                                                                </span>
+                                                                                            </div>
+
+                                                                                            {plotStage && isSystem && (
+                                                                                                <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500 font-medium leading-normal">
+                                                                                                    Stage: <span className="capitalize">{plotStage}</span>
+                                                                                                </p>
+                                                                                            )}
+
+                                                                                            <p className="mt-2 text-xs text-gray-600 dark:text-slate-300 line-clamp-3 leading-relaxed" title={act.notes}>
+                                                                                                <span className="font-semibold text-gray-400 dark:text-gray-500">Notes:</span> {act.notes || '—'}
                                                                                             </p>
-                                                                                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusBadge.className}`}>
-                                                                                                {statusBadge.label}
+                                                                                        </div>
+
+                                                                                        <div className="mt-3 pt-2 border-t border-gray-100/50 dark:border-slate-800/50 flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400">
+                                                                                            <span className="font-medium">Scheduled Date</span>
+                                                                                            <span className="font-bold text-gray-700 dark:text-slate-300 whitespace-nowrap">
+                                                                                                {act.activity_date ? act.activity_date.slice(0, 10) : '—'}
                                                                                             </span>
                                                                                         </div>
-
-                                                                                        <div className="mt-2 flex items-center justify-between gap-3">
-                                                                                            <p className="text-xs text-gray-600 truncate" title={act.notes}>
-                                                                                                Notes: {act.notes || '—'}
-                                                                                            </p>
-                                                                                            <p className="text-xs text-gray-500 whitespace-nowrap">
-                                                                                                {act.activity_date ? act.activity_date.slice(0, 10) : '—'}
-                                                                                            </p>
-                                                                                        </div>
-
-                                                                                        {plotStage && isSystem && (
-                                                                                            <p className="mt-2 text-[11px] text-gray-500">
-                                                                                                System activity for lifecycle stage: {plotStage}
-                                                                                            </p>
-                                                                                        )}
                                                                                     </div>
                                                                                 );
                                                                             })
@@ -1278,113 +1408,6 @@ const Dashboard = () => {
                     )}
                 </div>
 
-                {/* Right sidebar */}
-                <div className="lg:col-span-1 space-y-6">
-                    {/* Weather (Desktop-only) */}
-                    <div className="hidden lg:block">
-                        <WeatherWidget
-                            location={weatherLocation}
-                            variant="dashboard"
-                            rainExpected={rainExpected}
-                        />
-                    </div>
-
-                    {/* Crop Lifecycle */}
-                    <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
-                        <div className="flex items-start justify-between gap-3">
-                            <div>
-                                <h2 className="text-lg font-bold">Active Planting</h2>
-                                <p className="mt-1 text-sm text-gray-600">
-                                    {mostRecentPlanting
-                                        ? `${mostRecentPlanting.variety || 'Variety'}${mostRecentPlanting.field_name ? ` • ${mostRecentPlanting.field_name}` : ''}`
-                                        : 'No active planting found'}
-                                </p>
-                            </div>
-                            <Layers className="h-6 w-6 text-emerald-700" />
-                        </div>
-
-                        {mostRecentPlanting && (
-                            <div className="mt-4">
-                                <div className="flex items-center justify-between text-[10px] lg:text-[9px] xl:text-[10px] font-bold uppercase tracking-wider text-gray-400 px-1">
-                                    {lifecycleStageLabels.map((label, idx) => {
-                                        const fullLabel = FULL_STAGE_NAMES[idx].toUpperCase();
-                                        const displayFullLabel = fullLabel === 'REPRODUCTIVE' ? 'REPROD.' : fullLabel;
-                                        return (
-                                            <span
-                                                key={label}
-                                                className={idx === lifecycleStageIndex ? 'text-emerald-700 dark:text-emerald-400 font-extrabold' : 'text-gray-400 dark:text-gray-600'}
-                                                title={FULL_STAGE_NAMES[idx]}
-                                            >
-                                                <span className="lg:hidden">{label}</span>
-                                                <span className="hidden lg:inline">{displayFullLabel}</span>
-                                            </span>
-                                        );
-                                    })}
-                                </div>
-                                <div className="mt-2 h-2 w-full rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden">
-                                    <div
-                                        className="h-full bg-emerald-600"
-                                        style={{ width: `${((lifecycleStageIndex + 1) / 5) * 100}%` }}
-                                    />
-                                </div>
-
-                                <div className="mt-3 flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
-                                    <div>
-                                        Stage: <span className="font-bold text-gray-900 dark:text-white capitalize">{FULL_STAGE_NAMES[lifecycleStageIndex]?.toLowerCase()}</span>
-                                    </div>
-                                    <div>
-                                        <span className="font-bold text-gray-900 dark:text-white">{Math.min(totalLifecycleDays, currentLifecycleDay)}</span> of{' '}
-                                        <span className="font-bold text-gray-900 dark:text-white">{totalLifecycleDays}</span> days
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Critical Alerts */}
-                    <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
-                        <h2 className="text-lg font-bold">Critical Alerts</h2>
-
-                        <div className="mt-4 space-y-3">
-                            <div className={`flex items-start gap-3 rounded-xl p-4 ${overdueHarvestCount > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
-                                <AlertTriangle className={`mt-0.5 h-5 w-5 ${overdueHarvestCount > 0 ? 'text-red-600' : 'text-gray-500'}`} />
-                                <div>
-                                    <p className="font-bold text-gray-900">Overdue Harvest</p>
-                                    <p className={`mt-1 text-xs ${overdueHarvestCount > 0 ? 'text-red-700' : 'text-gray-600'}`}>
-                                        {overdueHarvestCount > 0
-                                            ? `${overdueHarvestCount} planting(s) are past their expected harvest date. Review field conditions and harvest plans.`
-                                            : 'No plantings are past expected harvest date.'}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex items-start gap-3 rounded-xl p-4 bg-gray-50">
-                                <Clock className="mt-0.5 h-5 w-5 text-gray-600" />
-                                <div>
-                                    <p className="font-bold text-gray-900">Pending Activities</p>
-                                    <p className="mt-1 text-xs text-gray-600">
-                                        {pendingActivitiesThisMonthCount} pending/ongoing activity(ies) scheduled for this month.
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex items-start gap-3 rounded-xl p-4 bg-yellow-50">
-                                <Info className="mt-0.5 h-5 w-5 text-yellow-700" />
-                                <div>
-                                    <p className="font-bold text-gray-900">
-                                        {activitiesThisMonthCount === 0 ? 'Low Activity' : 'Monthly Activity'}
-                                    </p>
-                                    <p className="mt-1 text-xs text-yellow-900/80">
-                                        {activitiesThisMonthCount === 0
-                                            ? 'No activities logged this month. Schedule key field operations to stay on track.'
-                                            : `${activitiesThisMonthCount} activity(ies) logged this month. Keep planning future tasks.`}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                </div>
             </div>
         </div>
     );

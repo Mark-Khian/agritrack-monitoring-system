@@ -1,3 +1,4 @@
+
 -- Migration 002: Add variety_class to plantings for tiered variety selection
 -- Run once before starting the server
 

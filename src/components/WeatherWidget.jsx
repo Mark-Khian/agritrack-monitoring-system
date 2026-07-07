@@ -38,84 +38,84 @@ const getWeatherIcon = (code, size = 28, hour = new Date().getHours()) => {
 
     // ── Clear / cloudy — time-of-day aware ───────────────────────────────
     const isNight = hour >= 19 || hour < 6;          // 7 PM – 5:59 AM
-    const isDawn  = hour >= 6  && hour < 9;           // 6 AM – 8:59 AM
-    const isDusk  = hour >= 17 && hour < 19;          // 5 PM – 6:59 PM
+    const isDawn = hour >= 6 && hour < 9;           // 6 AM – 8:59 AM
+    const isDusk = hour >= 17 && hour < 19;          // 5 PM – 6:59 PM
 
     if (isNight) return <Moon size={size} />;         // night   → moon
-    if (isDawn)  return <Sunrise size={size} />;      // dawn    → sunrise
-    if (isDusk)  return <Sunset size={size} />;       // dusk    → sunset
+    if (isDawn) return <Sunrise size={size} />;      // dawn    → sunrise
+    if (isDusk) return <Sunset size={size} />;       // dusk    → sunset
 
     // Daytime
     if (code === 800) return <Sun size={size} />;     // clear sky
-    if (code > 800)   return <CloudSun size={size} />; // partly cloudy
+    if (code > 800) return <CloudSun size={size} />; // partly cloudy
     return <CloudSun size={size} />;
 };
 
 const getWeatherBg = (code, hour) => {
     const isNight = hour >= 19 || hour < 6;
     if (isNight) return 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)';
-    if (code >= 200 && code < 300) return 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)';
-    if (code >= 300 && code < 400) return 'linear-gradient(135deg, #2c3e50 0%, #3d5a6e 50%, #4a708b 100%)';
-    if (code >= 500 && code < 600) return 'linear-gradient(135deg, #1f2937 0%, #374151 50%, #4b5563 100%)';
-    if (code >= 600 && code < 700) return 'linear-gradient(135deg, #94a3b8 0%, #cbd5e1 50%, #e2e8f0 100%)';
-    if (code >= 700 && code < 800) return 'linear-gradient(135deg, #4b5563 0%, #6b7280 50%, #9ca3af 100%)';
+
+    // Rain / Storm
+    if (code >= 200 && code < 600) return 'linear-gradient(135deg, #1f2937 0%, #374151 50%, #4b5563 100%)';
+    // Clear Sky
     if (code === 800) return 'linear-gradient(135deg, #0369a1 0%, #0ea5e9 50%, #38bdf8 100%)';
-    if (code === 801 || code === 802) return 'linear-gradient(135deg, #0f4c2a 0%, #1a7a46 50%, #22a05a 100%)';
-    if (code === 803 || code === 804) return 'linear-gradient(135deg, #374151 0%, #4b5563 50%, #6b7280 100%)';
+    // Cloudy (and other codes)
     return 'linear-gradient(135deg, #0f4c2a 0%, #1a7a46 50%, #22a05a 100%)';
 };
 
 const getWeatherBgImage = (code, hour) => {
     const isNight = hour >= 19 || hour < 6;
-    
-    // Night skies (100% pure sky/stars, no buildings/ground/trees)
+
+    const isRainy = (code >= 200 && code < 700);
+    const isClear = (code === 800);
+    const isCloudy = (code > 800 || (code >= 700 && code < 800));
+
     if (isNight) {
-        // Rain/Thunderstorm/Drizzle at night (pure stormy dark night sky)
-        if (code >= 200 && code < 600) {
-            return 'https://images.unsplash.com/photo-1485594050903-8e8ee7b071a8?q=80&w=600&auto=format&fit=crop';
+        if (isRainy) {
+            return 'https://images.unsplash.com/photo-1485594050903-8e8ee7b071a8?q=80&w=1600&auto=format&fit=crop';
         }
-        // Snow at night (falling snow on pure dark sky)
-        if (code >= 600 && code < 700) {
-            return 'https://images.unsplash.com/photo-1418985991508-e47386d96a71?q=80&w=600&auto=format&fit=crop';
+        if (isCloudy) {
+            return 'https://images.unsplash.com/photo-1534274988757-a28bf1a57c17?q=80&w=1600&auto=format&fit=crop';
         }
-        // Fog/Mist at night (pure foggy night texture)
-        if (code >= 700 && code < 800) {
-            return 'https://images.unsplash.com/photo-1585506942812-e72b29cef712?q=80&w=600&auto=format&fit=crop';
+        // Clear night
+        return 'https://images.unsplash.com/photo-1538370965046-79c0d6907d47?q=80&w=1600&auto=format&fit=crop';
+    } else {
+        if (isRainy) {
+            return '/rainy_sky.jpg';
         }
-        // Clouds at night (pure dark night clouds)
-        if (code > 800) {
-            return 'https://images.unsplash.com/photo-1534274988757-a28bf1a57c17?q=80&w=600&auto=format&fit=crop';
+        if (isClear) {
+            return '/clear_sky.jpg';
         }
-        // Clear night (pure starry sky, no trees)
-        return 'https://images.unsplash.com/photo-1538370965046-79c0d6907d47?q=80&w=600&auto=format&fit=crop';
+        // Cloudy
+        return '/cloudy_sky.png';
     }
-
-    // Day skies (100% pure sky/clouds, no buildings/ground/trees)
-    // Rain/Thunderstorm/Drizzle (pure grey rainy sky/clouds)
-    if (code >= 200 && code < 600) {
-        return 'https://images.unsplash.com/photo-1515694346937-94d85e41e6f0?q=80&w=600&auto=format&fit=crop';
-    }
-    // Snow (falling snow on pure winter sky)
-    if (code >= 600 && code < 700) {
-        return 'https://images.unsplash.com/photo-1418985991508-e47386d96a71?q=80&w=600&auto=format&fit=crop';
-    }
-    // Fog/Mist/Atmospheric (pure fog/mist)
-    if (code >= 700 && code < 800) {
-        return 'https://images.unsplash.com/photo-1585506942812-e72b29cef712?q=80&w=600&auto=format&fit=crop';
-    }
-    // Clear Day (pure blue sky and sun)
-    if (code === 800) {
-        return 'https://images.unsplash.com/photo-1509114397022-ed747cca3f65?q=80&w=600&auto=format&fit=crop';
-    }
-    // Cloudy Day (pure clouds looking up, no ground/trees)
-    return 'https://images.unsplash.com/photo-1517999144091-3d9dca6d1e43?q=80&w=600&auto=format&fit=crop';
 };
 
-const getTextColor = (code, hour) => {
+const getWeatherBgVideo = (code, hour) => {
     const isNight = hour >= 19 || hour < 6;
-    if (!isNight && code >= 600 && code < 700) return '#1e293b';
-    return '#ffffff';
+    
+    const isRainy = (code >= 200 && code < 700);
+    const isClear = (code === 800);
+    const isCloudy = (code > 800 || (code >= 700 && code < 800));
+
+    if (isRainy) {
+        return '/rainy_sky.mp4';
+    }
+    if (isCloudy) {
+        return '/cloudy_sky.mp4';
+    }
+    if (isClear) {
+        if (isNight) {
+            return '/clear_night.mp4';
+        } else {
+            return '/clear_day.mp4';
+        }
+    }
+    // Fallback/Default
+    return '/clear_day.mp4';
 };
+
+const getTextColor = () => '#ffffff';
 
 const formatHour = (timestamp) => {
     const date = new Date(timestamp * 1000);
@@ -223,10 +223,10 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                 // ── Backend proxy route (farm location) ──────────────────────
                 const res = await getWeather(location);
                 const data = res.data;
-                current      = data.current;
+                current = data.current;
                 forecastList = data.forecast || [];
-                uviValue     = data.uvIndex ?? null;
-                daily        = groupForecastByDay(forecastList);
+                uviValue = data.uvIndex ?? null;
+                daily = groupForecastByDay(forecastList);
                 forecastList = forecastList.slice(0, 6);
             } else {
                 throw new Error('No location provided for weather widget.');
@@ -318,26 +318,28 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
 
     const code = weather.weather[0].id;
     const hour = now.getHours();
+    const isNight = hour >= 19 || hour < 6;
     const bg = getWeatherBg(code, hour);
     const bgImage = getWeatherBgImage(code, hour);
+    const bgVideo = getWeatherBgVideo(code, hour);
     const textColor = getTextColor(code, hour);
 
     // Dashboard decision-support card — 3-level visual hierarchy.
     if (variant === 'dashboard') {
-        const tempC       = weather?.main?.temp       ? Math.round(weather.main.temp)       : '--';
-        const feelsLike   = weather?.main?.feels_like ? Math.round(weather.main.feels_like) : null;
+        const tempC = weather?.main?.temp ? Math.round(weather.main.temp) : '--';
+        const feelsLike = weather?.main?.feels_like ? Math.round(weather.main.feels_like) : null;
         const description = weather?.weather?.[0]?.description || '';
-        const humidity    = weather?.main?.humidity   ?? '--';
-        const windKmh     = weather?.wind?.speed      != null ? Math.round(weather.wind.speed * 3.6) : null;
-        const rainProb    = rainChance ?? 0;
+        const humidity = weather?.main?.humidity ?? '--';
+        const windKmh = weather?.wind?.speed != null ? Math.round(weather.wind.speed * 3.6) : null;
+        const rainProb = rainChance ?? 0;
         const locationLabel = location || weather?.name || 'Farm Location';
 
         // ── Smart recommendation — highest-priority condition wins ────────────
         const rainIsHigh = typeof rainExpected === 'boolean' ? rainExpected : rainProb > 60;
-        const heatHigh   = typeof tempC === 'number' && tempC > 34;
-        const humidHigh  = typeof humidity === 'number' && humidity > 80;
-        const windHigh   = windKmh != null && windKmh > 25;
-        const isClear    = (code === 800 || code === 801 || code === 802) && !rainIsHigh;
+        const heatHigh = typeof tempC === 'number' && tempC > 34;
+        const humidHigh = typeof humidity === 'number' && humidity > 80;
+        const windHigh = windKmh != null && windKmh > 25;
+        const isClear = (code === 800 || code === 801 || code === 802) && !rainIsHigh;
 
         let rec, recAccent;
         if (rainIsHigh) {
@@ -361,96 +363,121 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
         }
 
         return (
-            <div 
-                className="rounded-2xl text-white overflow-hidden shadow-md"
+            <div
+                className="rounded-2xl text-white overflow-hidden shadow-md flex flex-col lg:flex-row lg:items-stretch lg:p-7 lg:gap-7 relative"
                 style={{
-                    background: `linear-gradient(135deg, rgba(15, 23, 42, 0.45) 0%, rgba(15, 23, 42, 0.65) 100%), url(${bgImage})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    backgroundRepeat: 'no-repeat',
+                    background: bg,
                 }}
             >
+                {bgVideo && (
+                    <video
+                        key={bgVideo}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            zIndex: 0,
+                            pointerEvents: 'none',
+                            opacity: isNight ? (bgVideo === '/clear_night.mp4' ? 0.38 : 0.15) : 0.38,
+                            filter: isNight && bgVideo !== '/clear_night.mp4' ? 'brightness(0.2) saturate(0.2) contrast(1.3)' : 'none',
+                        }}
+                    >
+                        <source src={bgVideo} type="video/mp4" />
+                    </video>
+                )}
 
                 {/* ── SECTION 1: Primary weather summary ── */}
-                <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3">
+                <div className="px-5 pt-4 pb-3 lg:px-0 lg:py-0 flex items-start lg:items-center justify-between gap-3 lg:w-80 lg:shrink-0 relative z-10">
                     <div className="min-w-0">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-300/70 mb-1">
+                        <p className="text-[10px] lg:text-[11px] font-bold uppercase tracking-widest text-emerald-300/70 mb-1.5">
                             Local Weather
                         </p>
                         {/* Dominant temperature */}
                         <div className="flex items-end gap-2 leading-none">
-                            <span className="text-[2.75rem] font-bold tracking-tight leading-none">
+                            <span className="text-[2.75rem] lg:text-[3.25rem] font-bold tracking-tight leading-none">
                                 {tempC}{typeof tempC === 'number' ? '°C' : ''}
                             </span>
                             {feelsLike !== null && (
-                                <span className="text-xs text-white/50 pb-1.5">
+                                <span className="text-xs lg:text-sm text-white/50 pb-1.5 lg:pb-2">
                                     Feels {feelsLike}°
                                 </span>
                             )}
                         </div>
                         {/* Condition + location */}
-                        <p className="mt-1 text-sm text-white/80 capitalize font-medium">{description}</p>
-                        <div className="mt-0.5 flex items-center gap-1 text-xs text-white/40">
-                            <MapPin size={10} />
+                        <p className="mt-1 lg:mt-1.5 text-sm lg:text-base text-white/80 capitalize font-medium">{description}</p>
+                        <div className="mt-0.5 lg:mt-1 flex items-center gap-1 text-xs lg:text-sm text-white/40">
+                            <MapPin size={10} className="lg:size-[12px]" />
                             <span className="truncate">{locationLabel}</span>
                         </div>
                     </div>
 
                     {/* Weather icon — time-of-day aware */}
-                    <div className="shrink-0 rounded-2xl bg-white/10 p-3 mt-1">
-                        {getWeatherIcon(code, 36, hour)}
+                    <div className="shrink-0 rounded-2xl bg-white/10 p-3 lg:p-4 mt-1">
+                        {getWeatherIcon(code, 44, hour)}
                     </div>
                 </div>
 
                 {/* Divider */}
-                <div className="border-t border-white/10 mx-5" />
+                <div className="border-t border-white/10 mx-5 lg:hidden relative z-10" />
+                <div className="hidden lg:block border-l border-white/10 self-stretch my-1 relative z-10" />
 
-                {/* ── SECTION 2: Key metrics grid (3-column) ── */}
-                <div className="px-5 py-3 grid grid-cols-3 gap-2">
-                    {/* Humidity */}
-                    <div className="rounded-xl bg-white/8 border border-white/10 px-3 py-2.5">
-                        <div className="flex items-center gap-1.5 text-emerald-200/70 mb-1">
-                            <Droplets size={13} />
-                            <span className="text-[10px] font-semibold uppercase tracking-wider">Humidity</span>
+                {/* Right side container for Desktop horizontal flow */}
+                <div className="flex-1 flex flex-col justify-between gap-3 lg:gap-4 relative z-10">
+
+                    {/* ── SECTION 2: Key metrics grid (3-column) ── */}
+                    <div className="px-5 py-3 lg:px-0 lg:py-0 grid grid-cols-3 gap-2 lg:gap-3">
+                        {/* Humidity */}
+                        <div className="rounded-xl bg-white/8 border border-white/10 px-3 py-2.5 lg:px-4 lg:py-3.5">
+                            <div className="flex items-center gap-1.5 text-emerald-200/70 mb-1">
+                                <Droplets size={13} className="lg:size-[15px]" />
+                                <span className="text-[10px] lg:text-[11px] font-semibold uppercase tracking-wider">Humidity</span>
+                            </div>
+                            <p className="text-lg lg:text-xl font-bold leading-none">{humidity}{typeof humidity === 'number' ? '%' : ''}</p>
                         </div>
-                        <p className="text-lg font-bold leading-none">{humidity}{typeof humidity === 'number' ? '%' : ''}</p>
-                    </div>
 
-                    {/* Rain probability */}
-                    <div className="rounded-xl bg-white/8 border border-white/10 px-3 py-2.5">
-                        <div className="flex items-center gap-1.5 text-blue-200/70 mb-1">
-                            <CloudRain size={13} />
-                            <span className="text-[10px] font-semibold uppercase tracking-wider">Rain</span>
+                        {/* Rain probability */}
+                        <div className="rounded-xl bg-white/8 border border-white/10 px-3 py-2.5 lg:px-4 lg:py-3.5">
+                            <div className="flex items-center gap-1.5 text-blue-200/70 mb-1">
+                                <CloudRain size={13} className="lg:size-[15px]" />
+                                <span className="text-[10px] lg:text-[11px] font-semibold uppercase tracking-wider">Rain</span>
+                            </div>
+                            <p className="text-lg lg:text-xl font-bold leading-none">{rainProb}%</p>
                         </div>
-                        <p className="text-lg font-bold leading-none">{rainProb}%</p>
-                    </div>
 
-                    {/* Wind speed */}
-                    <div className="rounded-xl bg-white/8 border border-white/10 px-3 py-2.5">
-                        <div className="flex items-center gap-1.5 text-white/50 mb-1">
-                            <Wind size={13} />
-                            <span className="text-[10px] font-semibold uppercase tracking-wider">Wind</span>
+                        {/* Wind speed */}
+                        <div className="rounded-xl bg-white/8 border border-white/10 px-3 py-2.5 lg:px-4 lg:py-3.5">
+                            <div className="flex items-center gap-1.5 text-white/50 mb-1">
+                                <Wind size={13} className="lg:size-[15px]" />
+                                <span className="text-[10px] lg:text-[11px] font-semibold uppercase tracking-wider">Wind</span>
+                            </div>
+                            <p className="text-lg lg:text-xl font-bold leading-none">
+                                {windKmh !== null ? `${windKmh}` : '--'}
+                                <span className="text-xs lg:text-sm font-normal ml-0.5 text-white/50">km/h</span>
+                            </p>
                         </div>
-                        <p className="text-lg font-bold leading-none">
-                            {windKmh !== null ? `${windKmh}` : '--'}
-                            <span className="text-xs font-normal ml-0.5 text-white/50">km/h</span>
-                        </p>
                     </div>
-                </div>
 
-                {/* ── SECTION 3: Smart recommendation banner ── */}
-                <div className="mx-5 mb-4 rounded-xl bg-white/8 border border-white/10 px-4 py-3 flex items-start gap-3">
-                    {/* Icon */}
-                    <div className="shrink-0 mt-0.5 rounded-lg bg-white/10 p-1.5">
-                        <Thermometer size={14} className="text-emerald-300" />
-                    </div>
-                    <div>
-                        <p className="text-[11px] font-bold uppercase tracking-widest text-white/50 mb-0.5">
-                            Recommended Action
-                        </p>
-                        <p className={`text-[13px] font-medium leading-snug ${recAccent}`}>
-                            {rec}
-                        </p>
+                    {/* ── SECTION 3: Smart recommendation banner ── */}
+                    <div className="mx-5 mb-4 lg:mx-0 lg:mb-0 rounded-xl bg-white/8 border border-white/10 px-4 py-3 lg:px-5 lg:py-4 flex items-start gap-3">
+                        {/* Icon */}
+                        <div className="shrink-0 mt-0.5 rounded-lg bg-white/10 p-1.5 lg:p-2">
+                            <Thermometer size={14} className="text-emerald-300 lg:size-[16px]" />
+                        </div>
+                        <div>
+                            <p className="text-[11px] lg:text-xs font-bold uppercase tracking-widest text-white/50 mb-0.5">
+                                Recommended Action
+                            </p>
+                            <p className={`text-[13px] lg:text-[15px] font-medium leading-snug ${recAccent}`}>
+                                {rec}
+                            </p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -479,19 +506,39 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
     return (
         <div style={{
             borderRadius: '20px', padding: '1.5rem 1.75rem',
-            background: `linear-gradient(135deg, rgba(15, 23, 42, 0.45) 0%, rgba(15, 23, 42, 0.65) 100%), url(${bgImage})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat',
+            background: bg,
             transition: 'background 1.5s ease',
             color: textColor, position: 'relative', overflow: 'hidden', fontFamily: 'inherit'
         }}>
+            {bgVideo && (
+                <video
+                    key={bgVideo}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        zIndex: 0,
+                        pointerEvents: 'none',
+                        opacity: isNight ? (bgVideo === '/clear_night.mp4' ? 0.38 : 0.15) : 0.38,
+                        filter: isNight && bgVideo !== '/clear_night.mp4' ? 'brightness(0.2) saturate(0.2) contrast(1.3)' : 'none',
+                    }}
+                >
+                    <source src={bgVideo} type="video/mp4" />
+                </video>
+            )}
             {/* Decorative circles */}
-            <div style={{ position: 'absolute', top: '-40px', right: '-40px', width: '180px', height: '180px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', pointerEvents: 'none' }} />
-            <div style={{ position: 'absolute', bottom: '-60px', left: '30%', width: '240px', height: '240px', borderRadius: '50%', background: 'rgba(255,255,255,0.04)', pointerEvents: 'none' }} />
+            <div style={{ position: 'absolute', top: '-40px', right: '-40px', width: '180px', height: '180px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', pointerEvents: 'none', zIndex: 1 }} />
+            <div style={{ position: 'absolute', bottom: '-60px', left: '30%', width: '240px', height: '240px', borderRadius: '50%', background: 'rgba(255,255,255,0.04)', pointerEvents: 'none', zIndex: 1 }} />
 
             {/* Top Row */}
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', position: 'relative', zIndex: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
                     <div style={{ lineHeight: 1 }}>{getWeatherIcon(code, 56)}</div>
                     <div>
@@ -518,7 +565,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
             </div>
 
             {/* Stat Pills */}
-            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1.25rem', position: 'relative' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1.25rem', position: 'relative', zIndex: 10 }}>
                 {statPills.map((s, i) => (
                     <div
                         key={i}
@@ -537,10 +584,10 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
             </div>
 
             {/* Divider */}
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.12)', margin: '1.25rem 0 1rem' }} />
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.12)', margin: '1.25rem 0 1rem', position: 'relative', zIndex: 10 }} />
 
             {/* Tabs */}
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.875rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.875rem', position: 'relative', zIndex: 10 }}>
                 {tabs.map(tab => (
                     <button
                         key={tab.key}
@@ -572,7 +619,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
 
             {/* Hourly Forecast */}
             {activeTab === 'hourly' && (
-                <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '2px', position: 'relative' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '2px', position: 'relative', zIndex: 10 }}>
                     {forecast.map((f, i) => (
                         <div
                             key={i}
@@ -604,7 +651,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
 
             {/* 5-Day Forecast */}
             {activeTab === 'daily' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', position: 'relative' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', position: 'relative', zIndex: 10 }}>
                     {dailyForecast.map((d, i) => (
                         <div
                             key={i}
@@ -641,7 +688,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
             )}
 
             {/* Bottom: last updated */}
-            <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
+            <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', zIndex: 10 }}>
                 <span style={{ fontSize: '11px', opacity: 0.45 }}>Weather updated {lastUpdated}</span>
                 <button
                     onClick={() => fetchWeather(true)}

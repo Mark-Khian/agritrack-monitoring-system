@@ -22,7 +22,8 @@ import {
     SkeletonText
 } from '../components/Skeleton';
 
-const API = 'http://localhost:5000/api/v1';
+const API_HOST = window.location.hostname;
+const API = `http://${API_HOST}:5000/api/v1`;
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
 
 const PLANTING_VARIETY_CLASS_FILTERS = [
@@ -647,8 +648,8 @@ const Analytics = () => {
                                 type="button"
                                 onClick={() => setDateRange(btn.id)}
                                 className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors border ${isActive
-                                        ? 'bg-[#166534] text-white border-[#166534]'
-                                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                                    ? 'bg-[#166534] text-white border-[#166534]'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                                     }`}
                             >
                                 {btn.label}
@@ -694,7 +695,7 @@ const Analytics = () => {
             </div>
 
             {/* KPI Cards */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-4 gap-1.5 md:grid-cols-2 xl:grid-cols-4 md:gap-4 lg:gap-6">
                 {[
                     {
                         label: 'Total Yield',
@@ -733,24 +734,25 @@ const Analytics = () => {
                     return (
                         <div
                             key={card.label}
-                            className="group relative text-left bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden transition-transform hover:-translate-y-1"
+                            className="group relative text-center bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden flex flex-col items-center justify-center p-2.5 transition-transform hover:-translate-y-1 md:text-left md:items-start md:p-5 md:pl-6"
                         >
-                            <span className="absolute left-0 top-0 bottom-0 w-[4px]" style={{ backgroundColor: card.accent }} />
-                            <div className="p-5 pl-6">
-                                <div className="flex items-start justify-between gap-4">
-                                    <div
-                                        className="rounded-xl p-3 border border-gray-100"
-                                        style={{ backgroundColor: card.iconBg }}
-                                    >
-                                        <Icon size={20} style={{ color: card.accent }} />
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-3xl font-bold text-gray-900">{card.value}</div>
-                                        <div className="text-xs text-gray-500 mt-1">{card.unit}</div>
-                                    </div>
+                            <span
+                                className="absolute left-0 top-0 w-full h-[3px] md:bottom-0 md:h-full md:w-[4px]"
+                                style={{ backgroundColor: card.accent }}
+                            />
+                            <div className="flex flex-col items-center justify-center gap-1.5 md:flex-row md:items-start md:justify-between md:gap-4 md:w-full">
+                                <div
+                                    className="rounded-xl p-1.5 border border-gray-100 md:p-3"
+                                    style={{ backgroundColor: card.iconBg }}
+                                >
+                                    <Icon size={16} className="md:size-[20px]" style={{ color: card.accent }} />
                                 </div>
-                                <div className="mt-3 text-sm font-semibold text-gray-800">{card.label}</div>
+                                <div className="text-center md:text-right">
+                                    <div className="text-base font-bold text-gray-900 leading-none md:text-3xl">{card.value}</div>
+                                    <div className="text-[9px] text-gray-500 mt-0.5 md:text-xs md:mt-1">{card.unit}</div>
+                                </div>
                             </div>
+                            <div className="mt-1.5 text-[9px] font-semibold text-gray-800 leading-tight md:mt-3 md:text-sm">{card.label}</div>
                         </div>
                     );
                 })}
@@ -1093,11 +1095,11 @@ const Analytics = () => {
 
                     {(() => {
                         const isPlaceholder = seasonComparison.length === 0;
-                        const chartData = isPlaceholder 
+                        const chartData = isPlaceholder
                             ? [
                                 { season: 'Dry', yield_kg: 0 },
                                 { season: 'Wet', yield_kg: 0 },
-                              ] 
+                            ]
                             : seasonComparison;
                         return (
                             <div className="h-[220px] relative">
@@ -1105,10 +1107,10 @@ const Analytics = () => {
                                     <BarChart data={chartData} margin={{ top: 15, right: 10, left: 0, bottom: 0 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-800" vertical={false} />
                                         <XAxis dataKey="season" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 10.5 }} />
-                                        <YAxis 
-                                            axisLine={false} 
-                                            tickLine={false} 
-                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }} 
+                                        <YAxis
+                                            axisLine={false}
+                                            tickLine={false}
+                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }}
                                             tickFormatter={(v) => `${v}kg`}
                                             domain={isPlaceholder ? [0, 8000] : undefined}
                                         />
@@ -1203,8 +1205,8 @@ const Analytics = () => {
                                         <td className="px-5 py-3">
                                             <span
                                                 className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${row.status === 'Active'
-                                                        ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
-                                                        : 'bg-gray-100 dark:bg-slate-800/60 text-gray-700 dark:text-slate-300'
+                                                    ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
+                                                    : 'bg-gray-100 dark:bg-slate-800/60 text-gray-700 dark:text-slate-300'
                                                     }`}
                                             >
                                                 {row.status}

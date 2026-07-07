@@ -65,7 +65,6 @@ const Activities = () => {
     const [formError, setFormError] = useState('');
     const [statusUpdatingId, setStatusUpdatingId] = useState(null);
     const [expandedPlantingId, setExpandedPlantingId] = useState(null);
-    const [showArchivedActivities, setShowArchivedActivities] = useState(false);
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [activityToComplete, setActivityToComplete] = useState(null);
 
@@ -189,9 +188,7 @@ const Activities = () => {
     };
 
     const isCompletedActivity = (act) => String(act?.status || '').toLowerCase() === 'completed';
-    const visibleActivities = showArchivedActivities
-        ? activities
-        : activities.filter((act) => !isCompletedActivity(act));
+    const visibleActivities = activities;
 
     return (
         <div className="space-y-6">
@@ -207,17 +204,6 @@ const Activities = () => {
                 >
                     <Plus size={16} /> Log Activity
                 </button>
-            </div>
-            <div className="flex items-center justify-end">
-                <label className="inline-flex items-center gap-2 text-xs text-gray-600">
-                    <input
-                        type="checkbox"
-                        checked={showArchivedActivities}
-                        onChange={(e) => setShowArchivedActivities(e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-green-700 focus:ring-green-600"
-                    />
-                    Show archived activities
-                </label>
             </div>
 
             {/* Dependency guard */}
@@ -261,12 +247,10 @@ const Activities = () => {
                         <div className="flex flex-col items-center gap-3 py-10">
                             <Tractor size={40} className="text-gray-200" />
                             <p className="text-gray-400 text-sm font-medium">
-                                {activities.length === 0 ? 'No activities recorded yet.' : 'All activities are archived.'}
+                                No activities recorded yet.
                             </p>
                             <p className="text-gray-300 text-xs">
-                                {activities.length === 0
-                                    ? 'System activities are auto-generated when you create a planting.'
-                                    : 'Enable "Show archived activities" to view completed activity history.'}
+                                System activities are auto-generated when you create a planting.
                             </p>
                         </div>
                     ) : (
@@ -330,9 +314,9 @@ const Activities = () => {
                                                             <p className="font-semibold text-gray-900 truncate">
                                                                 {headerLabel}
                                                             </p>
-                                                            {showArchivedActivities && isArchivedGroup && (
-                                                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-                                                                    Archived
+                                                            {isArchivedGroup && (
+                                                                <span className="inline-flex items-center rounded-full border border-green-200 bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-800">
+                                                                    Completed
                                                                 </span>
                                                             )}
                                                         </div>

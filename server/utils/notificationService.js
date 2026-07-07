@@ -325,6 +325,21 @@ const generateWeatherNotifications = async () => {
 // ── Batch runner ──────────────────────────────────────────────────────────────
 
 /**
+ * Auto-delete notifications older than 24 hours.
+ */
+const pruneNotifications = async () => {
+    try {
+        console.log('[NotifService] Pruning notifications older than 24 hours...');
+        const [result] = await db.query(
+            'DELETE FROM notifications WHERE created_at < NOW() - INTERVAL 24 HOUR'
+        );
+        console.log(`[NotifService] Pruned ${result.affectedRows || 0} old notification(s).`);
+    } catch (err) {
+        console.error('[NotifService] pruneNotifications error:', err.message);
+    }
+};
+
+/**
  * Run all activity + lifecycle generators (called every 6 hours).
  */
 const runActivityCycle = async () => {
@@ -332,6 +347,7 @@ const runActivityCycle = async () => {
     await generateActivityNotifications();
     await generateOverdueNotifications();
     await generateLifecycleNotifications();
+    await pruneNotifications();
     console.log('[NotifService] Activity/lifecycle cycle complete.');
 };
 
@@ -341,6 +357,7 @@ const runActivityCycle = async () => {
 const runWeatherCycle = async () => {
     console.log('[NotifService] Running weather notification cycle...');
     await generateWeatherNotifications();
+    await pruneNotifications();
     console.log('[NotifService] Weather cycle complete.');
 };
 
@@ -351,4 +368,5 @@ module.exports = {
     generateWeatherNotifications,
     runActivityCycle,
     runWeatherCycle,
+    pruneNotifications,
 };

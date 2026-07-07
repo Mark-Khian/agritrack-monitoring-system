@@ -28,13 +28,22 @@ app.use(morgan(
     process.env.NODE_ENV === 'production' ? 'combined' : 'dev'
 ));
 
-// Use HTTPS origin in production, HTTP in development
+// CORS configuration: Allow any origin in development, restrict in production
 const allowedOrigin = process.env.NODE_ENV === 'production'
     ? (process.env.ALLOWED_ORIGIN || 'https://localhost:5173')
-    : (process.env.ALLOWED_ORIGIN || 'http://localhost:5173');
+    : null;
 
 app.use(cors({
-    origin: allowedOrigin,
+    origin: (origin, callback) => {
+        // In development, allow all origins (including local network IPs)
+        if (!origin || process.env.NODE_ENV !== 'production') {
+            return callback(null, true);
+        }
+        if (origin === allowedOrigin) {
+            return callback(null, true);
+        }
+        return callback(new Error('Not allowed by CORS'));
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 }));

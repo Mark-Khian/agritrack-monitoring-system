@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 
-const Modal = ({ isOpen, onClose, title, children }) => {
+const Modal = ({ isOpen, onClose, title, children, maxWidth = 'max-w-md' }) => {
     // Close on escape key
     useEffect(() => {
         const handleEsc = (e) => {
@@ -17,7 +17,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 mt-20 mx-4 relative animate-zoom-in">
+            <div className={`bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full ${maxWidth} p-6 mt-20 mx-4 relative animate-zoom-in`}>
                 <div className="flex items-center justify-between mb-6">
                     <h2 className="text-xl font-semibold text-gray-800 tracking-tight">{title}</h2>
                     <button 
