@@ -14,6 +14,7 @@ const {
     getNotifications,
     markAsRead,
     markAllRead,
+    deleteNotification,
 } = require('../controllers/notificationController');
 
 // All routes require authentication
@@ -27,5 +28,8 @@ router.patch('/read-all', markAllRead);
 
 // PATCH /api/v1/notifications/:id/read — mark one as read
 router.patch('/:id/read', markAsRead);
+
+// DELETE /api/v1/notifications/:id — delete a notification
+router.delete('/:id', deleteNotification);
 
 module.exports = router;

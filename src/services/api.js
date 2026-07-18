@@ -55,8 +55,14 @@ export const deleteHarvest  = (id)           => API.delete(`/harvests/${id}`);
 export const getWeather = (location) => API.get('/weather', { params: { location } });
 
 // ── Notifications ─────────────────────────
-export const getNotifications          = ()    => API.get('/notifications');
-export const markNotificationRead      = (id)  => API.patch(`/notifications/${id}/read`);
-export const markAllNotificationsRead  = ()    => API.patch('/notifications/read-all');
+export const getNotifications          = ()     => API.get('/notifications');
+export const markNotificationRead      = (id)   => API.patch(`/notifications/${id}/read`);
+export const markAllNotificationsRead  = (group) => API.patch('/notifications/read-all', null, { params: { group } });
+export const deleteNotification        = (id)   => API.delete(`/notifications/${id}`);
+
+// ── Exports ───────────────────────────────
+export const exportPlantingsCSV = (params = {}) => API.get('/plantings/export/csv', { params, responseType: 'blob' });
+export const exportPlantingsPDF = (params = {}) => API.get('/plantings/export/pdf', { params, responseType: 'blob' });
+export const exportPlantingPDF  = (id)          => API.get(`/plantings/${id}/export/pdf`, { responseType: 'blob' });
 
 export default API;

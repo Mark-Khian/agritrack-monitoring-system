@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import useAuth from '../context/useAuth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend,
@@ -12,9 +12,10 @@ import {
     FlaskConical, Package, LayoutDashboard,
     Cpu, CloudRain, PlusCircle,
     ChevronRight, AlertTriangle, Info, Layers, Clock,
-    Trash2, CheckCircle, Circle, Plus, Eye
+    Trash2, CheckCircle, Circle, Plus, Eye, ChevronDown
 } from 'lucide-react';
 import WeatherWidget from '../components/WeatherWidget';
+import ActivePlantingsModal from '../components/ActivePlantingsModal';
 import {
     SkeletonPageHeader,
     SkeletonStatCard,
@@ -136,35 +137,51 @@ const isCompletedPlanting = (p) => {
     return status === 'completed' || stage === 'harvested' || lc === 'harvested';
 };
 
+let dashboardCache = null;
+
 const Dashboard = () => {
     const { token } = useAuth();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
 
-    const [stats, setStats] = useState({ plantings: 0, harvests: 0, activities: 0 });
-    const [recentActivities, setRecentActivities] = useState([]);
-    const [activitiesList, setActivitiesList] = useState([]);
-    const [_plantingStatusData, setPlantingStatusData] = useState([]);
-    const [plantingsList, setPlantingsList] = useState([]);
-    const [harvestsList, setHarvestsList] = useState([]);
-    const [activitiesPerMonth, setActivitiesPerMonth] = useState([]);
-    const [_harvestYield, setHarvestYield] = useState([]);
-    const [_cropDistribution, setCropDistribution] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [isPlantingsModalOpen, setIsPlantingsModalOpen] = useState(() => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('activePlantings') === 'true';
+    });
+
+    useEffect(() => {
+        if (searchParams.get('activePlantings') === 'true') {
+            const newParams = new URLSearchParams(searchParams);
+            newParams.delete('activePlantings');
+            setSearchParams(newParams, { replace: true });
+        }
+    }, [searchParams, setSearchParams]);
+
+    const [stats, setStats] = useState(dashboardCache?.stats || { plantings: 0, harvests: 0, activities: 0 });
+    const [recentActivities, setRecentActivities] = useState(dashboardCache?.recentActivities || []);
+    const [activitiesList, setActivitiesList] = useState(dashboardCache?.activitiesList || []);
+    const [_plantingStatusData, setPlantingStatusData] = useState(dashboardCache?._plantingStatusData || []);
+    const [plantingsList, setPlantingsList] = useState(dashboardCache?.plantingsList || []);
+    const [harvestsList, setHarvestsList] = useState(dashboardCache?.harvestsList || []);
+    const [activitiesPerMonth, setActivitiesPerMonth] = useState(dashboardCache?.activitiesPerMonth || []);
+    const [_harvestYield, setHarvestYield] = useState(dashboardCache?._harvestYield || []);
+    const [_cropDistribution, setCropDistribution] = useState(dashboardCache?._cropDistribution || []);
+    const [loading, setLoading] = useState(!dashboardCache);
 
     // Plot activity explorer state 
-    const [expandedPlantingId, setExpandedPlantingId] = useState(null);
+    const [expandedPlantingIds, setExpandedPlantingIds] = useState({});
     const [plotActivitiesByPlantingId, setPlotActivitiesByPlantingId] = useState({});
     const [plotActivitiesLoadingByPlantingId, setPlotActivitiesLoadingByPlantingId] = useState({});
     const [plotOverviewTab, setPlotOverviewTab] = useState('active');
-    const [expandedHarvestId, setExpandedHarvestId] = useState(null);
+    const [expandedHarvestIds, setExpandedHarvestIds] = useState({});
+    const [expandedTaskIds, setExpandedTaskIds] = useState({});
     const [plotSearch, setPlotSearch] = useState('');
     const [activityStatusFilter, setActivityStatusFilter] = useState('all');
-    const [plantingFilters, setPlantingFilters] = useState({
+    const [plantingFilters] = useState({
         variety_class: '',
         variety_id: '',
         variety_null: false,
     });
-
     // Quick tasks / ideas checklist state
     const [quickTasks, setQuickTasks] = useState(() => {
         try {
@@ -254,10 +271,30 @@ const Dashboard = () => {
                     : 'Cabanatuan';
                 setWeatherLocation(fieldLocation);
                 // Fetch rain alert from backend weather proxy
+                let rainExp = false;
                 try {
                     const wRes = await getWeather(fieldLocation);
-                    setRainExpected(wRes.data.rainExpected || false);
+                    rainExp = wRes.data.rainExpected || false;
+                    setRainExpected(rainExp);
                 } catch { /* weather is non-critical */ }
+
+                dashboardCache = {
+                    stats: {
+                        plantings: plantings.filter(p => !isCompletedPlanting(p)).length,
+                        harvests: toNonNegativeNumber(harvestsRes.data.meta?.total),
+                        activities: toNonNegativeNumber(activitiesRes.data.meta?.total),
+                    },
+                    recentActivities: upcomingActivities.slice(0, 5),
+                    activitiesList: activities,
+                    _plantingStatusData: groupByField(plantings, 'status'),
+                    plantingsList: plantings,
+                    harvestsList: harvests,
+                    activitiesPerMonth: groupByMonth(activities, 'activity_date'),
+                    _harvestYield: harvestByMonth(harvests),
+                    _cropDistribution: groupByField(plantings, 'variety'),
+                    weatherLocation: fieldLocation,
+                    rainExpected: rainExp
+                };
             } catch (err) {
                 console.error('Dashboard fetch error:', err.message);
             } finally {
@@ -514,13 +551,13 @@ const Dashboard = () => {
     const togglePlotActivities = async (plantingId) => {
         if (!plantingId) return;
 
-        // Collapse if clicking the same card.
-        if (expandedPlantingId === plantingId) {
-            setExpandedPlantingId(null);
-            return;
-        }
+        const isCurrentlyExpanded = !!expandedPlantingIds[plantingId];
+        setExpandedPlantingIds((prev) => ({
+            ...prev,
+            [plantingId]: !isCurrentlyExpanded,
+        }));
 
-        setExpandedPlantingId(plantingId);
+        if (isCurrentlyExpanded) return;
 
         // Lazy-load activities only when the plot is expanded for the first time.
         if (plotActivitiesByPlantingId[plantingId]) return;
@@ -718,9 +755,6 @@ const Dashboard = () => {
                 <p className="mt-1 text-sm text-gray-600">
                     Real-time agronomic insights for AgriTrack
                 </p>
-                <p className="mt-2 text-xs text-gray-500">
-                    Insights are computed from your planting lifecycle records (supports historical + future planning).
-                </p>
             </div>
 
             {/* Weather Widget (Horizontal on Desktop, Vertical on Mobile) */}
@@ -789,24 +823,39 @@ const Dashboard = () => {
                                 <div className="grid gap-2.5">
                                     {topPendingTasks.map((act) => {
                                         const activityName = normalize(act?.activity_type)?.replaceAll('_', ' ') || 'Activity';
+                                        const isExpanded = !!expandedTaskIds[act.id];
                                         return (
                                             <div
                                                 key={act.id}
-                                                className="group flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3 hover:bg-gray-50 transition-colors"
+                                                className="group flex flex-col justify-between rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/30 px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-800/40 transition-colors"
                                             >
-                                                <div className="flex items-start gap-3">
-                                                    {getTaskIconBox(act.activity_type)}
-                                                    <div>
-                                                        <p className="text-sm font-bold capitalize text-gray-900">{activityName}</p>
-                                                        <p className="mt-1 text-xs text-gray-500 font-medium">
-                                                            {act.planting_variety || '—'}
-                                                        </p>
+                                                <div className="flex items-center justify-between w-full">
+                                                    <div className="flex items-start gap-3">
+                                                        {getTaskIconBox(act.activity_type)}
+                                                        <div>
+                                                            <p className="text-sm font-bold capitalize text-gray-900 dark:text-white">{activityName}</p>
+                                                            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 font-medium">
+                                                                {act.planting_variety || '—'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-3">
+                                                        {getPriorityBadge(act.activity_type)}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setExpandedTaskIds((prev) => ({ ...prev, [act.id]: !prev[act.id] }))}
+                                                            className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 dark:hover:text-slate-350 transition-colors cursor-pointer"
+                                                            aria-label="Toggle details"
+                                                        >
+                                                            <ChevronRight className={`h-5 w-5 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} />
+                                                        </button>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-3">
-                                                    {getPriorityBadge(act.activity_type)}
-                                                    <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-gray-600 transition-colors" />
-                                                </div>
+                                                {isExpanded && act.notes && (
+                                                    <div className="mt-3.5 text-xs text-gray-600 dark:text-slate-400 bg-gray-50/50 dark:bg-slate-900/50 p-2.5 rounded-lg border border-gray-100 dark:border-slate-800/50 leading-relaxed">
+                                                        <span className="font-semibold text-gray-400 dark:text-slate-500">Details:</span> {act.notes}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })}
@@ -895,13 +944,15 @@ const Dashboard = () => {
                         <div className="flex items-start justify-between gap-3">
                             <div>
                                 <h2 className="text-lg font-bold">Active Planting</h2>
-                                <p className="mt-1 text-sm text-gray-600">
-                                    {mostRecentPlanting
-                                        ? `${mostRecentPlanting.variety || 'Variety'}${mostRecentPlanting.field_name ? ` • ${mostRecentPlanting.field_name}` : ''}`
-                                        : 'No active planting found'}
-                                </p>
+
                             </div>
-                            <Layers className="h-6 w-6 text-emerald-700" />
+                            <button
+                                onClick={() => setIsPlantingsModalOpen(true)}
+                                className="group p-1.5 rounded-lg hover:bg-emerald-500/10 transition-all duration-300 hover:scale-110 active:scale-95 focus:outline-none cursor-pointer"
+                                title="View all active plantings"
+                            >
+                                <Layers className="h-6 w-6 text-emerald-700 dark:text-emerald-400 transition-colors duration-300 group-hover:text-emerald-500 group-hover:dark:text-emerald-300" />
+                            </button>
                         </div>
 
                         {mostRecentPlanting && (
@@ -1138,58 +1189,28 @@ const Dashboard = () => {
                                     className="w-full sm:w-72 rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200"
                                 />
                                 {plotOverviewTab === 'active' && (
-                                    <select
-                                        value={activityStatusFilter}
-                                        onChange={(e) => setActivityStatusFilter(e.target.value)}
-                                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200"
-                                    >
-                                        <option value="all">All statuses</option>
-                                        <option value="pending">Pending</option>
-                                        <option value="ongoing">Ongoing</option>
-                                    </select>
+                                    <div className="relative inline-block w-full sm:w-auto">
+                                        <select
+                                            value={activityStatusFilter}
+                                            onChange={(e) => setActivityStatusFilter(e.target.value)}
+                                            className="w-full rounded-xl border border-gray-200 pl-3 pr-8 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200 appearance-none bg-white text-gray-800"
+                                        >
+                                            <option value="all">All statuses</option>
+                                            <option value="pending">Pending</option>
+                                            <option value="ongoing">Ongoing</option>
+                                        </select>
+                                        <span className="absolute inset-y-0 right-2.5 flex items-center pointer-events-none text-gray-400">
+                                            <ChevronDown size={14} />
+                                        </span>
+                                    </div>
                                 )}
                             </div>
 
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                                <span className="font-medium text-gray-500 mr-1">Plantings API filter:</span>
-                                <select
-                                    value={plantingFilters.variety_class}
-                                    onChange={(e) => setPlantingFilters((f) => ({ ...f, variety_class: e.target.value }))}
-                                    className="rounded-lg border border-gray-200 px-2 py-1.5 bg-white max-w-[200px]"
-                                >
-                                    {PLANTING_VARIETY_CLASS_FILTERS.map((o) => (
-                                        <option key={o.value || 'all'} value={o.value}>{o.label}</option>
-                                    ))}
-                                </select>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    placeholder="variety_id"
-                                    disabled={plantingFilters.variety_null}
-                                    value={plantingFilters.variety_id}
-                                    onChange={(e) => setPlantingFilters((f) => ({ ...f, variety_id: e.target.value }))}
-                                    className="w-24 rounded-lg border border-gray-200 px-2 py-1.5 bg-white disabled:opacity-50"
-                                />
-                                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
-                                    <input
-                                        type="checkbox"
-                                        checked={plantingFilters.variety_null}
-                                        onChange={(e) => setPlantingFilters((f) => ({
-                                            ...f,
-                                            variety_null: e.target.checked,
-                                            variety_id: e.target.checked ? '' : f.variety_id,
-                                        }))}
-                                        className="rounded border-gray-300 text-emerald-700"
-                                    />
-                                    Catalog unlinked only
-                                </label>
-                            </div>
-
                             {plotOverviewTab === 'active' && (
-                                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                <div className="mt-4 grid grid-cols-1 gap-3 items-start sm:grid-cols-2 lg:grid-cols-3">
                                     {activePlots.map((plot) => {
                                         const pid = plot.id;
-                                        const isExpanded = expandedPlantingId === pid;
+                                        const isExpanded = !!expandedPlantingIds[pid];
                                         const activitiesForPlot = plotActivitiesByPlantingId[pid];
                                         const isLoadingPlot = !!plotActivitiesLoadingByPlantingId[pid];
                                         const pendingCount = activitiesList.filter((a) => a.planting_id === pid && hasPendingOrOngoing(a)).length;
@@ -1216,17 +1237,17 @@ const Dashboard = () => {
                                         return (
                                             <div
                                                 key={pid}
-                                                className={`rounded-xl border overflow-hidden flex flex-col transition-shadow hover:shadow-md ${isExpanded ? 'border-emerald-500 shadow-sm bg-white' : 'border-gray-100 bg-gray-50/20'}`}
+                                                className={`rounded-xl border overflow-hidden flex flex-col transition-shadow hover:shadow-md ${isExpanded ? 'border-gray-200 dark:border-slate-700 shadow-sm bg-white dark:bg-slate-800' : 'border-gray-100 dark:border-slate-800 bg-gray-50/20 dark:bg-slate-800/40'}`}
                                             >
                                                 <button
                                                     type="button"
                                                     onClick={() => togglePlotActivities(pid)}
-                                                    className="w-full text-left p-4 focus:outline-none hover:bg-gray-50/60 transition-colors"
+                                                    className="w-full text-left p-4 focus:outline-none hover:bg-gray-50/60 dark:hover:bg-slate-800/60 transition-colors"
                                                 >
                                                     <div className="flex items-start justify-between gap-3">
                                                         <div className="min-w-0">
-                                                            <p className="font-semibold text-gray-900 truncate">{plotTitle}</p>
-                                                            <p className="mt-1 text-xs text-gray-500 truncate">
+                                                            <p className="font-semibold text-gray-900 dark:text-white truncate">{plotTitle}</p>
+                                                            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 truncate">
                                                                 {plot.planting_date ? `Planted: ${plot.planting_date.slice(0, 10)}` : 'Planted: —'}
                                                             </p>
                                                             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1248,102 +1269,105 @@ const Dashboard = () => {
                                                         />
                                                     </div>
                                                     <div className="mt-3">
-                                                        <div className="flex items-center justify-between text-[11px] text-gray-500">
+                                                        <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400">
                                                             <span>Lifecycle Progress</span>
-                                                            <span className="font-semibold text-gray-700">{progressPercent}%</span>
+                                                            <span className="font-semibold text-gray-700 dark:text-slate-200">{progressPercent}%</span>
                                                         </div>
-                                                        <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+                                                        <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100 dark:bg-slate-900 overflow-hidden">
                                                             <div
                                                                 className="h-full rounded-full bg-emerald-600"
                                                                 style={{ width: `${progressPercent}%` }}
                                                             />
                                                         </div>
                                                     </div>
+                                                    {!isExpanded && (
+                                                        <p className="mt-3 text-[10px] text-gray-400 dark:text-slate-500 text-center font-medium tracking-wide">
+                                                            Click to expand & view scheduled tasks
+                                                        </p>
+                                                    )}
                                                 </button>
 
-                                                <div className="px-4 pb-4 flex-1 min-h-0">
-                                                    {isExpanded && (
-                                                        <>
-                                                            {isLoadingPlot && (
-                                                                <div className="flex items-center gap-2 text-sm text-gray-500 pt-2">
-                                                                    <span className="w-3 h-3 rounded-full bg-emerald-600 animate-pulse" />
-                                                                    Loading activities...
+                                                {isExpanded && (
+                                                    <div className="px-4 pb-4 flex-1 min-h-0">
+                                                        {isLoadingPlot && (
+                                                            <div className="flex items-center gap-2 text-sm text-gray-500 pt-2">
+                                                                <span className="w-3 h-3 rounded-full bg-emerald-600 animate-pulse" />
+                                                                Loading activities...
+                                                            </div>
+                                                        )}
+
+                                                        {!isLoadingPlot && (
+                                                            <>
+                                                                <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                                                                    <span className="inline-flex items-center gap-2">
+                                                                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                                                        Manual
+                                                                    </span>
+                                                                    <span className="inline-flex items-center gap-2">
+                                                                        <span className="h-2 w-2 rounded-full bg-gray-400" />
+                                                                        System
+                                                                    </span>
                                                                 </div>
-                                                            )}
 
-                                                            {!isLoadingPlot && (
-                                                                <>
-                                                                    <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                                                                        <span className="inline-flex items-center gap-2">
-                                                                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                                                            Manual
-                                                                        </span>
-                                                                        <span className="inline-flex items-center gap-2">
-                                                                            <span className="h-2 w-2 rounded-full bg-gray-400" />
-                                                                            System
-                                                                        </span>
-                                                                    </div>
+                                                                <div className="mt-3 flex gap-3 overflow-x-auto pb-3 pr-1 overscroll-x-contain scrollbar-thin">
+                                                                    {filteredExpandedActivities.length === 0 ? (
+                                                                        <div className="text-sm text-gray-400 py-2">
+                                                                            No activities found for this plot.
+                                                                        </div>
+                                                                    ) : (
+                                                                        filteredExpandedActivities.map((act) => {
+                                                                            const statusBadge = getActivityStatusBadge(act);
+                                                                            const isSystem = !!act.is_system_generated;
+                                                                            const rowClass = isSystem
+                                                                                ? 'bg-gray-50 border-gray-100 dark:bg-slate-900/60 dark:border-slate-800'
+                                                                                : 'bg-emerald-50/60 border-emerald-100/60 dark:bg-emerald-950/20 dark:border-emerald-900/30';
+                                                                            const textClass = isSystem ? 'text-gray-700 dark:text-slate-200' : 'text-emerald-900 dark:text-emerald-400';
 
-                                                                    <div className="mt-3 flex gap-3 overflow-x-auto pb-3 pr-1 overscroll-x-contain scrollbar-thin">
-                                                                        {filteredExpandedActivities.length === 0 ? (
-                                                                            <div className="text-sm text-gray-400 py-2">
-                                                                                No activities found for this plot.
-                                                                            </div>
-                                                                        ) : (
-                                                                            filteredExpandedActivities.map((act) => {
-                                                                                const statusBadge = getActivityStatusBadge(act);
-                                                                                const isSystem = !!act.is_system_generated;
-                                                                                const rowClass = isSystem
-                                                                                    ? 'bg-gray-50 border-gray-100 dark:bg-slate-900/60 dark:border-slate-800'
-                                                                                    : 'bg-emerald-50/60 border-emerald-100/60 dark:bg-emerald-950/20 dark:border-emerald-900/30';
-                                                                                const textClass = isSystem ? 'text-gray-700 dark:text-slate-200' : 'text-emerald-900 dark:text-emerald-400';
+                                                                            const activityLabel = normalize(act?.activity_type)
+                                                                                ? normalize(act.activity_type).replaceAll('_', ' ')
+                                                                                : '—';
 
-                                                                                const activityLabel = normalize(act?.activity_type)
-                                                                                    ? normalize(act.activity_type).replaceAll('_', ' ')
-                                                                                    : '—';
-
-                                                                                return (
-                                                                                    <div
-                                                                                        key={act.id}
-                                                                                        className={`flex-shrink-0 w-64 rounded-xl border p-4 flex flex-col justify-between ${rowClass}`}
-                                                                                    >
-                                                                                        <div>
-                                                                                            <div className="flex items-start justify-between gap-2">
-                                                                                                <p className={`text-sm font-bold capitalize truncate ${textClass}`} title={activityLabel}>
-                                                                                                    {activityLabel}
-                                                                                                </p>
-                                                                                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${statusBadge.className}`}>
-                                                                                                    {statusBadge.label}
-                                                                                                </span>
-                                                                                            </div>
-
-                                                                                            {plotStage && isSystem && (
-                                                                                                <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500 font-medium leading-normal">
-                                                                                                    Stage: <span className="capitalize">{plotStage}</span>
-                                                                                                </p>
-                                                                                            )}
-
-                                                                                            <p className="mt-2 text-xs text-gray-600 dark:text-slate-300 line-clamp-3 leading-relaxed" title={act.notes}>
-                                                                                                <span className="font-semibold text-gray-400 dark:text-gray-500">Notes:</span> {act.notes || '—'}
+                                                                            return (
+                                                                                <div
+                                                                                    key={act.id}
+                                                                                    className={`flex-shrink-0 w-64 rounded-xl border p-4 flex flex-col justify-between ${rowClass}`}
+                                                                                >
+                                                                                    <div>
+                                                                                        <div className="flex items-start justify-between gap-2">
+                                                                                            <p className={`text-sm font-bold capitalize truncate ${textClass}`} title={activityLabel}>
+                                                                                                {activityLabel}
                                                                                             </p>
-                                                                                        </div>
-
-                                                                                        <div className="mt-3 pt-2 border-t border-gray-100/50 dark:border-slate-800/50 flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400">
-                                                                                            <span className="font-medium">Scheduled Date</span>
-                                                                                            <span className="font-bold text-gray-700 dark:text-slate-300 whitespace-nowrap">
-                                                                                                {act.activity_date ? act.activity_date.slice(0, 10) : '—'}
+                                                                                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${statusBadge.className}`}>
+                                                                                                {statusBadge.label}
                                                                                             </span>
                                                                                         </div>
+
+                                                                                        {plotStage && isSystem && (
+                                                                                            <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500 font-medium leading-normal">
+                                                                                                Stage: <span className="capitalize">{plotStage}</span>
+                                                                                            </p>
+                                                                                        )}
+
+                                                                                        <p className="mt-2 text-xs text-gray-600 dark:text-slate-300 line-clamp-3 leading-relaxed" title={act.notes}>
+                                                                                            <span className="font-semibold text-gray-400 dark:text-gray-500">Notes:</span> {act.notes || '—'}
+                                                                                        </p>
                                                                                     </div>
-                                                                                );
-                                                                            })
-                                                                        )}
-                                                                    </div>
-                                                                </>
-                                                            )}
-                                                        </>
-                                                    )}
-                                                </div>
+
+                                                                                    <div className="mt-3 pt-2 border-t border-gray-100/50 dark:border-slate-800/50 flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400">
+                                                                                        <span className="font-medium">Scheduled Date</span>
+                                                                                        <span className="font-bold text-gray-700 dark:text-slate-300 whitespace-nowrap">
+                                                                                            {act.activity_date ? act.activity_date.slice(0, 10) : '—'}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })
+                                                                    )}
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })}
@@ -1360,35 +1384,35 @@ const Dashboard = () => {
                                     {completedHarvests.map((harvest) => {
                                         const planting = plantingsList.find((p) => p.id === harvest.planting_id);
                                         const cardTitle = `${harvest.planting_variety || planting?.variety || 'Harvest'}${harvest.field_name ? ` • ${harvest.field_name}` : (planting?.field_name ? ` • ${planting.field_name}` : '')}`;
-                                        const isExpanded = expandedHarvestId === harvest.id;
+                                        const isExpanded = !!expandedHarvestIds[harvest.id];
                                         return (
-                                            <div key={harvest.id} className="self-start rounded-xl border border-amber-200 bg-amber-50/40 overflow-hidden">
+                                            <div key={harvest.id} className={`self-start rounded-xl border overflow-hidden transition-all ${isExpanded ? 'border-amber-300 dark:border-amber-800/80 bg-amber-50/50 dark:bg-slate-800' : 'border-amber-200 dark:border-amber-900/30 bg-amber-50/20 dark:bg-slate-800/40'}`}>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setExpandedHarvestId((prev) => (prev === harvest.id ? null : harvest.id))}
-                                                    className="w-full text-left px-4 py-3 hover:bg-amber-50 transition-colors"
+                                                    onClick={() => setExpandedHarvestIds((prev) => ({ ...prev, [harvest.id]: !prev[harvest.id] }))}
+                                                    className="w-full text-left px-4 py-3 hover:bg-amber-50 dark:hover:bg-slate-800/50 transition-colors"
                                                 >
                                                     <div className="flex items-start justify-between gap-3">
                                                         <div className="min-w-0">
-                                                            <p className="font-semibold text-amber-900 truncate">{cardTitle}</p>
-                                                            <p className="mt-1 text-xs text-amber-800/80">
+                                                            <p className="font-semibold text-amber-900 dark:text-white truncate">{cardTitle}</p>
+                                                            <p className="mt-1 text-xs text-amber-800/80 dark:text-slate-400">
                                                                 Yield: {harvest.yield_kg || '0'} kg • {harvest.harvest_date ? String(harvest.harvest_date).slice(0, 10) : '—'}
                                                             </p>
                                                         </div>
-                                                        <ChevronRight className={`h-5 w-5 text-amber-700 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                                        <ChevronRight className={`h-5 w-5 text-amber-700 dark:text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                                                     </div>
                                                 </button>
 
                                                 {isExpanded && (
-                                                    <div className="px-4 pb-4 border-t border-amber-200/60">
+                                                    <div className="px-4 pb-4 border-t border-amber-200/60 dark:border-slate-700/60">
                                                         <div className="mt-3 space-y-1 text-sm">
-                                                            <p><span className="font-semibold text-amber-900">Crop type:</span> <span className="text-amber-800">{harvest.planting_variety || planting?.variety || '—'}</span></p>
-                                                            <p><span className="font-semibold text-amber-900">Yield:</span> <span className="text-amber-800">{harvest.yield_kg || '0'} kg</span></p>
+                                                            <p><span className="font-semibold text-amber-900 dark:text-slate-300">Crop type:</span> <span className="text-amber-800 dark:text-slate-100">{harvest.planting_variety || planting?.variety || '—'}</span></p>
+                                                            <p><span className="font-semibold text-amber-900 dark:text-slate-300">Yield:</span> <span className="text-amber-800 dark:text-slate-100">{harvest.yield_kg || '0'} kg</span></p>
                                                         </div>
                                                         <button
                                                             type="button"
                                                             onClick={() => downloadHarvestCsv(harvest)}
-                                                            className="mt-3 inline-flex items-center rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 transition-colors"
+                                                            className="mt-3 inline-flex items-center rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:text-slate-300 hover:bg-amber-100 dark:hover:bg-slate-800 transition-colors"
                                                         >
                                                             Export CSV
                                                         </button>
@@ -1409,6 +1433,10 @@ const Dashboard = () => {
                 </div>
 
             </div>
+            <ActivePlantingsModal
+                isOpen={isPlantingsModalOpen}
+                onClose={() => setIsPlantingsModalOpen(false)}
+            />
         </div>
     );
 };

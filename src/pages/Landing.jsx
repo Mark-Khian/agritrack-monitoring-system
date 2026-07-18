@@ -20,14 +20,23 @@ const Landing = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  // Temporarily disable dark mode while viewing the login page
+  // Temporarily disable dark mode and hide scrollbars while viewing the login page
   useEffect(() => {
     const root = document.documentElement;
+    const body = document.body;
     const hadDark = root.classList.contains('dark');
     if (hadDark) {
       root.classList.remove('dark');
     }
+
+    const originalHtmlOverflow = root.style.overflow;
+    const originalBodyOverflow = body.style.overflow;
+    root.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+
     return () => {
+      root.style.overflow = originalHtmlOverflow;
+      body.style.overflow = originalBodyOverflow;
       // Restore dark mode when redirecting to main application if user preferred it
       if (localStorage.getItem('theme') === 'dark') {
         root.classList.add('dark');
@@ -118,13 +127,13 @@ const Landing = () => {
     <div className="relative min-h-screen w-full overflow-hidden">
       {/* Full-screen background image */}
       <div
-        className="absolute inset-0 bg-cover bg-center"
+        className="absolute inset-0 bg-cover bg-center scale-105 blur-[8px]"
         style={{ backgroundImage: `url(${heroRice})` }}
         aria-hidden="true"
       />
 
-      {/* Dark overlay for readability */}
-      <div className="absolute inset-0 bg-linear-to-b from-black/50 via-black/40 to-black/50" />
+      {/* Dark overlay for readability and glassmorphic blur */}
+      <div className="absolute inset-0 bg-linear-to-b from-black/50 via-black/40 to-black/50 backdrop-blur-[4px]" />
 
       {/* Success Screen Overlay */}
       {showSuccess && (

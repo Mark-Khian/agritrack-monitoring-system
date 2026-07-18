@@ -109,12 +109,14 @@ const DownwardSelect = ({
         return () => document.removeEventListener('keydown', handleKey);
     }, [open]);
 
+    const hasError = className.includes('border-red-500');
     const baseClass = [
-        'w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm',
-        'focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow',
-        'flex items-center justify-between text-left cursor-pointer select-none',
+        'w-full border rounded-lg pl-4 pr-10 py-2.5 text-sm',
+        hasError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-green-500',
+        'focus:border-transparent outline-none transition-shadow',
+        'flex items-center text-left cursor-pointer select-none relative',
         disabled ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-800',
-        className,
+        className.replace('border-red-500', '').replace('focus:ring-red-500', ''),
     ]
         .filter(Boolean)
         .join(' ');
@@ -136,10 +138,12 @@ const DownwardSelect = ({
                 <span className={value ? '' : 'text-gray-400'}>
                     {value ? selectedLabel : placeholder}
                 </span>
-                <ChevronDown
-                    size={16}
-                    className={`text-gray-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
-                />
+                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400">
+                    <ChevronDown
+                        size={16}
+                        className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+                    />
+                </span>
             </button>
 
             {/* Dropdown panel — rendered in a portal so overflow never clips it */}

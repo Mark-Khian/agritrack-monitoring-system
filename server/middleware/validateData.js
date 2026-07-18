@@ -254,6 +254,12 @@ const validateHarvest = [
         .isLength({ max: 1000 }).withMessage('Remarks cannot exceed 1000 characters.')
         .escape(),
 
+    body('financial_value')
+        .optional({ checkFalsy: true })
+        .isFloat({ min: 0.00 }).withMessage('Financial value must be 0 or greater.')
+        .custom(val => val <= 99999999.99)
+        .withMessage('Financial value is too large.'),
+
     handleValidation
 ];
 

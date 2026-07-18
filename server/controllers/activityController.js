@@ -170,6 +170,14 @@ const updateActivity = async (req, res) => {
         if (result.affectedRows === 0)
             return res.status(404).json({ message: 'Activity not found.' });
 
+        if (status === 'completed') {
+            await db.query(
+                `DELETE FROM notifications 
+                 WHERE type IN ('activity_due', 'activity_overdue') AND related_id = ?`,
+                [req.params.id]
+            );
+        }
+
         await logActivity({
             user_id: req.user.id,
             action: 'UPDATE_ACTIVITY',
@@ -195,6 +203,12 @@ const deleteActivity = async (req, res) => {
         );
         if (result.affectedRows === 0)
             return res.status(404).json({ message: 'Activity not found.' });
+
+        await db.query(
+            `DELETE FROM notifications 
+             WHERE type IN ('activity_due', 'activity_overdue') AND related_id = ?`,
+            [req.params.id]
+        );
 
         await logActivity({
             user_id: req.user.id,

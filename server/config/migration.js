@@ -256,6 +256,20 @@ const runMigrations = async (db) => {
             console.log('✅ Modified activities.activity_type to VARCHAR(100).');
         }
 
+        // ── Add financial_value to harvests ──────────────────────────────────
+        const [[{ hasFinancialValue }]] = await db.query(
+            `SELECT COUNT(*) as hasFinancialValue
+             FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'harvests'
+               AND COLUMN_NAME = 'financial_value'`
+        );
+        if (hasFinancialValue === 0) {
+            console.log('🔹 Adding financial_value to harvests...');
+            await db.query('ALTER TABLE harvests ADD COLUMN financial_value DECIMAL(10,2) NULL AFTER remarks');
+            console.log('✅ Added financial_value to harvests.');
+        }
+
         console.log('🎉 Migrations completed successfully!');
     } catch (err) {
         console.error('❌ Migration failed:', err.message);

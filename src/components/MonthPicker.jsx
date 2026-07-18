@@ -16,6 +16,7 @@ const MonthPicker = ({
     required = false,
     className = '',
     id,
+    placeholder = 'Select planting date',
 }) => {
     const [open, setOpen] = useState(false);
     const [panelStyle, setPanelStyle] = useState({});
@@ -44,7 +45,9 @@ const MonthPicker = ({
         if (!triggerRef.current) return;
         const rect = triggerRef.current.getBoundingClientRect();
         const viewportH = window.innerHeight;
+        const viewportW = window.innerWidth;
         const dropdownHeight = 310; // Estimated height of Full Calendar panel
+        const dropdownWidth = 280; // minWidth is 280px
 
         const spaceBelow = viewportH - rect.bottom - 16;
         const spaceAbove = rect.top - 16;
@@ -52,12 +55,18 @@ const MonthPicker = ({
         // Fold upwards if limited bottom space and more space exists above
         const openUpward = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
 
+        // Ensure left position doesn't push the dropdown off the right edge of the screen
+        let left = rect.left;
+        if (left + dropdownWidth > viewportW) {
+            left = Math.max(8, viewportW - dropdownWidth - 8);
+        }
+
         if (openUpward) {
             setPanelStyle({
                 position: 'fixed',
                 bottom: viewportH - rect.top + 4,
-                left: rect.left,
-                width: rect.width,
+                left: left,
+                width: Math.min(rect.width, viewportW - 16),
                 zIndex: 9999,
                 maxHeight: Math.min(spaceAbove, dropdownHeight),
             });
@@ -65,8 +74,8 @@ const MonthPicker = ({
             setPanelStyle({
                 position: 'fixed',
                 top: rect.bottom + 4,
-                left: rect.left,
-                width: rect.width,
+                left: left,
+                width: Math.min(rect.width, viewportW - 16),
                 zIndex: 9999,
                 maxHeight: Math.min(spaceBelow, dropdownHeight),
             });
@@ -176,12 +185,14 @@ const MonthPicker = ({
         return () => document.removeEventListener('keydown', handleKey);
     }, [open]);
 
+    const hasError = className.includes('border-red-500');
     const baseClass = [
-        'w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm',
-        'focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow',
+        'w-full border rounded-lg px-4 py-2.5 text-sm',
+        hasError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-green-500',
+        'focus:border-transparent outline-none transition-shadow',
         'flex items-center justify-between text-left cursor-pointer select-none',
         disabled ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-800',
-        className,
+        className.replace('border-red-500', '').replace('focus:ring-red-500', ''),
     ]
         .filter(Boolean)
         .join(' ');
@@ -198,7 +209,7 @@ const MonthPicker = ({
                 onClick={open ? closePanel : openPanel}
             >
                 <span className={value ? '' : 'text-gray-400'}>
-                    {value ? displayValue : 'Select planting date'}
+                    {value ? displayValue : placeholder}
                 </span>
                 <CalendarIcon size={16} className="text-gray-400 shrink-0" />
             </button>

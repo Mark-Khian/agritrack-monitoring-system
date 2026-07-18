@@ -23,35 +23,35 @@ function App() {
       {/* Protected Routes */}
       <Route path="/dashboard" element={
         <ProtectedRoute>
-          <Layout title="Dashboard">
+          <Layout>
             <Dashboard />
           </Layout>
         </ProtectedRoute>
       } />
       <Route path="/plantings" element={
         <ProtectedRoute>
-          <Layout title="Crop Plantings">
+          <Layout>
             <Plantings />
           </Layout>
         </ProtectedRoute>
       } />
       <Route path="/activities" element={
         <ProtectedRoute>
-          <Layout title="Farm Activities">
+          <Layout>
             <Activities />
           </Layout>
         </ProtectedRoute>
       } />
       <Route path="/harvests" element={
         <ProtectedRoute>
-          <Layout title="Harvest Records">
+          <Layout>
             <Harvests />
           </Layout>
         </ProtectedRoute>
       } />
       <Route path="/analytics" element={
         <ProtectedRoute>
-          <Layout title="Analytics">
+          <Layout>
             <Analytics />
           </Layout>
         </ProtectedRoute>

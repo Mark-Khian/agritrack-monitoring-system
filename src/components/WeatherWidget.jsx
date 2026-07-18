@@ -51,71 +51,54 @@ const getWeatherIcon = (code, size = 28, hour = new Date().getHours()) => {
     return <CloudSun size={size} />;
 };
 
-const getWeatherBg = (code, hour) => {
-    const isNight = hour >= 19 || hour < 6;
-    if (isNight) return 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)';
 
-    // Rain / Storm
-    if (code >= 200 && code < 600) return 'linear-gradient(135deg, #1f2937 0%, #374151 50%, #4b5563 100%)';
-    // Clear Sky
-    if (code === 800) return 'linear-gradient(135deg, #0369a1 0%, #0ea5e9 50%, #38bdf8 100%)';
-    // Cloudy (and other codes)
-    return 'linear-gradient(135deg, #0f4c2a 0%, #1a7a46 50%, #22a05a 100%)';
-};
-
-const getWeatherBgImage = (code, hour) => {
+const getWeatherGradient = (code, hour, isDark) => {
     const isNight = hour >= 19 || hour < 6;
 
     const isRainy = (code >= 200 && code < 700);
     const isClear = (code === 800);
     const isCloudy = (code > 800 || (code >= 700 && code < 800));
 
-    if (isNight) {
-        if (isRainy) {
-            return 'https://images.unsplash.com/photo-1485594050903-8e8ee7b071a8?q=80&w=1600&auto=format&fit=crop';
-        }
-        if (isCloudy) {
-            return 'https://images.unsplash.com/photo-1534274988757-a28bf1a57c17?q=80&w=1600&auto=format&fit=crop';
-        }
-        // Clear night
-        return 'https://images.unsplash.com/photo-1538370965046-79c0d6907d47?q=80&w=1600&auto=format&fit=crop';
-    } else {
-        if (isRainy) {
-            return '/rainy_sky.jpg';
-        }
-        if (isClear) {
-            return '/clear_sky.jpg';
-        }
-        // Cloudy
-        return '/cloudy_sky.png';
-    }
-};
-
-const getWeatherBgVideo = (code, hour) => {
-    const isNight = hour >= 19 || hour < 6;
-    
-    const isRainy = (code >= 200 && code < 700);
-    const isClear = (code === 800);
-    const isCloudy = (code > 800 || (code >= 700 && code < 800));
-
-    if (isRainy) {
-        return '/rainy_sky.mp4';
-    }
-    if (isCloudy) {
-        return '/cloudy_sky.mp4';
-    }
-    if (isClear) {
+    if (isDark) {
         if (isNight) {
-            return '/clear_night.mp4';
+            if (isRainy) {
+                return 'linear-gradient(135deg, #090d16 0%, #1e1b4b 100%)';
+            }
+            if (isCloudy) {
+                return 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)';
+            }
+            return 'linear-gradient(135deg, #020617 0%, #0f172a 100%)';
         } else {
-            return '/clear_day.mp4';
+            if (isRainy) {
+                return 'linear-gradient(135deg, #334155 0%, #1e293b 100%)';
+            }
+            if (isClear) {
+                return 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)';
+            }
+            return 'linear-gradient(135deg, #475569 0%, #334155 100%)';
+        }
+    } else {
+        if (isNight) {
+            if (isRainy) {
+                return 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)';
+            }
+            if (isCloudy) {
+                return 'linear-gradient(135deg, #f1f5f9 0%, #cbd5e1 100%)';
+            }
+            return 'linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%)';
+        } else {
+            if (isRainy) {
+                return 'linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)';
+            }
+            if (isClear) {
+                return 'linear-gradient(135deg, #fef9c3 0%, #fef08a 100%)';
+            }
+            return 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)';
         }
     }
-    // Fallback/Default
-    return '/clear_day.mp4';
 };
 
-const getTextColor = () => '#ffffff';
+const getTextColor = (isDark) => isDark ? '#ffffff' : '#0f172a';
 
 const formatHour = (timestamp) => {
     const date = new Date(timestamp * 1000);
@@ -204,6 +187,22 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
     const [hoveredDay, setHoveredDay] = useState(null);
     const [hoveredTab, setHoveredTab] = useState(null);
 
+    const [isDarkMode, setIsDarkMode] = useState(() =>
+        document.documentElement.classList.contains('dark')
+    );
+
+    useEffect(() => {
+        setIsDarkMode(document.documentElement.classList.contains('dark'));
+        const observer = new MutationObserver(() => {
+            setIsDarkMode(document.documentElement.classList.contains('dark'));
+        });
+        observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['class'],
+        });
+        return () => observer.disconnect();
+    }, []);
+
     useEffect(() => {
         const clock = setInterval(() => setNow(new Date()), 1000);
         return () => clearInterval(clock);
@@ -280,8 +279,8 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
     const sunsetTime = weather ? formatTime(weather.sys.sunset) : '--';
 
     const baseCardStyle = {
-        background: 'rgba(255,255,255,0.12)',
-        border: '1px solid rgba(255,255,255,0.18)',
+        background: isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.4)',
+        border: isDarkMode ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(255,255,255,0.6)',
         borderRadius: '12px',
         padding: '0.6rem 1rem',
         display: 'flex',
@@ -292,37 +291,44 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
         transition: 'background 0.2s, transform 0.2s, box-shadow 0.2s',
     };
 
+    const activeHoverStyle = {
+        background: isDarkMode ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.65)',
+        transform: 'translateY(-3px)',
+        boxShadow: isDarkMode ? '0 6px 18px rgba(0,0,0,0.2)' : '0 6px 18px rgba(0,0,0,0.08)',
+    };
+
     if (loading) return (
         <div style={{
             borderRadius: '20px', padding: '1.5rem 1.75rem',
-            background: 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)',
+            background: isDarkMode
+                ? 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)'
+                : 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
             minHeight: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center'
         }}>
-            <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '14px' }}>Loading weather...</p>
+            <p style={{ color: isDarkMode ? 'rgba(255,255,255,0.5)' : 'rgba(15,23,42,0.5)', fontSize: '14px' }}>Loading weather...</p>
         </div>
     );
 
     if (error) return (
         <div style={{
             borderRadius: '20px', padding: '1.5rem',
-            background: 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)',
+            background: isDarkMode
+                ? 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)'
+                : 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between'
         }}>
-            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px' }}>{error}</p>
+            <p style={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : 'rgba(15,23,42,0.6)', fontSize: '14px' }}>{error}</p>
             <button onClick={() => fetchWeather(true)} style={{
-                background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)',
-                color: '#fff', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer'
+                background: isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)', border: isDarkMode ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(0,0,0,0.15)',
+                color: isDarkMode ? '#fff' : '#0f172a', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer'
             }}>Retry</button>
         </div>
     );
 
     const code = weather.weather[0].id;
     const hour = now.getHours();
-    const isNight = hour >= 19 || hour < 6;
-    const bg = getWeatherBg(code, hour);
-    const bgImage = getWeatherBgImage(code, hour);
-    const bgVideo = getWeatherBgVideo(code, hour);
-    const textColor = getTextColor(code, hour);
+    const bgGradient = getWeatherGradient(code, hour, isDarkMode);
+    const textColor = getTextColor(isDarkMode);
 
     // Dashboard decision-support card — 3-level visual hierarchy.
     if (variant === 'dashboard') {
@@ -344,98 +350,78 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
         let rec, recAccent;
         if (rainIsHigh) {
             rec = 'Possible rainfall — postpone irrigation and prepare drainage channels.';
-            recAccent = 'text-blue-200';
+            recAccent = isDarkMode ? 'text-blue-200' : 'text-blue-700';
         } else if (heatHigh) {
             rec = 'High heat detected — irrigate early morning or late afternoon to reduce crop stress.';
-            recAccent = 'text-orange-200';
+            recAccent = isDarkMode ? 'text-orange-200' : 'text-orange-700';
         } else if (humidHigh) {
             rec = 'High humidity — monitor crops closely for fungal disease and leaf blight risk.';
-            recAccent = 'text-yellow-200';
+            recAccent = isDarkMode ? 'text-yellow-200' : 'text-amber-700';
         } else if (windHigh) {
             rec = 'Strong winds expected — secure lightweight materials and delay aerial spraying.';
-            recAccent = 'text-purple-200';
+            recAccent = isDarkMode ? 'text-purple-200' : 'text-purple-700';
         } else if (isClear) {
             rec = 'Good conditions — proceed with scheduled field activities and soil preparation.';
-            recAccent = 'text-emerald-200';
+            recAccent = isDarkMode ? 'text-emerald-200' : 'text-emerald-700';
         } else {
             rec = 'Stable conditions — proceed with routine field work and monitor for changes.';
-            recAccent = 'text-emerald-200';
+            recAccent = isDarkMode ? 'text-emerald-200' : 'text-emerald-700';
         }
+
+        const textPrimary = isDarkMode ? 'text-white' : 'text-slate-900';
+        const textSecondary = isDarkMode ? 'text-white/80' : 'text-slate-700';
+        const textMuted = isDarkMode ? 'text-white/50' : 'text-slate-500';
+        const textGhost = isDarkMode ? 'text-white/40' : 'text-slate-400';
+        const cardBg = isDarkMode 
+            ? 'bg-white/8 border-white/10 hover:bg-white/12 hover:border-white/20' 
+            : 'bg-white/40 border-white/60 hover:bg-white/60 hover:border-white/80';
+        const cardShadow = isDarkMode ? 'hover:shadow-lg' : 'hover:shadow-md';
 
         return (
             <div
-                className="rounded-2xl text-white overflow-hidden shadow-md flex flex-col lg:flex-row lg:items-stretch lg:p-7 lg:gap-7 relative"
+                className={`rounded-2xl overflow-hidden shadow-md flex flex-col lg:flex-row lg:items-stretch p-5 lg:p-6 gap-4 lg:gap-6 relative transition-all duration-500 ${textPrimary}`}
                 style={{
-                    background: bg,
+                    backgroundImage: bgGradient,
                 }}
             >
-                {bgVideo && (
-                    <video
-                        key={bgVideo}
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
-                        style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                            zIndex: 0,
-                            pointerEvents: 'none',
-                            opacity: isNight ? (bgVideo === '/clear_night.mp4' ? 0.38 : 0.15) : 0.38,
-                            filter: isNight && bgVideo !== '/clear_night.mp4' ? 'brightness(0.2) saturate(0.2) contrast(1.3)' : 'none',
-                        }}
-                    >
-                        <source src={bgVideo} type="video/mp4" />
-                    </video>
-                )}
-
-                {/* ── SECTION 1: Primary weather summary ── */}
-                <div className="px-5 pt-4 pb-3 lg:px-0 lg:py-0 flex items-start lg:items-center justify-between gap-3 lg:w-80 lg:shrink-0 relative z-10">
+                {/* ── SECTION 1: Primary weather summary card ── */}
+                <div className={`rounded-xl border p-5 flex items-center justify-between gap-4 lg:w-80 lg:shrink-0 relative z-10 transition-all duration-300 hover:scale-[1.02] cursor-pointer ${cardBg} ${cardShadow}`}>
                     <div className="min-w-0">
-                        <p className="text-[10px] lg:text-[11px] font-bold uppercase tracking-widest text-emerald-300/70 mb-1.5">
+                        <p className={`text-[10px] lg:text-[11px] font-bold uppercase tracking-widest mb-1.5 ${isDarkMode ? 'text-emerald-300/70' : 'text-emerald-700/80'}`}>
                             Local Weather
                         </p>
                         {/* Dominant temperature */}
                         <div className="flex items-end gap-2 leading-none">
-                            <span className="text-[2.75rem] lg:text-[3.25rem] font-bold tracking-tight leading-none">
+                            <span className="text-[2.5rem] lg:text-[3rem] font-bold tracking-tight leading-none">
                                 {tempC}{typeof tempC === 'number' ? '°C' : ''}
                             </span>
                             {feelsLike !== null && (
-                                <span className="text-xs lg:text-sm text-white/50 pb-1.5 lg:pb-2">
+                                <span className={`text-xs lg:text-sm pb-1 ${textMuted}`}>
                                     Feels {feelsLike}°
                                 </span>
                             )}
                         </div>
                         {/* Condition + location */}
-                        <p className="mt-1 lg:mt-1.5 text-sm lg:text-base text-white/80 capitalize font-medium">{description}</p>
-                        <div className="mt-0.5 lg:mt-1 flex items-center gap-1 text-xs lg:text-sm text-white/40">
+                        <p className={`mt-2 text-sm lg:text-base capitalize font-medium ${textSecondary}`}>{description}</p>
+                        <div className={`mt-1 flex items-center gap-1 text-xs lg:text-sm ${textGhost}`}>
                             <MapPin size={10} className="lg:size-[12px]" />
                             <span className="truncate">{locationLabel}</span>
                         </div>
                     </div>
 
                     {/* Weather icon — time-of-day aware */}
-                    <div className="shrink-0 rounded-2xl bg-white/10 p-3 lg:p-4 mt-1">
+                    <div className={`shrink-0 rounded-2xl p-3 lg:p-4 ${isDarkMode ? 'bg-white/10' : 'bg-slate-900/5'}`}>
                         {getWeatherIcon(code, 44, hour)}
                     </div>
                 </div>
 
-                {/* Divider */}
-                <div className="border-t border-white/10 mx-5 lg:hidden relative z-10" />
-                <div className="hidden lg:block border-l border-white/10 self-stretch my-1 relative z-10" />
-
                 {/* Right side container for Desktop horizontal flow */}
                 <div className="flex-1 flex flex-col justify-between gap-3 lg:gap-4 relative z-10">
-
                     {/* ── SECTION 2: Key metrics grid (3-column) ── */}
-                    <div className="px-5 py-3 lg:px-0 lg:py-0 grid grid-cols-3 gap-2 lg:gap-3">
+                    <div className="grid grid-cols-3 gap-2 lg:gap-3">
                         {/* Humidity */}
-                        <div className="rounded-xl bg-white/8 border border-white/10 px-3 py-2.5 lg:px-4 lg:py-3.5">
-                            <div className="flex items-center gap-1.5 text-emerald-200/70 mb-1">
+                        <div className={`rounded-xl border px-3 py-2.5 lg:px-4 lg:py-3.5 transition-all duration-300 hover:scale-[1.03] cursor-pointer ${cardBg} ${cardShadow}`}>
+                            <div className={`flex items-center gap-1.5 mb-1 ${isDarkMode ? 'text-emerald-200/70' : 'text-emerald-700/80'}`}>
                                 <Droplets size={13} className="lg:size-[15px]" />
                                 <span className="text-[10px] lg:text-[11px] font-semibold uppercase tracking-wider">Humidity</span>
                             </div>
@@ -443,8 +429,8 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                         </div>
 
                         {/* Rain probability */}
-                        <div className="rounded-xl bg-white/8 border border-white/10 px-3 py-2.5 lg:px-4 lg:py-3.5">
-                            <div className="flex items-center gap-1.5 text-blue-200/70 mb-1">
+                        <div className={`rounded-xl border px-3 py-2.5 lg:px-4 lg:py-3.5 transition-all duration-300 hover:scale-[1.03] cursor-pointer ${cardBg} ${cardShadow}`}>
+                            <div className={`flex items-center gap-1.5 mb-1 ${isDarkMode ? 'text-blue-200/70' : 'text-blue-700/80'}`}>
                                 <CloudRain size={13} className="lg:size-[15px]" />
                                 <span className="text-[10px] lg:text-[11px] font-semibold uppercase tracking-wider">Rain</span>
                             </div>
@@ -452,26 +438,26 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                         </div>
 
                         {/* Wind speed */}
-                        <div className="rounded-xl bg-white/8 border border-white/10 px-3 py-2.5 lg:px-4 lg:py-3.5">
-                            <div className="flex items-center gap-1.5 text-white/50 mb-1">
+                        <div className={`rounded-xl border px-3 py-2.5 lg:px-4 lg:py-3.5 transition-all duration-300 hover:scale-[1.03] cursor-pointer ${cardBg} ${cardShadow}`}>
+                            <div className={`flex items-center gap-1.5 mb-1 ${isDarkMode ? 'text-white/50' : 'text-slate-500/80'}`}>
                                 <Wind size={13} className="lg:size-[15px]" />
                                 <span className="text-[10px] lg:text-[11px] font-semibold uppercase tracking-wider">Wind</span>
                             </div>
                             <p className="text-lg lg:text-xl font-bold leading-none">
                                 {windKmh !== null ? `${windKmh}` : '--'}
-                                <span className="text-xs lg:text-sm font-normal ml-0.5 text-white/50">km/h</span>
+                                <span className={`text-xs lg:text-sm font-normal ml-0.5 ${textMuted}`}>km/h</span>
                             </p>
                         </div>
                     </div>
 
                     {/* ── SECTION 3: Smart recommendation banner ── */}
-                    <div className="mx-5 mb-4 lg:mx-0 lg:mb-0 rounded-xl bg-white/8 border border-white/10 px-4 py-3 lg:px-5 lg:py-4 flex items-start gap-3">
+                    <div className={`rounded-xl border px-4 py-3 lg:px-5 lg:py-4 flex items-start gap-3 transition-all duration-300 hover:scale-[1.01] cursor-pointer ${cardBg} ${cardShadow}`}>
                         {/* Icon */}
-                        <div className="shrink-0 mt-0.5 rounded-lg bg-white/10 p-1.5 lg:p-2">
-                            <Thermometer size={14} className="text-emerald-300 lg:size-[16px]" />
+                        <div className={`shrink-0 mt-0.5 rounded-lg p-1.5 lg:p-2 ${isDarkMode ? 'bg-white/10' : 'bg-slate-900/5'}`}>
+                            <Thermometer size={14} className={`${isDarkMode ? 'text-emerald-300' : 'text-emerald-600'} lg:size-[16px]`} />
                         </div>
                         <div>
-                            <p className="text-[11px] lg:text-xs font-bold uppercase tracking-widest text-white/50 mb-0.5">
+                            <p className={`text-[11px] lg:text-xs font-bold uppercase tracking-widest mb-0.5 ${textMuted}`}>
                                 Recommended Action
                             </p>
                             <p className={`text-[13px] lg:text-[15px] font-medium leading-snug ${recAccent}`}>
@@ -506,33 +492,10 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
     return (
         <div style={{
             borderRadius: '20px', padding: '1.5rem 1.75rem',
-            background: bg,
+            backgroundImage: bgGradient,
             transition: 'background 1.5s ease',
             color: textColor, position: 'relative', overflow: 'hidden', fontFamily: 'inherit'
         }}>
-            {bgVideo && (
-                <video
-                    key={bgVideo}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                        zIndex: 0,
-                        pointerEvents: 'none',
-                        opacity: isNight ? (bgVideo === '/clear_night.mp4' ? 0.38 : 0.15) : 0.38,
-                        filter: isNight && bgVideo !== '/clear_night.mp4' ? 'brightness(0.2) saturate(0.2) contrast(1.3)' : 'none',
-                    }}
-                >
-                    <source src={bgVideo} type="video/mp4" />
-                </video>
-            )}
             {/* Decorative circles */}
             <div style={{ position: 'absolute', top: '-40px', right: '-40px', width: '180px', height: '180px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', pointerEvents: 'none', zIndex: 1 }} />
             <div style={{ position: 'absolute', bottom: '-60px', left: '30%', width: '240px', height: '240px', borderRadius: '50%', background: 'rgba(255,255,255,0.04)', pointerEvents: 'none', zIndex: 1 }} />
@@ -571,7 +534,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                         key={i}
                         style={{
                             ...baseCardStyle,
-                            ...(hoveredPill === i ? hoverStyle : {}),
+                            ...(hoveredPill === i ? activeHoverStyle : {}),
                         }}
                         onMouseEnter={() => setHoveredPill(i)}
                         onMouseLeave={() => setHoveredPill(null)}
@@ -584,7 +547,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
             </div>
 
             {/* Divider */}
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.12)', margin: '1.25rem 0 1rem', position: 'relative', zIndex: 10 }} />
+            <div style={{ borderTop: isDarkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(15,23,42,0.1)', margin: '1.25rem 0 1rem', position: 'relative', zIndex: 10 }} />
 
             {/* Tabs */}
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.875rem', position: 'relative', zIndex: 10 }}>
@@ -596,11 +559,11 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                         onMouseLeave={() => setHoveredTab(null)}
                         style={{
                             background: activeTab === tab.key
-                                ? 'rgba(255,255,255,0.25)'
+                                ? (isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.65)')
                                 : hoveredTab === tab.key
-                                    ? 'rgba(255,255,255,0.18)'
-                                    : 'rgba(255,255,255,0.08)',
-                            border: '1px solid rgba(255,255,255,0.18)',
+                                    ? (isDarkMode ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.5)')
+                                    : (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.3)'),
+                            border: isDarkMode ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(255,255,255,0.5)',
                             color: textColor,
                             borderRadius: '8px',
                             padding: '5px 14px',
@@ -627,13 +590,15 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                             onMouseLeave={() => setHoveredHour(null)}
                             style={{
                                 flex: 1, minWidth: '64px',
-                                background: hoveredHour === i ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)',
-                                border: '1px solid rgba(255,255,255,0.12)',
+                                background: hoveredHour === i
+                                    ? (isDarkMode ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.65)')
+                                    : (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.3)'),
+                                border: isDarkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(255,255,255,0.4)',
                                 borderRadius: '12px', padding: '0.6rem 0.5rem', textAlign: 'center',
                                 cursor: 'pointer',
                                 transition: 'background 0.2s, transform 0.2s, box-shadow 0.2s',
                                 transform: hoveredHour === i ? 'translateY(-3px)' : 'none',
-                                boxShadow: hoveredHour === i ? '0 6px 18px rgba(0,0,0,0.2)' : 'none',
+                                boxShadow: hoveredHour === i ? (isDarkMode ? '0 6px 18px rgba(0,0,0,0.2)' : '0 6px 18px rgba(0,0,0,0.08)') : 'none',
                             }}
                         >
                             <div style={{ fontSize: '11px', opacity: 0.6 }}>{i === 0 ? 'Now' : formatHour(f.dt)}</div>
@@ -659,13 +624,15 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                             onMouseLeave={() => setHoveredDay(null)}
                             style={{
                                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                background: hoveredDay === i ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)',
-                                border: '1px solid rgba(255,255,255,0.12)',
+                                background: hoveredDay === i
+                                    ? (isDarkMode ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.65)')
+                                    : (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.3)'),
+                                border: isDarkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(255,255,255,0.4)',
                                 borderRadius: '12px', padding: '0.6rem 1rem',
                                 cursor: 'pointer',
                                 transition: 'background 0.2s, transform 0.2s, box-shadow 0.2s',
                                 transform: hoveredDay === i ? 'translateY(-2px)' : 'none',
-                                boxShadow: hoveredDay === i ? '0 6px 18px rgba(0,0,0,0.2)' : 'none',
+                                boxShadow: hoveredDay === i ? (isDarkMode ? '0 6px 18px rgba(0,0,0,0.2)' : '0 6px 18px rgba(0,0,0,0.08)') : 'none',
                             }}
                         >
                             <div style={{ fontSize: '13px', fontWeight: 600, minWidth: '90px' }}>{getDayLabel(d.dt)}</div>

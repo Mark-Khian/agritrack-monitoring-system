@@ -22,4 +22,15 @@ const loginLimiter = rateLimit({
     }
 });
 
-module.exports = { apiLimiter, loginLimiter };
+// Limiter for export routes (PDF generation is resource intensive)
+const exportLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000, // 5 minutes
+    max: 10,                 // max 10 export requests per 5 minutes
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        message: 'Too many export requests. Please try again after 5 minutes.'
+    }
+});
+
+module.exports = { apiLimiter, loginLimiter, exportLimiter };

@@ -9,7 +9,7 @@ import {
     Wheat, TrendingUp, Sprout, Award, Activity,
     BarChart2, Home, Tractor, Map as MapIcon,
     Shovel, Droplets, Bug, Scissors,
-    FlaskConical, Package, ChevronRight
+    FlaskConical, Package, ChevronRight, ChevronDown
 } from 'lucide-react';
 import {
     SkeletonPageHeader,
@@ -33,27 +33,49 @@ const PLANTING_VARIETY_CLASS_FILTERS = [
     { value: 'Upland Varieties', label: 'Upland' },
 ];
 
-const harvestByMonth = (items) => {
+const harvestByMonth = (items, plantings) => {
     const months = {};
+    const plantingById = new Map((plantings || []).map((p) => [p.id, p]));
+
     items.forEach((h) => {
         const d = h?.harvest_date ? new Date(h.harvest_date) : null;
         if (!d || Number.isNaN(d.getTime())) return;
         const key = d.toLocaleString('default', { month: 'short', year: '2-digit' });
-        months[key] = (months[key] || 0) + Number(h.yield_kg || 0);
+        if (!months[key]) {
+            months[key] = {
+                yield_kg: 0,
+                harvestsList: []
+            };
+        }
+        months[key].yield_kg += Number(h.yield_kg || 0);
+        
+        const p = plantingById.get(h?.planting_id);
+        const variety = p?.variety || p?.rice_variety || p?.variety_name || 'Unknown Variety';
+        const field_name = p?.field_name || 'No Field';
+        
+        months[key].harvestsList.push({
+            ...h,
+            variety,
+            field_name
+        });
     });
 
     // Sort by actual date (not by string).
-    const entries = Object.entries(months).map(([month, yield_kg]) => {
+    const entries = Object.entries(months).map(([month, data]) => {
         const [mon, yr] = month.split(' ');
-        const year = `20${yr}`; // matches "Jan 24"
-        // Use first day of month as sort anchor.
+        const year = `20${yr}`;
         const dt = new Date(`${mon} 1, ${year}`);
-        return { month, yield_kg, _dt: dt };
+        return { 
+            month, 
+            yield_kg: Number(data.yield_kg.toFixed(0)), 
+            harvestsList: data.harvestsList,
+            _dt: dt 
+        };
     });
 
     return entries
         .sort((a, b) => a._dt - b._dt)
-        .map(({ month, yield_kg }) => ({ month, yield_kg: Number(yield_kg.toFixed(0)) }));
+        .map(({ month, yield_kg, harvestsList }) => ({ month, yield_kg, harvestsList }));
 };
 
 const getPlaceholderMonths = () => {
@@ -63,10 +85,51 @@ const getPlaceholderMonths = () => {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         data.push({
             month: d.toLocaleString('default', { month: 'short', year: '2-digit' }),
-            yield_kg: 0
+            yield_kg: 0,
+            harvestsList: []
         });
     }
     return data;
+};
+
+const fillTimelineData = (data) => {
+    if (!data || data.length === 0) return getPlaceholderMonths();
+    const timeline = getPlaceholderMonths();
+    const yieldMap = {};
+    data.forEach(item => {
+        yieldMap[item.month] = {
+            yield_kg: item.yield_kg,
+            harvestsList: item.harvestsList
+        };
+    });
+    
+    let merged = timeline.map(t => {
+        if (yieldMap[t.month] !== undefined) {
+            const entry = yieldMap[t.month];
+            delete yieldMap[t.month];
+            return { ...t, yield_kg: entry.yield_kg, harvestsList: entry.harvestsList };
+        }
+        return { ...t, harvestsList: [] };
+    });
+    
+    const extraEntries = Object.entries(yieldMap).map(([month, entry]) => {
+        return { month, yield_kg: entry.yield_kg, harvestsList: entry.harvestsList };
+    });
+    
+    if (extraEntries.length > 0) {
+        merged = [...merged, ...extraEntries];
+    }
+    
+    const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    merged.sort((a, b) => {
+        const [monA, yrA] = a.month.split(' ');
+        const [monB, yrB] = b.month.split(' ');
+        const dateA = new Date(`20${yrA}`, monthsShort.indexOf(monA), 1);
+        const dateB = new Date(`20${yrB}`, monthsShort.indexOf(monB), 1);
+        return dateA - dateB;
+    });
+    
+    return merged;
 };
 
 const getSuccessRate = (harvests) => {
@@ -195,7 +258,7 @@ const Analytics = () => {
     const { token } = useAuth();
 
     const [dateRange, setDateRange] = useState('7d');
-    const [plantingFilters, setPlantingFilters] = useState({
+    const [plantingFilters] = useState({
         variety_class: '',
         variety_id: '',
         variety_null: false,
@@ -278,8 +341,8 @@ const Analytics = () => {
     }, [filteredHarvests, filteredPlantings]);
 
     const harvestYieldOverTime = useMemo(
-        () => harvestByMonth(filteredHarvests),
-        [filteredHarvests]
+        () => harvestByMonth(filteredHarvests, plantings),
+        [filteredHarvests, plantings]
     );
 
     const harvestQualityDistribution = useMemo(() => {
@@ -504,13 +567,45 @@ const Analytics = () => {
 
     const areaTooltip = ({ active, payload }) => {
         if (!active || !payload || payload.length === 0) return null;
-        const item = payload[0]?.payload;
+        const dataPoint = payload[0]?.payload;
+        if (!dataPoint) return null;
+        const harvestsList = dataPoint.harvestsList || [];
+        
         return (
-            <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
-                <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.month}</p>
-                <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">
-                    {item?.yield_kg ?? 0} <span className="text-xs font-normal text-gray-500">kg</span>
-                </p>
+            <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800 text-white rounded-xl p-3.5 shadow-2xl backdrop-blur-sm max-w-xs md:max-w-md">
+                <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
+                    <span className="text-xs font-semibold text-slate-400">{dataPoint.month}</span>
+                    <span className="text-sm font-bold text-emerald-400 ml-3">
+                        Total: {dataPoint.yield_kg.toLocaleString()} kg
+                    </span>
+                </div>
+                {harvestsList.length > 0 ? (
+                    <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                        {harvestsList.map((h, idx) => {
+                            const hDate = h.harvest_date 
+                                ? new Date(h.harvest_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                : '—';
+                            return (
+                                <div key={h.id || idx} className="text-xs flex flex-col border-b border-slate-800/40 last:border-0 pb-1.5 last:pb-0">
+                                    <div className="flex justify-between items-start gap-3">
+                                        <span className="font-semibold text-slate-200">
+                                            {h.variety || 'Unknown Variety'}
+                                        </span>
+                                        <span className="font-bold text-emerald-400 shrink-0">
+                                            {Number(h.yield_kg || 0).toLocaleString()} kg
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
+                                        <span>{h.field_name || 'No Field'}</span>
+                                        <span>{hDate}</span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    <p className="text-[11px] text-slate-500 italic">No detailed harvests recorded</p>
+                )}
             </div>
         );
     };
@@ -659,40 +754,7 @@ const Analytics = () => {
                 </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                <span className="font-medium text-gray-500">Plantings filter (API):</span>
-                <select
-                    value={plantingFilters.variety_class}
-                    onChange={(e) => setPlantingFilters((f) => ({ ...f, variety_class: e.target.value }))}
-                    className="rounded-lg border border-gray-200 px-2 py-1.5 bg-white max-w-[200px]"
-                >
-                    {PLANTING_VARIETY_CLASS_FILTERS.map((o) => (
-                        <option key={o.value || 'all'} value={o.value}>{o.label}</option>
-                    ))}
-                </select>
-                <input
-                    type="number"
-                    min="1"
-                    placeholder="variety_id"
-                    disabled={plantingFilters.variety_null}
-                    value={plantingFilters.variety_id}
-                    onChange={(e) => setPlantingFilters((f) => ({ ...f, variety_id: e.target.value }))}
-                    className="w-24 rounded-lg border border-gray-200 px-2 py-1.5 bg-white disabled:opacity-50"
-                />
-                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
-                    <input
-                        type="checkbox"
-                        checked={plantingFilters.variety_null}
-                        onChange={(e) => setPlantingFilters((f) => ({
-                            ...f,
-                            variety_null: e.target.checked,
-                            variety_id: e.target.checked ? '' : f.variety_id,
-                        }))}
-                        className="rounded border-gray-300 text-emerald-700"
-                    />
-                    Catalog unlinked only
-                </label>
-            </div>
+
 
             {/* KPI Cards */}
             <div className="grid grid-cols-4 gap-1.5 md:grid-cols-2 xl:grid-cols-4 md:gap-4 lg:gap-6">
@@ -767,7 +829,7 @@ const Analytics = () => {
 
                 {(() => {
                     const isPlaceholder = harvestYieldOverTime.length === 0;
-                    const chartData = isPlaceholder ? getPlaceholderMonths() : harvestYieldOverTime;
+                    const chartData = isPlaceholder ? getPlaceholderMonths() : fillTimelineData(harvestYieldOverTime);
                     return (
                         <div className="h-[220px] relative">
                             <ResponsiveContainer width="100%" height={220}>
@@ -1171,38 +1233,19 @@ const Analytics = () => {
                         <p>No field data yet.</p>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-white">
-                                    <th className="px-5 py-3">FIELD NAME</th>
-                                    <th className="px-5 py-3">SIZE (ha)</th>
-                                    <th className="px-5 py-3">PLANTINGS</th>
-                                    <th className="px-5 py-3">HARVESTS</th>
-                                    <th className="px-5 py-3">TOTAL YIELD</th>
-                                    <th className="px-5 py-3">AVG YIELD</th>
-                                    <th className="px-5 py-3">TOP VARIETY</th>
-                                    <th className="px-5 py-3">STATUS</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {fieldRows.map((row) => (
-                                    <tr
-                                        key={row.fieldId}
-                                        className="hover:bg-emerald-50/40 dark:hover:bg-slate-800/50 transition-colors"
-                                    >
-                                        <td className="px-5 py-3 font-semibold text-gray-900">{row.fieldName}</td>
-                                        <td className="px-5 py-3 text-gray-700">{row.size} ha</td>
-                                        <td className="px-5 py-3 text-gray-700">{row.plantingsCount}</td>
-                                        <td className="px-5 py-3 text-gray-700">{row.harvestCount}</td>
-                                        <td className="px-5 py-3 text-gray-700 font-semibold">
-                                            {row.totalYield.toLocaleString()} <span className="text-gray-500 font-normal">kg</span>
-                                        </td>
-                                        <td className="px-5 py-3 text-gray-700">
-                                            {row.avgYield.toLocaleString()} <span className="text-gray-500 font-normal">kg</span>
-                                        </td>
-                                        <td className="px-5 py-3 text-gray-700">{formatVariant(row.topVariety)}</td>
-                                        <td className="px-5 py-3">
+                    <>
+                        {/* Mobile card list */}
+                        <div className="md:hidden space-y-3">
+                            {fieldRows.map((row) => (
+                                <div
+                                    key={row.fieldId}
+                                    className="rounded-2xl border border-gray-100 bg-white dark:bg-slate-800 dark:border-slate-700 shadow-sm p-4"
+                                >
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <p className="font-bold text-gray-900 dark:text-slate-100 break-words">{row.fieldName}</p>
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
                                             <span
                                                 className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${row.status === 'Active'
                                                     ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
@@ -1211,12 +1254,90 @@ const Analytics = () => {
                                             >
                                                 {row.status}
                                             </span>
-                                        </td>
+                                        </div>
+                                    </div>
+                                    <div className="mt-3 border-t border-gray-100 dark:border-slate-700 pt-3 space-y-2.5 text-sm">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Size</span>
+                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right break-words">{row.size} ha</span>
+                                        </div>
+                                        <div className="flex items-start justify-between gap-3">
+                                            <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Plantings</span>
+                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">{row.plantingsCount}</span>
+                                        </div>
+                                        <div className="flex items-start justify-between gap-3">
+                                            <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Harvests</span>
+                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">{row.harvestCount}</span>
+                                        </div>
+                                        <div className="flex items-start justify-between gap-3">
+                                            <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Total Yield</span>
+                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">
+                                                {row.totalYield.toLocaleString()} <span className="text-gray-500 dark:text-slate-500 font-normal">kg</span>
+                                            </span>
+                                        </div>
+                                        <div className="flex items-start justify-between gap-3">
+                                            <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Avg Yield</span>
+                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">
+                                                {row.avgYield.toLocaleString()} <span className="text-gray-500 dark:text-slate-500 font-normal">kg</span>
+                                            </span>
+                                        </div>
+                                        <div className="flex items-start justify-between gap-3">
+                                            <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Top Variety</span>
+                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">{formatVariant(row.topVariety)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Desktop / tablet table */}
+                        <div className="hidden md:block overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-white dark:bg-slate-800">
+                                        <th className="px-5 py-3">FIELD NAME</th>
+                                        <th className="px-5 py-3">SIZE (ha)</th>
+                                        <th className="px-5 py-3">PLANTINGS</th>
+                                        <th className="px-5 py-3">HARVESTS</th>
+                                        <th className="px-5 py-3">TOTAL YIELD</th>
+                                        <th className="px-5 py-3">AVG YIELD</th>
+                                        <th className="px-5 py-3">TOP VARIETY</th>
+                                        <th className="px-5 py-3">STATUS</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+                                    {fieldRows.map((row) => (
+                                        <tr
+                                            key={row.fieldId}
+                                            className="hover:bg-emerald-50/40 dark:hover:bg-slate-800/50 transition-colors"
+                                        >
+                                            <td className="px-5 py-3 font-semibold text-gray-900 dark:text-slate-100">{row.fieldName}</td>
+                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200">{row.size} ha</td>
+                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200">{row.plantingsCount}</td>
+                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200">{row.harvestCount}</td>
+                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200 font-semibold">
+                                                {row.totalYield.toLocaleString()} <span className="text-gray-500 dark:text-slate-500 font-normal">kg</span>
+                                            </td>
+                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200">
+                                                {row.avgYield.toLocaleString()} <span className="text-gray-500 dark:text-slate-500 font-normal">kg</span>
+                                            </td>
+                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200">{formatVariant(row.topVariety)}</td>
+                                            <td className="px-5 py-3">
+                                                <span
+                                                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${row.status === 'Active'
+                                                        ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
+                                                        : 'bg-gray-100 dark:bg-slate-800/60 text-gray-700 dark:text-slate-300'
+                                                        }`}
+                                                >
+                                                    {row.status}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
                 )}
             </section>
 
@@ -1233,53 +1354,111 @@ const Analytics = () => {
                         <p>No harvest records found.</p>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-white">
-                                    <th className="px-5 py-3">VARIETY</th>
-                                    <th className="px-5 py-3">FIELD</th>
-                                    <th className="px-5 py-3">HARVEST DATE</th>
-                                    <th className="px-5 py-3">YIELD (kg)</th>
-                                    <th className="px-5 py-3">YIELD CLASS</th>
-                                    <th className="px-5 py-3">LIFECYCLE</th>
-                                    <th className="px-5 py-3">QUALITY GRADE</th>
-                                    <th className="px-5 py-3">REMARKS</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {recentHarvests.map((h) => {
-                                    const p = plantingById.get(h?.planting_id);
-                                    const variety = h.planting_variety || p?.variety || p?.variety_name || '—';
-                                    const fieldName = h.field_name || p?.field_name || '—';
-                                    const yieldClass = getYieldClass(h?.yield_kg);
-                                    const lifecyclePct = getLifecycleProgressPercent(p);
-                                    return (
-                                        <tr key={h.id} className="hover:bg-emerald-50/40 dark:hover:bg-slate-800/50 transition-colors">
-                                            <td className="px-5 py-3 font-semibold text-gray-900">{variety}</td>
-                                            <td className="px-5 py-3 text-gray-700">{fieldName}</td>
-                                            <td className="px-5 py-3 text-gray-700">{h.harvest_date?.slice(0, 10) || '—'}</td>
-                                            <td className="px-5 py-3 text-gray-700 font-semibold">{Number(h.yield_kg || 0).toLocaleString()}</td>
-                                            <td className="px-5 py-3">
+                    <>
+                        {/* Mobile card list */}
+                        <div className="md:hidden space-y-3">
+                            {recentHarvests.map((h) => {
+                                const p = plantingById.get(h?.planting_id);
+                                const variety = h.planting_variety || p?.variety || p?.variety_name || '—';
+                                const fieldName = h.field_name || p?.field_name || '—';
+                                const yieldClass = getYieldClass(h?.yield_kg);
+                                const lifecyclePct = getLifecycleProgressPercent(p);
+                                return (
+                                    <div
+                                        key={h.id}
+                                        className="rounded-2xl border border-gray-100 bg-white dark:bg-slate-800 dark:border-slate-700 shadow-sm p-4"
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <p className="font-bold text-gray-900 dark:text-slate-100 break-words">{variety}</p>
+                                                <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{fieldName}</p>
+                                            </div>
+                                            <div className="flex items-center gap-1 shrink-0">
                                                 <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${yieldClass.className}`}>
                                                     {yieldClass.label}
                                                 </span>
-                                            </td>
-                                            <td className="px-5 py-3 text-gray-700 font-semibold">
-                                                {lifecyclePct}%
-                                            </td>
-                                            <td className="px-5 py-3">
-                                                <QualityBadge grade={h.quality_grade} />
-                                            </td>
-                                            <td className="px-5 py-3 text-gray-600 text-xs max-w-[260px] truncate" title={h.remarks}>
-                                                {h.remarks || '—'}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
+                                            </div>
+                                        </div>
+                                        <div className="mt-3 border-t border-gray-100 dark:border-slate-700 pt-3 space-y-2.5 text-sm">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Harvest Date</span>
+                                                <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">{h.harvest_date?.slice(0, 10) || '—'}</span>
+                                            </div>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Yield</span>
+                                                <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">
+                                                    {Number(h.yield_kg || 0).toLocaleString()} <span className="text-gray-500 dark:text-slate-500 font-normal">kg</span>
+                                                </span>
+                                            </div>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Lifecycle</span>
+                                                <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">{lifecyclePct}%</span>
+                                            </div>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Quality Grade</span>
+                                                <span className="text-right">
+                                                    <QualityBadge grade={h.quality_grade} />
+                                                </span>
+                                            </div>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Remarks</span>
+                                                <span className="font-medium text-gray-600 dark:text-slate-300 text-right text-xs max-w-[200px] break-words">{h.remarks || '—'}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Desktop / tablet table */}
+                        <div className="hidden md:block overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-white dark:bg-slate-800">
+                                        <th className="px-5 py-3">VARIETY</th>
+                                        <th className="px-5 py-3">FIELD</th>
+                                        <th className="px-5 py-3">HARVEST DATE</th>
+                                        <th className="px-5 py-3">YIELD (kg)</th>
+                                        <th className="px-5 py-3">YIELD CLASS</th>
+                                        <th className="px-5 py-3">LIFECYCLE</th>
+                                        <th className="px-5 py-3">QUALITY GRADE</th>
+                                        <th className="px-5 py-3">REMARKS</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+                                    {recentHarvests.map((h) => {
+                                        const p = plantingById.get(h?.planting_id);
+                                        const variety = h.planting_variety || p?.variety || p?.variety_name || '—';
+                                        const fieldName = h.field_name || p?.field_name || '—';
+                                        const yieldClass = getYieldClass(h?.yield_kg);
+                                        const lifecyclePct = getLifecycleProgressPercent(p);
+                                        return (
+                                            <tr key={h.id} className="hover:bg-emerald-50/40 dark:hover:bg-slate-800/50 transition-colors">
+                                                <td className="px-5 py-3 font-semibold text-gray-900 dark:text-slate-100">{variety}</td>
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-200">{fieldName}</td>
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-200">{h.harvest_date?.slice(0, 10) || '—'}</td>
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-200 font-semibold">{Number(h.yield_kg || 0).toLocaleString()}</td>
+                                                <td className="px-5 py-3">
+                                                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${yieldClass.className}`}>
+                                                        {yieldClass.label}
+                                                    </span>
+                                                </td>
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-200 font-semibold">
+                                                    {lifecyclePct}%
+                                                </td>
+                                                <td className="px-5 py-3">
+                                                    <QualityBadge grade={h.quality_grade} />
+                                                </td>
+                                                <td className="px-5 py-3 text-gray-600 dark:text-slate-300 text-xs max-w-[260px] truncate" title={h.remarks}>
+                                                    {h.remarks || '—'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
                 )}
             </section>
         </div>

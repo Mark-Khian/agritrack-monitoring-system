@@ -181,7 +181,7 @@ const generateActivityNotifications = async () => {
             const plotLabel = [row.variety, row.field_name].filter(Boolean).join(' · ');
             await insertNotification(
                 'activity_due',
-                `${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)} Due Today`,
+                `${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)} Due Today${plotLabel ? ` — ${plotLabel}` : ''}`,
                 `Your ${actLabel} activity is scheduled for today${plotLabel ? ` on ${plotLabel}` : ''}. Complete it to stay on track with your crop lifecycle.`,
                 row.activity_id
             );
@@ -222,7 +222,7 @@ const generateOverdueNotifications = async () => {
             const daysLabel = row.days_overdue === 1 ? '1 day' : `${row.days_overdue} days`;
             await insertNotification(
                 'activity_overdue',
-                `Overdue: ${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)}`,
+                `Overdue: ${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)}${plotLabel ? ` — ${plotLabel}` : ''}`,
                 `Your ${actLabel} activity${plotLabel ? ` on ${plotLabel}` : ''} is ${daysLabel} overdue. Take action immediately to protect crop health.`,
                 row.activity_id
             );
@@ -329,11 +329,47 @@ const generateWeatherNotifications = async () => {
  */
 const pruneNotifications = async () => {
     try {
-        console.log('[NotifService] Pruning notifications older than 24 hours...');
-        const [result] = await db.query(
-            'DELETE FROM notifications WHERE created_at < NOW() - INTERVAL 24 HOUR'
+        console.log('[NotifService] Pruning weather alerts older than 24 hours...');
+        const [weatherRes] = await db.query(
+            "DELETE FROM notifications WHERE type = 'weather_alert' AND created_at < NOW() - INTERVAL 24 HOUR"
         );
-        console.log(`[NotifService] Pruned ${result.affectedRows || 0} old notification(s).`);
+
+        console.log('[NotifService] Pruning inactive activity notifications...');
+        const [activityRes] = await db.query(`
+            DELETE n FROM notifications n
+            LEFT JOIN activities a ON n.related_id = a.id
+            LEFT JOIN plantings pl ON a.planting_id = pl.id
+            WHERE n.type IN ('activity_due', 'activity_overdue')
+              AND (
+                  a.id IS NULL
+                  OR a.status = 'completed'
+                  OR a.deleted_at IS NOT NULL
+                  OR pl.id IS NULL
+                  OR pl.status = 'completed'
+                  OR pl.lifecycle_state = 'HARVESTED'
+                  OR pl.lifecycle_state = 'ABANDONED'
+                  OR pl.deleted_at IS NOT NULL
+              )
+        `);
+
+        console.log('[NotifService] Pruning inactive lifecycle notifications...');
+        const [lifecycleRes] = await db.query(`
+            DELETE n FROM notifications n
+            LEFT JOIN plantings pl ON n.related_id = pl.id
+            WHERE n.type = 'lifecycle_update'
+              AND (
+                  pl.id IS NULL
+                  OR pl.status = 'completed'
+                  OR pl.lifecycle_state = 'HARVESTED'
+                  OR pl.lifecycle_state = 'ABANDONED'
+                  OR pl.deleted_at IS NOT NULL
+              )
+        `);
+
+        const totalPruned = (weatherRes.affectedRows || 0) + (activityRes.affectedRows || 0) + (lifecycleRes.affectedRows || 0);
+        if (totalPruned > 0) {
+            console.log(`[NotifService] Pruned ${totalPruned} obsolete/old notification(s).`);
+        }
     } catch (err) {
         console.error('[NotifService] pruneNotifications error:', err.message);
     }

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Edit2, Trash2, Wheat, AlertTriangle } from 'lucide-react';
+import { Plus, Edit2, Trash2, Wheat, AlertTriangle, ChevronDown } from 'lucide-react';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Badge from '../components/Badge';
 import { getHarvests, createHarvest, updateHarvest, deleteHarvest, getPlantings } from '../services/api';
 import { SkeletonTable } from '../components/Skeleton';
+import MonthPicker from '../components/MonthPicker';
 
 const Harvests = () => {
     const [harvests, setHarvests] = useState([]);
@@ -21,7 +22,7 @@ const Harvests = () => {
 
     const [formData, setFormData] = useState({
         planting_id: '', harvest_date: '', yield_kg: '',
-        quality_grade: 'A', remarks: ''
+        quality_grade: 'A', remarks: '', financial_value: ''
     });
 
     const getReadableFormError = (err) => {
@@ -58,7 +59,11 @@ const Harvests = () => {
         }
     }, []);
 
-    useEffect(() => { fetchData(); }, [fetchData]);
+    useEffect(() => {
+        fetchData();
+        const timer = setInterval(fetchData, 5000);
+        return () => clearInterval(timer);
+    }, [fetchData]);
 
     const handleOpenModal = (item = null) => {
         setFormError('');
@@ -68,14 +73,16 @@ const Harvests = () => {
                 harvest_date: item.harvest_date?.slice(0, 10) || '',
                 yield_kg: item.yield_kg,
                 quality_grade: item.quality_grade || 'A',
-                remarks: item.remarks || ''
+                remarks: item.remarks || '',
+                financial_value: item.financial_value != null ? String(item.financial_value) : ''
             });
             setEditingItem(item);
         } else {
             setFormData({
                 planting_id: activePlantings[0]?.id || '',
                 harvest_date: '', yield_kg: '',
-                quality_grade: 'A', remarks: ''
+                quality_grade: 'A', remarks: '',
+                financial_value: ''
             });
             setEditingItem(null);
         }
@@ -86,23 +93,19 @@ const Harvests = () => {
         e.preventDefault();
         setSaving(true);
         setFormError('');
+        const payload = {
+            planting_id: editingItem ? Number(formData.planting_id || editingItem.planting_id) : formData.planting_id,
+            harvest_date: formData.harvest_date,
+            yield_kg: parseFloat(formData.yield_kg),
+            quality_grade: formData.quality_grade,
+            remarks: formData.remarks,
+            financial_value: formData.financial_value !== '' ? parseFloat(formData.financial_value) : null
+        };
         try {
             if (editingItem) {
-                await updateHarvest(editingItem.id, {
-                    planting_id: Number(formData.planting_id || editingItem.planting_id),
-                    harvest_date: formData.harvest_date,
-                    yield_kg: parseFloat(formData.yield_kg),
-                    quality_grade: formData.quality_grade,
-                    remarks: formData.remarks
-                });
+                await updateHarvest(editingItem.id, payload);
             } else {
-                await createHarvest({
-                    planting_id: formData.planting_id,
-                    harvest_date: formData.harvest_date,
-                    yield_kg: parseFloat(formData.yield_kg),
-                    quality_grade: formData.quality_grade,
-                    remarks: formData.remarks
-                });
+                await createHarvest(payload);
             }
             setIsModalOpen(false);
             await fetchData(); // refreshes both harvests + active plantings list
@@ -121,15 +124,16 @@ const Harvests = () => {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">Harvest Records</h1>
                     <p className="text-sm text-gray-500">Review yields and quality of completed crops</p>
                 </div>
                 <button
+                    type="button"
                     onClick={() => handleOpenModal()}
                     disabled={activePlantings.length === 0}
-                    className="flex items-center gap-2 bg-green-700 hover:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-green-700 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white outline-none focus:outline-none"
                 >
                     <Plus size={16} /> Record Harvest
                 </button>
@@ -162,33 +166,108 @@ const Harvests = () => {
                     cols={6}
                     columnHeaders={['Variety', 'Harvest Date', 'Yield (kg)', 'Quality Grade', 'Remarks', 'Actions']}
                 />
+            ) : harvests.length === 0 ? (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-16 text-center">
+                    <div className="flex flex-col items-center gap-3">
+                        <Wheat size={40} className="text-gray-200" />
+                        <p className="text-gray-400 text-sm font-medium">No harvest records yet.</p>
+                        <p className="text-gray-300 text-xs">Record a harvest when a planting reaches maturity.</p>
+                    </div>
+                </div>
             ) : (
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse min-w-[800px]">
-                            <thead>
-                                <tr className="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    <th className="px-6 py-3">Planting Variety</th>
-                                    <th className="px-6 py-3">Harvest Date</th>
-                                    <th className="px-6 py-3">Yield (kg)</th>
-                                    <th className="px-6 py-3">Quality Grade</th>
-                                    <th className="px-6 py-3">Remarks</th>
-                                    <th className="px-6 py-3 text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {harvests.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="6" className="px-6 py-16 text-center">
-                                            <div className="flex flex-col items-center gap-3">
-                                                <Wheat size={40} className="text-gray-200" />
-                                                <p className="text-gray-400 text-sm font-medium">No harvest records yet.</p>
-                                                <p className="text-gray-300 text-xs">Record a harvest when a planting reaches maturity.</p>
-                                            </div>
-                                        </td>
+                <>
+                    {/* Mobile card list */}
+                    <div className="md:hidden space-y-3">
+                        {harvests.map((h) => (
+                            <div
+                                key={h.id}
+                                className="rounded-2xl border border-gray-100 bg-white shadow-sm p-4 dark:border-slate-700"
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-gray-900 break-words">
+                                            {h.planting_variety || 'Harvest'}
+                                        </p>
+                                        {h.field_name && (
+                                            <p className="mt-0.5 text-xs text-gray-500 break-words">{h.field_name}</p>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleOpenModal(h)}
+                                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600"
+                                            title="Edit harvest"
+                                        >
+                                            <Edit2 size={16} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDeleteClick(h.id)}
+                                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"
+                                            title="Delete harvest"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="mt-3 border-t border-gray-100 dark:border-slate-700 pt-3 space-y-2.5 text-sm">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <span className="text-xs text-gray-500 shrink-0">Harvest Date</span>
+                                        <span className="font-medium text-gray-800">
+                                            {h.harvest_date?.slice(0, 10) || '—'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <span className="text-xs text-gray-500 shrink-0">Yield</span>
+                                        <span>
+                                            <span className="font-bold text-amber-600">
+                                                {parseFloat(h.yield_kg || 0).toLocaleString()}
+                                            </span>{' '}
+                                            <span className="text-xs text-gray-500">kg</span>
+                                        </span>
+                                    </div>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <span className="text-xs text-gray-500 shrink-0">Quality Grade</span>
+                                        <Badge status={h.quality_grade} />
+                                    </div>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <span className="text-xs text-gray-500 shrink-0">Financial Value</span>
+                                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                                            {h.financial_value != null
+                                                ? `₱${parseFloat(h.financial_value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                : '—'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <span className="text-xs text-gray-500 shrink-0">Remarks</span>
+                                        <span className="text-xs text-gray-600 dark:text-slate-300 text-right break-words max-w-[65%]">
+                                            {h.remarks || '—'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Desktop / tablet table */}
+                    <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse min-w-[800px]">
+                                <thead>
+                                    <tr className="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th className="px-6 py-3">Planting Variety</th>
+                                        <th className="px-6 py-3">Harvest Date</th>
+                                        <th className="px-6 py-3">Yield (kg)</th>
+                                        <th className="px-6 py-3">Quality Grade</th>
+                                        <th className="px-6 py-3">Financial Value</th>
+                                        <th className="px-6 py-3">Remarks</th>
+                                        <th className="px-6 py-3 text-right">Actions</th>
                                     </tr>
-                                ) : (
-                                    harvests.map((h) => (
+                                </thead>
+                                <tbody>
+                                    {harvests.map((h) => (
                                         <tr key={h.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors duration-200">
                                             <td className="px-6 py-4 font-bold text-gray-900">{h.planting_variety}</td>
                                             <td className="px-6 py-4 text-sm text-gray-600 font-medium">
@@ -201,6 +280,9 @@ const Harvests = () => {
                                                 <span className="text-sm text-gray-500">kg</span>
                                             </td>
                                             <td className="px-6 py-4 text-sm"><Badge status={h.quality_grade} /></td>
+                                            <td className="px-6 py-4 text-sm font-semibold text-slate-700">
+                                                {h.financial_value != null ? `₱${parseFloat(h.financial_value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '—'}
+                                            </td>
                                             <td className="px-6 py-4 text-xs text-gray-500 max-w-[250px] truncate" title={h.remarks}>
                                                 {h.remarks || '—'}
                                             </td>
@@ -213,12 +295,12 @@ const Harvests = () => {
                                                 </button>
                                             </td>
                                         </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                </div>
+                </>
             )}
 
             <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingItem ? 'Edit Harvest Details' : 'Record Harvest'}>
@@ -229,29 +311,34 @@ const Harvests = () => {
                     {!editingItem && (
                         <div>
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Source Planting *</label>
-                            <select
-                                required
-                                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow"
-                                value={formData.planting_id}
-                                onChange={e => setFormData({ ...formData, planting_id: e.target.value })}
-                            >
-                                <option value="">Select Active Planting</option>
-                                {activePlantings.map(p => (
-                                    <option key={p.id} value={p.id}>{p.variety} ({p.field_name})</option>
-                                ))}
-                            </select>
+                            <div className="relative">
+                                <select
+                                    required
+                                    className="w-full border border-gray-300 rounded-lg pl-4 pr-10 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow appearance-none bg-white text-gray-800"
+                                    value={formData.planting_id}
+                                    onChange={e => setFormData({ ...formData, planting_id: e.target.value })}
+                                >
+                                    <option value="">Select Active Planting</option>
+                                    {activePlantings.map(p => (
+                                        <option key={p.id} value={p.id}>{p.variety} ({p.field_name})</option>
+                                    ))}
+                                </select>
+                                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400">
+                                    <ChevronDown size={16} />
+                                </span>
+                            </div>
                             <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
                                 <AlertTriangle className="w-3 h-3" />
                                 Recording a harvest will mark the planting as completed and archive pending activities.
                             </p>
                         </div>
                     )}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Harvest Date *</label>
-                            <input
-                                required type="date"
-                                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow"
+                            <MonthPicker
+                                required
+                                placeholder="Select harvest date"
                                 value={formData.harvest_date}
                                 onChange={e => setFormData({ ...formData, harvest_date: e.target.value })}
                             />
@@ -266,21 +353,36 @@ const Harvests = () => {
                                 placeholder="e.g. 1250.50"
                             />
                         </div>
-                        <div className="col-span-2">
+                        <div>
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Quality Grade *</label>
-                            <select
-                                required
-                                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow"
-                                value={formData.quality_grade}
-                                onChange={e => setFormData({ ...formData, quality_grade: e.target.value })}
-                            >
-                                <option value="A">Grade A (Premium)</option>
-                                <option value="B">Grade B (Standard)</option>
-                                <option value="C">Grade C (Substandard)</option>
-                                <option value="rejected">Rejected / Unmarketable</option>
-                            </select>
+                            <div className="relative">
+                                <select
+                                    required
+                                    className="w-full border border-gray-300 rounded-lg pl-4 pr-10 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow appearance-none bg-white text-gray-800"
+                                    value={formData.quality_grade}
+                                    onChange={e => setFormData({ ...formData, quality_grade: e.target.value })}
+                                >
+                                    <option value="A">Grade A (Premium)</option>
+                                    <option value="B">Grade B (Standard)</option>
+                                    <option value="C">Grade C (Substandard)</option>
+                                    <option value="rejected">Rejected / Unmarketable</option>
+                                </select>
+                                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400">
+                                    <ChevronDown size={16} />
+                                </span>
+                            </div>
                         </div>
-                        <div className="col-span-2">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Financial Value (PHP)</label>
+                            <input
+                                type="number" step="0.01" min="0"
+                                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow"
+                                value={formData.financial_value}
+                                onChange={e => setFormData({ ...formData, financial_value: e.target.value })}
+                                placeholder="e.g. 75000.00"
+                            />
+                        </div>
+                        <div className="md:col-span-2">
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Remarks</label>
                             <textarea
                                 rows="3"
@@ -293,7 +395,7 @@ const Harvests = () => {
                     </div>
                     <div className="flex justify-end gap-2 mt-6">
                         <button type="button" onClick={() => setIsModalOpen(false)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm transition-colors">Cancel</button>
-                        <button type="submit" disabled={saving} className="bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <button type="submit" disabled={saving} className="bg-green-700 hover:bg-green-600 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                             {saving ? 'Saving...' : editingItem ? 'Save Changes' : 'Record Harvest'}
                         </button>
                     </div>

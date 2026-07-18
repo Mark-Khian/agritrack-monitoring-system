@@ -89,7 +89,7 @@
   /* slate-700 */
 }
 
-.dark .divide-gray-100>*+* {
+.dark .divide-gray-100>* {
   border-color: #334155 !important;
 }
 
@@ -141,6 +141,12 @@
 .dark .recharts-default-tooltip {
   background-color: #1e293b !important;
   border-color: #334155 !important;
+}
+
+/* Chart cards inherit light text from `.dark .bg-white { color }`;
+   isolate SVG so stroke/fill presentation attributes stay as set. */
+.dark .recharts-wrapper svg {
+  color: #94a3b8;
 }
 
 /* Alert Cards in Dark Mode */
@@ -269,4 +275,13 @@
 
 .dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(71, 85, 105, 0.6);
+}
+
+/* Hide scrollbar utility */
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+}
+.scrollbar-none {
+  -ms-overflow-style: none !important;  /* IE and Edge */
+  scrollbar-width: none !important;  /* Firefox */
 }

@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Menu, Sun, Moon } from 'lucide-react';
-import useAuth from '../context/useAuth';
 import NotificationBell from './NotificationBell';
 
-const Navbar = ({ title, onOpenSidebar }) => {
-    const { user } = useAuth();
+const Navbar = ({ onOpenSidebar }) => {
     const [darkMode, setDarkMode] = useState(() => {
         return localStorage.getItem('theme') === 'dark' ||
                (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -32,17 +30,12 @@ const Navbar = ({ title, onOpenSidebar }) => {
                         <span className="sr-only">Open sidebar</span>
                         <Menu size={20} />
                     </button>
-
-                    <h1 className="text-lg sm:text-xl font-semibold text-gray-700 tracking-tight">
-                        {title}
-                    </h1>
                 </div>
 
                 <div className="flex items-center gap-3">
-                    {/* Notification Bell */}
-                    <NotificationBell />
+                    <NotificationBell mode="weather" />
+                    <NotificationBell mode="activity" />
 
-                    {/* Dark Mode Toggle */}
                     <button
                         id="theme-toggle-btn"
                         type="button"

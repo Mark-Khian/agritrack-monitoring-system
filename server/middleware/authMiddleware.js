@@ -42,4 +42,27 @@ const protect = async (req, res, next) => {
     }
 };
 
-module.exports = { protect };
+const checkRole = (allowedRoles) => {
+    return async (req, res, next) => {
+        try {
+            if (!req.user || !req.user.id) {
+                return res.status(401).json({ message: 'Access denied. User not authenticated.' });
+            }
+            const [users] = await db.query('SELECT role FROM users WHERE id = ?', [req.user.id]);
+            if (users.length === 0) {
+                return res.status(401).json({ message: 'User not found.' });
+            }
+            const userRole = users[0].role;
+            if (!allowedRoles.includes(userRole)) {
+                return res.status(403).json({ message: 'Access denied. Unauthorized role.' });
+            }
+            req.user.role = userRole;
+            next();
+        } catch (err) {
+            console.error('Role check middleware error:', err);
+            res.status(500).json({ message: 'Server error during authorization.' });
+        }
+    };
+};
+
+module.exports = { protect, checkRole };

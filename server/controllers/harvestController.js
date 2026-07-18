@@ -13,6 +13,7 @@ const getAllHarvests = async (req, res) => {
                 harvests.harvest_date,
                 harvests.yield_kg,
                 harvests.quality_grade,
+                harvests.financial_value,
                 harvests.remarks,
                 harvests.created_at,
                 plantings.id      AS planting_id,
@@ -58,6 +59,7 @@ const getHarvestById = async (req, res) => {
                 harvests.harvest_date,
                 harvests.yield_kg,
                 harvests.quality_grade,
+                harvests.financial_value,
                 harvests.remarks,
                 harvests.created_at,
                 plantings.id      AS planting_id,
@@ -82,7 +84,8 @@ const getHarvestById = async (req, res) => {
 const createHarvest = async (req, res) => {
     const {
         planting_id, harvest_date,
-        yield_kg, quality_grade, remarks
+        yield_kg, quality_grade, remarks,
+        financial_value
     } = req.body;
 
     const connection = await db.getConnection();
@@ -122,10 +125,10 @@ const createHarvest = async (req, res) => {
         // Insert harvest
         const [result] = await connection.query(
             `INSERT INTO harvests
-             (planting_id, harvest_date, yield_kg, quality_grade, remarks)
-             VALUES (?, ?, ?, ?, ?)`,
+             (planting_id, harvest_date, yield_kg, quality_grade, remarks, financial_value)
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [planting_id, harvest_date, yield_kg,
-                quality_grade || null, remarks || null]
+                quality_grade || null, remarks || null, financial_value != null ? parseFloat(financial_value) : null]
         );
 
         // Terminal lifecycle: harvest is the only automatic closer
@@ -173,15 +176,16 @@ const createHarvest = async (req, res) => {
 };
 
 const updateHarvest = async (req, res) => {
-    const { harvest_date, yield_kg, quality_grade, remarks } = req.body;
+    const { harvest_date, yield_kg, quality_grade, remarks, financial_value } = req.body;
 
     try {
         const [result] = await db.query(
             `UPDATE harvests
              SET harvest_date = ?, yield_kg = ?,
-                 quality_grade = ?, remarks = ?
+                 quality_grade = ?, remarks = ?,
+                 financial_value = ?
              WHERE id = ? AND deleted_at IS NULL`,
-            [harvest_date, yield_kg, quality_grade, remarks, req.params.id]
+            [harvest_date, yield_kg, quality_grade, remarks, financial_value != null ? parseFloat(financial_value) : null, req.params.id]
         );
         if (result.affectedRows === 0)
             return res.status(404).json({ message: 'Harvest not found.' });
