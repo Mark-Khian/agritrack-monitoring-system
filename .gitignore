@@ -30,3 +30,4 @@ dist-ssr
 
 # SSL Certificates — NEVER commit private keys to git
 server/ssl/
+server/backups/*.sql

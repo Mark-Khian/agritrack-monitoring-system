@@ -63,18 +63,16 @@ const cleanupOldBackups = () => {
     try {
         const files = fs.readdirSync(BACKUP_DIR)
             .filter(f => f.startsWith('backup_') && f.endsWith('.sql'))
-            .map(f => ({
-                name: f,
-                time: fs.statSync(path.join(BACKUP_DIR, f)).mtime.getTime()
-            }))
-            .sort((a, b) => b.time - a.time); // newest first
+            // Sort safely by filename descending, which embeds the ISO timestamp.
+            // This avoids file system mtime anomalies.
+            .sort((a, b) => b.localeCompare(a)); 
 
         // Delete files beyond MAX_BACKUPS
         if (files.length > MAX_BACKUPS) {
             const toDelete = files.slice(MAX_BACKUPS);
             toDelete.forEach(file => {
-                fs.unlinkSync(path.join(BACKUP_DIR, file.name));
-                console.log(`🧹 Deleted old backup: ${file.name}`);
+                fs.unlinkSync(path.join(BACKUP_DIR, file));
+                console.log(`🧹 Deleted old backup: ${file}`);
             });
         }
     } catch (err) {
