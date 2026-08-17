@@ -16,6 +16,9 @@ import {
 } from 'lucide-react';
 import WeatherWidget from '../components/WeatherWidget';
 import ActivePlantingsModal from '../components/ActivePlantingsModal';
+import Modal from '../components/Modal';
+import { formatDisplayDate } from '../utils/dateFormatter';
+import MiniCalendarWidget from '../components/calendar/MiniCalendarWidget';
 import {
     SkeletonPageHeader,
     SkeletonStatCard,
@@ -48,22 +51,22 @@ const PLANTING_VARIETY_CLASS_FILTERS = [
 // ── Activity Type Icons ───────────────────
 const getIconForType = (type) => {
     const icons = {
-        'land preparation': <Shovel size={16} className="text-amber-600" />,
-        'seeding': <Sprout size={16} className="text-green-600" />,
-        'transplanting': <Sprout size={16} className="text-teal-600" />,
-        'fertilizing': <FlaskConical size={16} className="text-blue-600" />,
-        'first fertilizing': <FlaskConical size={16} className="text-blue-600" />,
-        'second fertilizing': <FlaskConical size={16} className="text-blue-700" />,
-        'irrigation': <Droplets size={16} className="text-cyan-600" />,
-        'drain irrigation': <Droplets size={16} className="text-sky-600" />,
-        'pest control': <Bug size={16} className="text-red-600" />,
-        'final pest inspection': <Bug size={16} className="text-red-700" />,
-        'crop monitoring': <Eye size={16} className="text-purple-600" />,
-        'weeding': <Scissors size={16} className="text-purple-600" />,
-        'harvesting': <Wheat size={16} className="text-yellow-600" />,
-        'other': <Package size={16} className="text-gray-500" />,
+        'land preparation': <Shovel size={16} className="text-amber-600 dark:text-amber-400" />,
+        'seeding': <Sprout size={16} className="text-green-600 dark:text-green-400" />,
+        'transplanting': <Sprout size={16} className="text-teal-600 dark:text-teal-400" />,
+        'fertilizing': <FlaskConical size={16} className="text-blue-600 dark:text-blue-400" />,
+        'first fertilizing': <FlaskConical size={16} className="text-blue-600 dark:text-blue-400" />,
+        'second fertilizing': <FlaskConical size={16} className="text-blue-700 dark:text-blue-300" />,
+        'irrigation': <Droplets size={16} className="text-cyan-600 dark:text-cyan-400" />,
+        'drain irrigation': <Droplets size={16} className="text-sky-600 dark:text-sky-400" />,
+        'pest control': <Bug size={16} className="text-red-600 dark:text-red-400" />,
+        'final pest inspection': <Bug size={16} className="text-red-700 dark:text-red-300" />,
+        'crop monitoring': <Eye size={16} className="text-purple-600 dark:text-purple-400" />,
+        'weeding': <Scissors size={16} className="text-purple-600 dark:text-purple-400" />,
+        'harvesting': <Wheat size={16} className="text-yellow-600 dark:text-yellow-400" />,
+        'other': <Package size={16} className="text-gray-500 dark:text-gray-400" />,
     };
-    return icons[type?.toLowerCase()] || <Package size={16} className="text-gray-500" />;
+    return icons[type?.toLowerCase()] || <Package size={16} className="text-gray-500 dark:text-gray-400" />;
 };
 
 const groupByMonth = (items, dateKey) => {
@@ -176,6 +179,7 @@ const Dashboard = () => {
     const [expandedHarvestIds, setExpandedHarvestIds] = useState({});
     const [expandedTaskIds, setExpandedTaskIds] = useState({});
     const [plotSearch, setPlotSearch] = useState('');
+    const [selectedPlotDetails, setSelectedPlotDetails] = useState(null);
     const [activityStatusFilter, setActivityStatusFilter] = useState('all');
     const [plantingFilters] = useState({
         variety_class: '',
@@ -234,7 +238,10 @@ const Dashboard = () => {
 
                 const plantings = plantingsRes.data.data || [];
                 const harvests = harvestsRes.data.data || [];
-                const activities = activitiesRes.data.data || [];
+                const activities = (activitiesRes.data.data || []).map(a => ({
+                    ...a,
+                    activity_date: a.planned_date || a.actual_date || a.activity_date
+                }));
 
                 setStats({
                     plantings: plantings.filter(p => !isCompletedPlanting(p)).length,
@@ -453,7 +460,7 @@ const Dashboard = () => {
         if (t === 'pest control') return <div className={`${baseBox} bg-red-50`}><Bug size={18} className="text-red-700" /></div>;
 
         return (
-            <div className={`${baseBox} bg-gray-50`}>
+            <div className={`${baseBox} bg-slate-50`}>
                 {getIconForType(activityType)}
             </div>
         );
@@ -464,15 +471,15 @@ const Dashboard = () => {
         const overdue = isOverdue(activity);
 
         if (overdue) {
-            return { dot: 'bg-red-500', text: 'Overdue' };
+            return { dot: 'bg-red-500', text: 'Overdue', rowHover: 'hover:bg-red-50 dark:hover:bg-red-500/10' };
         }
         if (status === 'pending') {
-            return { dot: 'bg-orange-500', text: 'Pending' };
+            return { dot: 'bg-orange-500', text: 'Pending', rowHover: 'hover:bg-orange-50 dark:hover:bg-orange-500/10' };
         }
         if (status === 'completed') {
-            return { dot: 'bg-emerald-600', text: 'Completed' };
+            return { dot: 'bg-emerald-600', text: 'Completed', rowHover: 'hover:bg-emerald-50 dark:hover:bg-emerald-500/10' };
         }
-        return { dot: 'bg-emerald-600', text: 'Scheduled' };
+        return { dot: 'bg-emerald-600', text: 'Scheduled', rowHover: 'hover:bg-emerald-50 dark:hover:bg-emerald-500/10' };
     };
 
     const getLifecycleStageIndex = (growthStage, lifecycleState) => {
@@ -702,7 +709,7 @@ const Dashboard = () => {
                 `${harvest.field_name || '—'} (${harvest.planting_variety || '—'})`,
                 harvest.planting_variety || '—',
                 harvest.yield_kg || '0',
-                harvest.harvest_date ? String(harvest.harvest_date).slice(0, 10) : '—',
+                harvest.harvest_date ? formatDisplayDate(harvest.harvest_date) : '—',
                 harvest.performed_by_name || '—',
                 (harvest.notes || '').replaceAll('"', '""')
             ]
@@ -718,9 +725,9 @@ const Dashboard = () => {
     };
 
     const statCards = [
-        { label: 'Active Plantings', value: stats.plantings, icon: Sprout, accent: '#16a34a', iconBg: '#f0fdf4', path: '/plantings', iconColor: '#16a34a' },
-        { label: 'Total Harvests', value: stats.harvests, icon: Wheat, accent: '#d97706', iconBg: '#fffbeb', path: '/harvests', iconColor: '#d97706' },
-        { label: 'Total Activities', value: stats.activities, icon: Tractor, accent: '#7c3aed', iconBg: '#f5f3ff', path: '/activities', iconColor: '#7c3aed' },
+        { label: 'Active Plantings', value: stats.plantings, icon: Sprout, accent: '#16a34a', iconBg: '#f0fdf4', path: '/plantings', iconColor: '#16a34a', hoverBg: 'bg-green-50 dark:bg-green-500/10' },
+        { label: 'Total Activities', value: stats.activities, icon: Tractor, accent: '#7c3aed', iconBg: '#f5f3ff', path: '/activities', iconColor: '#7c3aed', hoverBg: 'bg-violet-50 dark:bg-violet-500/10' },
+        { label: 'Total Harvests', value: Math.max(0, stats.harvests), icon: Wheat, accent: '#d97706', iconBg: '#fffbeb', path: '/harvests', iconColor: '#d97706', hoverBg: 'bg-amber-50 dark:bg-amber-500/10' },
     ];
 
     const renderStatCard = (card) => {
@@ -730,18 +737,21 @@ const Dashboard = () => {
                 key={card.label}
                 type="button"
                 onClick={() => navigate(card.path)}
-                className="group relative flex flex-col items-center justify-center gap-2 rounded-2xl bg-white border border-gray-100 shadow-sm p-3 text-center transition-colors hover:bg-gray-50 md:flex-row md:items-center md:justify-start md:text-left md:gap-4 md:px-5 md:py-4 w-full"
+                className="group relative flex flex-col items-center justify-center gap-2 rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 shadow-sm p-3 text-center transition-colors md:flex-row md:items-center md:justify-start md:text-left md:gap-4 md:px-5 md:py-5 w-full overflow-hidden"
             >
+                {/* Hover Overlay */}
+                <div className={`absolute inset-0 transition-opacity opacity-0 group-hover:opacity-100 ${card.hoverBg}`} />
+                
                 <span
-                    className="absolute left-0 top-0 w-full h-[3px] rounded-t-2xl md:h-full md:w-[4px] md:rounded-l-2xl md:rounded-t-none"
+                    className="absolute left-0 top-0 w-full h-[3px] rounded-t-2xl md:h-full md:w-[4px] md:rounded-l-2xl md:rounded-t-none z-10"
                     style={{ backgroundColor: card.accent }}
                 />
-                <span className="relative z-10 flex h-9 w-9 items-center justify-center rounded-xl md:h-10 md:w-10" style={{ backgroundColor: card.iconBg }}>
+                <span className="relative z-10 flex h-9 w-9 items-center justify-center rounded-xl md:h-10 md:w-10 dark:bg-slate-700/50" style={{ backgroundColor: card.iconBg }}>
                     <Icon size={18} className="md:size-[20px]" style={{ color: card.iconColor }} />
                 </span>
                 <span className="relative z-10 flex flex-col items-center md:items-start">
-                    <span className="block text-xl font-bold text-gray-900 leading-none md:text-2xl">{card.value}</span>
-                    <span className="mt-1 block text-[10px] font-medium text-gray-500 leading-tight md:text-xs md:text-gray-600 md:mt-2">{card.label}</span>
+                    <span className="block text-xl font-bold text-gray-900 dark:text-white leading-none md:text-2xl">{card.value}</span>
+                    <span className="mt-1 block text-[10px] font-medium text-gray-500 dark:text-slate-400 leading-tight md:text-xs md:mt-2">{card.label}</span>
                 </span>
             </button>
         );
@@ -799,10 +809,10 @@ const Dashboard = () => {
 
             <div className="grid gap-6 lg:grid-cols-3">
                 {/* Left column */}
-                <div className="lg:col-span-2 space-y-6">
+                <div className="lg:col-span-2 flex flex-col h-full">
                     {/* Today's Tasks */}
-                    <div className="rounded-2xl bg-white border border-gray-100 p-6 space-y-6">
-                        <div className="flex items-center justify-between border-b border-gray-50 pb-3">
+                    <div className="rounded-2xl bg-white border border-gray-100 p-5 pb-3 space-y-4 flex-1 flex flex-col">
+                        <div className="flex items-center justify-between border-b border-gray-50 pb-2.5">
                             <div className="flex items-center gap-3">
                                 <h2 className="text-lg font-bold text-gray-900">Today's Tasks</h2>
                                 <span className="inline-flex items-center rounded-full bg-emerald-50 border border-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
@@ -812,50 +822,43 @@ const Dashboard = () => {
                         </div>
 
                         {/* Section 1: Field Operations */}
-                        <div className="space-y-3">
+                        <div className="space-y-2.5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Field Operations</h3>
                             {topPendingTasks.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-6 text-sm text-gray-400 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+                                <div className="flex flex-col items-center justify-center py-4 text-sm text-gray-400 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
                                     <Tractor size={24} className="mb-1 text-gray-300 animate-pulse" />
                                     No pending field operations right now.
                                 </div>
                             ) : (
-                                <div className="grid gap-2.5">
+                                <div className="grid gap-2">
                                     {topPendingTasks.map((act) => {
                                         const activityName = normalize(act?.activity_type)?.replaceAll('_', ' ') || 'Activity';
-                                        const isExpanded = !!expandedTaskIds[act.id];
                                         return (
                                             <div
                                                 key={act.id}
-                                                className="group flex flex-col justify-between rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/30 px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-800/40 transition-colors"
+                                                className="flex flex-col justify-between rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/30 px-3.5 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-slate-800/50 cursor-pointer"
                                             >
-                                                <div className="flex items-center justify-between w-full">
-                                                    <div className="flex items-start gap-3">
-                                                        {getTaskIconBox(act.activity_type)}
-                                                        <div>
-                                                            <p className="text-sm font-bold capitalize text-gray-900 dark:text-white">{activityName}</p>
-                                                            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 font-medium">
-                                                                {act.planting_variety || '—'}
+                                                <div className="flex items-center justify-between w-full gap-3 h-full">
+                                                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                        <div className="mt-0.5 flex-shrink-0">
+                                                            {getTaskIconBox(act.activity_type)}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm font-bold capitalize text-gray-900 dark:text-white truncate">{activityName}</p>
+                                                            <p className="mt-0.5 text-xs text-gray-500 dark:text-slate-400 font-medium truncate">
+                                                                {act.field_name || '—'} {act.planting_variety ? `(${act.planting_variety})` : ''}
                                                             </p>
+                                                            {act.notes && (
+                                                                <p className="mt-1.5 text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 line-clamp-2 leading-relaxed whitespace-normal">
+                                                                    <span className="font-semibold text-gray-400 dark:text-slate-500">System:</span> {act.notes}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                     </div>
-                                                    <div className="flex items-center gap-3">
+                                                    <div className="flex-shrink-0">
                                                         {getPriorityBadge(act.activity_type)}
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setExpandedTaskIds((prev) => ({ ...prev, [act.id]: !prev[act.id] }))}
-                                                            className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 dark:hover:text-slate-350 transition-colors cursor-pointer"
-                                                            aria-label="Toggle details"
-                                                        >
-                                                            <ChevronRight className={`h-5 w-5 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} />
-                                                        </button>
                                                     </div>
                                                 </div>
-                                                {isExpanded && act.notes && (
-                                                    <div className="mt-3.5 text-xs text-gray-600 dark:text-slate-400 bg-gray-50/50 dark:bg-slate-900/50 p-2.5 rounded-lg border border-gray-100 dark:border-slate-800/50 leading-relaxed">
-                                                        <span className="font-semibold text-gray-400 dark:text-slate-500">Details:</span> {act.notes}
-                                                    </div>
-                                                )}
                                             </div>
                                         );
                                     })}
@@ -864,7 +867,7 @@ const Dashboard = () => {
                         </div>
 
                         {/* Section 2: Quick Reminders & Ideas */}
-                        <div className="space-y-3 pt-2">
+                        <div className="space-y-2.5">
                             <div className="flex items-center justify-between">
                                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Quick Reminders & Ideas</h3>
                                 {quickTasks.length > 0 && (
@@ -881,11 +884,11 @@ const Dashboard = () => {
                                     value={quickTaskInput}
                                     onChange={(e) => setQuickTaskInput(e.target.value)}
                                     placeholder="Add a quick task or idea... (e.g. Check irrigation gate)"
-                                    className="flex-1 rounded-xl border border-gray-200 bg-gray-50/50 px-3.5 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-500 focus:bg-white transition-all placeholder:text-gray-400"
+                                    className="flex-1 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50/50 dark:bg-slate-900/50 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-emerald-100 dark:focus:ring-emerald-900/50 focus:border-emerald-500 dark:focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition-all placeholder:text-gray-400 dark:text-white"
                                 />
                                 <button
                                     type="submit"
-                                    className="inline-flex items-center justify-center rounded-xl bg-emerald-700 hover:bg-emerald-800 px-4 text-sm font-semibold text-white transition-colors"
+                                    className="inline-flex items-center justify-center rounded-xl bg-emerald-700 hover:bg-emerald-800 px-3.5 py-1.5 text-sm font-semibold text-white transition-colors"
                                 >
                                     Add
                                 </button>
@@ -893,7 +896,7 @@ const Dashboard = () => {
 
                             {/* Checklist */}
                             {quickTasks.length === 0 ? (
-                                <div className="text-center py-5 text-xs text-gray-400 bg-gray-50/30 rounded-xl border border-dashed border-gray-200">
+                                <div className="text-center py-2 text-xs text-gray-400 dark:text-slate-400 bg-gray-50/30 dark:bg-slate-800/50 rounded-xl border border-dashed border-gray-200 dark:border-slate-700">
                                     💡 No quick reminders yet. Type an idea above to keep track of thoughts!
                                 </div>
                             ) : (
@@ -937,7 +940,7 @@ const Dashboard = () => {
                 </div>
 
                 {/* Right column of Grid 1: Crop Lifecycle */}
-                <div className="lg:col-span-1 space-y-6">
+                <div className="lg:col-span-1 flex flex-col h-full gap-6">
 
                     {/* Crop Lifecycle */}
                     <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
@@ -993,7 +996,7 @@ const Dashboard = () => {
                         )}
                     </div>
                     {/* Desktop-only Stat Cards Stack */}
-                    <div className="hidden lg:block space-y-6">
+                    <div className="hidden lg:flex flex-1 flex-col justify-between">
                         {renderStatCard(statCards[0])} {/* Active Plantings */}
                         {renderStatCard(statCards[2])} {/* Total Activities */}
                         {renderStatCard(statCards[1])} {/* Total Harvests */}
@@ -1001,46 +1004,46 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            {/* Grid Row 2: Upcoming Activities and Critical Alerts side-by-side stretching to equal height */}
+            {/* Grid Row 2: Upcoming Activities and Critical Alerts */}
             <div className="grid gap-6 lg:grid-cols-3 mt-6">
-                <div className="lg:col-span-2">
+                <div className="lg:col-span-2 flex flex-col gap-6">
                     {/* Upcoming Activities */}
-                    <div className="rounded-2xl bg-white border border-gray-100 overflow-hidden h-full">
-                        <div className="px-5 py-4 border-b border-gray-100">
-                            <h2 className="text-lg font-bold">Upcoming Activities</h2>
+                    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-700">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Upcoming Activities</h2>
                         </div>
 
                         {/* Desktop Table View */}
                         <div className="overflow-x-auto hidden sm:block">
                             <table className="w-full text-left text-sm">
-                                <thead className="bg-white">
-                                    <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                                <thead className="bg-white dark:bg-slate-800/50">
+                                    <tr className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">
                                         <th className="px-5 py-3">ACTIVITY</th>
                                         <th className="px-5 py-3">FIELD</th>
                                         <th className="px-5 py-3">DATE</th>
                                         <th className="px-5 py-3">STATUS</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-100">
+                                <tbody className="divide-y divide-gray-100 dark:divide-slate-700/50">
                                     {recentActivities.slice(0, 5).map((act) => {
-                                        const { dot, text } = getTableStatus(act);
+                                        const { dot, text, rowHover } = getTableStatus(act);
                                         return (
-                                            <tr key={act.id} className="hover:bg-gray-50 transition-colors">
+                                            <tr key={act.id} className={`${rowHover} transition-colors cursor-pointer`}>
                                                 <td className="px-5 py-3">
-                                                    <span className="font-semibold text-gray-900 capitalize">
+                                                    <span className="font-semibold text-gray-900 dark:text-white capitalize">
                                                         {normalize(act?.activity_type).replaceAll('_', ' ')}
                                                     </span>
                                                 </td>
-                                                <td className="px-5 py-3 text-gray-700">
-                                                    {act.planting_variety || '—'}
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-300">
+                                                    {act.field_name || act.planting_variety || '—'}
                                                 </td>
-                                                <td className="px-5 py-3 text-gray-700">
-                                                    {act.activity_date?.slice(0, 10) || '—'}
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-300">
+                                                    {act.activity_date ? formatDisplayDate(act.activity_date) : '—'}
                                                 </td>
                                                 <td className="px-5 py-3">
                                                     <div className="flex items-center gap-2">
                                                         <span className={`h-2 w-2 rounded-full ${dot}`} />
-                                                        <span className="text-gray-700 font-medium">{text}</span>
+                                                        <span className="text-gray-700 dark:text-slate-300 font-medium">{text}</span>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -1048,7 +1051,7 @@ const Dashboard = () => {
                                     })}
                                     {recentActivities.length === 0 && (
                                         <tr>
-                                            <td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-400">
+                                            <td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-400 dark:text-slate-500">
                                                 No upcoming activities yet.
                                             </td>
                                         </tr>
@@ -1058,97 +1061,47 @@ const Dashboard = () => {
                         </div>
 
                         {/* Mobile List View */}
-                        <div className="block sm:hidden divide-y divide-gray-100">
+                        <div className="block sm:hidden divide-y divide-gray-100 dark:divide-slate-700/50">
                             {recentActivities.slice(0, 5).map((act) => {
-                                const { dot, text } = getTableStatus(act);
+                                const { dot, text, rowHover } = getTableStatus(act);
                                 const iconElement = getIconForType(act.activity_type);
 
                                 return (
-                                    <div key={act.id} className="p-4 flex items-start gap-3 hover:bg-gray-50 transition-colors">
-                                        <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center shrink-0 border border-gray-100">
+                                    <div key={act.id} className={`p-4 flex items-start gap-3 ${rowHover} transition-colors cursor-pointer`}>
+                                        <div className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-700 flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300">
                                             {iconElement}
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-start justify-between gap-2">
-                                                <h3 className="text-sm font-semibold text-gray-900 capitalize truncate">
+                                                <h3 className="text-sm font-semibold text-slate-900 dark:text-white capitalize truncate">
                                                     {normalize(act?.activity_type).replaceAll('_', ' ')}
                                                 </h3>
-                                                <span className="shrink-0 text-[10px] text-gray-400 whitespace-nowrap mt-0.5">
-                                                    {act.activity_date?.slice(0, 10) || '—'}
+                                                <span className="shrink-0 text-[10px] text-slate-400 dark:text-slate-400 whitespace-nowrap mt-0.5">
+                                                    {act.activity_date ? formatDisplayDate(act.activity_date) : '—'}
                                                 </span>
                                             </div>
-                                            <p className="text-xs text-gray-500 mt-1 truncate">
-                                                {act.planting_variety || '—'} {act.field_name ? `(${act.field_name})` : ''}
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
+                                                {act.field_name || '—'} {act.planting_variety ? `(${act.planting_variety})` : ''}
                                             </p>
                                             <div className="flex items-center gap-1.5 mt-2">
                                                 <span className={`h-2 w-2 rounded-full ${dot}`} />
-                                                <span className="text-[11px] text-gray-600 font-medium">{text}</span>
+                                                <span className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">{text}</span>
                                             </div>
                                         </div>
                                     </div>
                                 );
                             })}
                             {recentActivities.length === 0 && (
-                                <div className="p-8 text-center text-sm text-gray-400">
+                                <div className="p-8 text-center text-sm text-gray-400 dark:text-slate-500">
                                     No upcoming activities yet.
                                 </div>
                             )}
                         </div>
                     </div>
-                </div>
 
-                {/* Right column of Grid 2: Critical Alerts */}
-                <div className="lg:col-span-1">
-                    <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm h-full">
-                        <h2 className="text-lg font-bold">Critical Alerts</h2>
-
-                        <div className="mt-4 space-y-3">
-                            <div className={`flex items-start gap-3 rounded-xl p-4 ${overdueHarvestCount > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
-                                <AlertTriangle className={`mt-0.5 h-5 w-5 ${overdueHarvestCount > 0 ? 'text-red-600' : 'text-gray-500'}`} />
-                                <div>
-                                    <p className="font-bold text-gray-900">Overdue Harvest</p>
-                                    <p className={`mt-1 text-xs ${overdueHarvestCount > 0 ? 'text-red-700' : 'text-gray-600'}`}>
-                                        {overdueHarvestCount > 0
-                                            ? `${overdueHarvestCount} planting(s) are past their expected harvest date. Review field conditions and harvest plans.`
-                                            : 'No plantings are past expected harvest date.'}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex items-start gap-3 rounded-xl p-4 bg-gray-50">
-                                <Clock className="mt-0.5 h-5 w-5 text-gray-600" />
-                                <div>
-                                    <p className="font-bold text-gray-900">Pending Activities</p>
-                                    <p className="mt-1 text-xs text-gray-600">
-                                        {pendingActivitiesThisMonthCount} pending/ongoing activity(ies) scheduled for this month.
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex items-start gap-3 rounded-xl p-4 bg-yellow-50">
-                                <Info className="mt-0.5 h-5 w-5 text-yellow-700" />
-                                <div>
-                                    <p className="font-bold text-gray-900">
-                                        {activitiesThisMonthCount === 0 ? 'Low Activity' : 'Monthly Activity'}
-                                    </p>
-                                    <p className="mt-1 text-xs text-yellow-900/80">
-                                        {activitiesThisMonthCount === 0
-                                            ? 'No activities logged this month. Schedule key field operations to stay on track.'
-                                            : `${activitiesThisMonthCount} activity(ies) logged this month. Keep planning future tasks.`}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Grid Row 3: Plot Overview */}
-            <div className="grid gap-6 lg:grid-cols-3 mt-6">
-                <div className="lg:col-span-3">
                     {/* Plot Overview */}
                     {plantingsList.length > 0 && (
-                        <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
+                        <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm flex-1 flex flex-col">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div>
                                     <h2 className="text-lg font-bold">Plot Overview</h2>
@@ -1207,12 +1160,9 @@ const Dashboard = () => {
                             </div>
 
                             {plotOverviewTab === 'active' && (
-                                <div className="mt-4 grid grid-cols-1 gap-3 items-start sm:grid-cols-2 lg:grid-cols-3">
+                                <div className="mt-4 flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-thin">
                                     {activePlots.map((plot) => {
                                         const pid = plot.id;
-                                        const isExpanded = !!expandedPlantingIds[pid];
-                                        const activitiesForPlot = plotActivitiesByPlantingId[pid];
-                                        const isLoadingPlot = !!plotActivitiesLoadingByPlantingId[pid];
                                         const pendingCount = activitiesList.filter((a) => a.planting_id === pid && hasPendingOrOngoing(a)).length;
                                         const criticalCount = activitiesList.filter((a) => {
                                             if (a.planting_id !== pid || !hasPendingOrOngoing(a)) return false;
@@ -1221,34 +1171,25 @@ const Dashboard = () => {
                                         }).length;
 
                                         const plotTitle = `${plot.variety || 'Plot'}${plot.field_name ? ` • ${plot.field_name}` : ''}`;
-                                        const plotStage = plot.growth_stage ? String(plot.growth_stage).replaceAll('_', ' ') : null;
                                         const progressPercent = getLifecycleProgressPercent(plot);
                                         const matchingHarvest = harvestsList
                                             .filter((h) => h.planting_id === pid)
                                             .slice()
                                             .sort((a, b) => new Date(b.harvest_date || 0) - new Date(a.harvest_date || 0))[0];
                                         const yieldClass = getYieldClass(matchingHarvest?.yield_kg);
-                                        const filteredExpandedActivities = (activitiesForPlot || []).filter((a) => {
-                                            if (!hasPendingOrOngoing(a) && normalize(a?.status) !== 'completed') return true;
-                                            if (activityStatusFilter === 'all') return true;
-                                            return normalize(a?.status) === activityStatusFilter;
-                                        });
 
                                         return (
-                                            <div
-                                                key={pid}
-                                                className={`rounded-xl border overflow-hidden flex flex-col transition-shadow hover:shadow-md ${isExpanded ? 'border-gray-200 dark:border-slate-700 shadow-sm bg-white dark:bg-slate-800' : 'border-gray-100 dark:border-slate-800 bg-gray-50/20 dark:bg-slate-800/40'}`}
-                                            >
+                                            <div key={pid} className="flex-shrink-0 w-72 snap-start rounded-xl border border-gray-200 dark:border-slate-700 hover:border-emerald-500/30 dark:hover:border-emerald-500/30 shadow-sm bg-white dark:bg-slate-800 transition-all hover:shadow-md overflow-hidden">
                                                 <button
                                                     type="button"
-                                                    onClick={() => togglePlotActivities(pid)}
-                                                    className="w-full text-left p-4 focus:outline-none hover:bg-gray-50/60 dark:hover:bg-slate-800/60 transition-colors"
+                                                    onClick={() => setSelectedPlotDetails({ type: 'active', data: plot })}
+                                                    className="w-full text-left p-4 focus:outline-none hover:bg-gray-50 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
                                                 >
                                                     <div className="flex items-start justify-between gap-3">
                                                         <div className="min-w-0">
                                                             <p className="font-semibold text-gray-900 dark:text-white truncate">{plotTitle}</p>
                                                             <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 truncate">
-                                                                {plot.planting_date ? `Planted: ${plot.planting_date.slice(0, 10)}` : 'Planted: —'}
+                                                                {plot.planting_date ? `Planted: ${formatDisplayDate(plot.planting_date)}` : 'Planted: —'}
                                                             </p>
                                                             <div className="mt-2 flex flex-wrap items-center gap-2">
                                                                 <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap">
@@ -1264,9 +1205,7 @@ const Dashboard = () => {
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <ChevronRight
-                                                            className={`h-5 w-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                                                        />
+                                                        <ChevronRight className="h-5 w-5 text-gray-400 opacity-50 shrink-0" />
                                                     </div>
                                                     <div className="mt-3">
                                                         <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400">
@@ -1280,99 +1219,12 @@ const Dashboard = () => {
                                                             />
                                                         </div>
                                                     </div>
-                                                    {!isExpanded && (
-                                                        <p className="mt-3 text-[10px] text-gray-400 dark:text-slate-500 text-center font-medium tracking-wide">
-                                                            Click to expand & view scheduled tasks
-                                                        </p>
-                                                    )}
                                                 </button>
-
-                                                {isExpanded && (
-                                                    <div className="px-4 pb-4 flex-1 min-h-0">
-                                                        {isLoadingPlot && (
-                                                            <div className="flex items-center gap-2 text-sm text-gray-500 pt-2">
-                                                                <span className="w-3 h-3 rounded-full bg-emerald-600 animate-pulse" />
-                                                                Loading activities...
-                                                            </div>
-                                                        )}
-
-                                                        {!isLoadingPlot && (
-                                                            <>
-                                                                <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                                                                    <span className="inline-flex items-center gap-2">
-                                                                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                                                        Manual
-                                                                    </span>
-                                                                    <span className="inline-flex items-center gap-2">
-                                                                        <span className="h-2 w-2 rounded-full bg-gray-400" />
-                                                                        System
-                                                                    </span>
-                                                                </div>
-
-                                                                <div className="mt-3 flex gap-3 overflow-x-auto pb-3 pr-1 overscroll-x-contain scrollbar-thin">
-                                                                    {filteredExpandedActivities.length === 0 ? (
-                                                                        <div className="text-sm text-gray-400 py-2">
-                                                                            No activities found for this plot.
-                                                                        </div>
-                                                                    ) : (
-                                                                        filteredExpandedActivities.map((act) => {
-                                                                            const statusBadge = getActivityStatusBadge(act);
-                                                                            const isSystem = !!act.is_system_generated;
-                                                                            const rowClass = isSystem
-                                                                                ? 'bg-gray-50 border-gray-100 dark:bg-slate-900/60 dark:border-slate-800'
-                                                                                : 'bg-emerald-50/60 border-emerald-100/60 dark:bg-emerald-950/20 dark:border-emerald-900/30';
-                                                                            const textClass = isSystem ? 'text-gray-700 dark:text-slate-200' : 'text-emerald-900 dark:text-emerald-400';
-
-                                                                            const activityLabel = normalize(act?.activity_type)
-                                                                                ? normalize(act.activity_type).replaceAll('_', ' ')
-                                                                                : '—';
-
-                                                                            return (
-                                                                                <div
-                                                                                    key={act.id}
-                                                                                    className={`flex-shrink-0 w-64 rounded-xl border p-4 flex flex-col justify-between ${rowClass}`}
-                                                                                >
-                                                                                    <div>
-                                                                                        <div className="flex items-start justify-between gap-2">
-                                                                                            <p className={`text-sm font-bold capitalize truncate ${textClass}`} title={activityLabel}>
-                                                                                                {activityLabel}
-                                                                                            </p>
-                                                                                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${statusBadge.className}`}>
-                                                                                                {statusBadge.label}
-                                                                                            </span>
-                                                                                        </div>
-
-                                                                                        {plotStage && isSystem && (
-                                                                                            <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500 font-medium leading-normal">
-                                                                                                Stage: <span className="capitalize">{plotStage}</span>
-                                                                                            </p>
-                                                                                        )}
-
-                                                                                        <p className="mt-2 text-xs text-gray-600 dark:text-slate-300 line-clamp-3 leading-relaxed" title={act.notes}>
-                                                                                            <span className="font-semibold text-gray-400 dark:text-gray-500">Notes:</span> {act.notes || '—'}
-                                                                                        </p>
-                                                                                    </div>
-
-                                                                                    <div className="mt-3 pt-2 border-t border-gray-100/50 dark:border-slate-800/50 flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400">
-                                                                                        <span className="font-medium">Scheduled Date</span>
-                                                                                        <span className="font-bold text-gray-700 dark:text-slate-300 whitespace-nowrap">
-                                                                                            {act.activity_date ? act.activity_date.slice(0, 10) : '—'}
-                                                                                        </span>
-                                                                                    </div>
-                                                                                </div>
-                                                                            );
-                                                                        })
-                                                                    )}
-                                                                </div>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                )}
                                             </div>
                                         );
                                     })}
                                     {activePlots.length === 0 && (
-                                        <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-400">
+                                        <div className="w-full rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-400">
                                             No active plots found with pending/ongoing activities.
                                         </div>
                                     )}
@@ -1380,49 +1232,51 @@ const Dashboard = () => {
                             )}
 
                             {plotOverviewTab === 'completed' && (
-                                <div className="mt-4 grid grid-cols-1 gap-3 items-start sm:grid-cols-2">
+                                <div className="mt-4 flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-thin">
                                     {completedHarvests.map((harvest) => {
                                         const planting = plantingsList.find((p) => p.id === harvest.planting_id);
                                         const cardTitle = `${harvest.planting_variety || planting?.variety || 'Harvest'}${harvest.field_name ? ` • ${harvest.field_name}` : (planting?.field_name ? ` • ${planting.field_name}` : '')}`;
-                                        const isExpanded = !!expandedHarvestIds[harvest.id];
+
                                         return (
-                                            <div key={harvest.id} className={`self-start rounded-xl border overflow-hidden transition-all ${isExpanded ? 'border-amber-300 dark:border-amber-800/80 bg-amber-50/50 dark:bg-slate-800' : 'border-amber-200 dark:border-amber-900/30 bg-amber-50/20 dark:bg-slate-800/40'}`}>
+                                            <div key={harvest.id} className="flex-shrink-0 w-72 snap-start rounded-xl border border-gray-200 dark:border-slate-700 hover:border-amber-500/30 dark:hover:border-amber-500/30 shadow-sm bg-white dark:bg-slate-800 transition-all hover:shadow-md overflow-hidden">
                                                 <button
                                                     type="button"
-                                                    onClick={() => setExpandedHarvestIds((prev) => ({ ...prev, [harvest.id]: !prev[harvest.id] }))}
-                                                    className="w-full text-left px-4 py-3 hover:bg-amber-50 dark:hover:bg-slate-800/50 transition-colors"
+                                                    onClick={() => setSelectedPlotDetails({ type: 'completed', data: harvest, planting })}
+                                                    className="w-full text-left p-4 focus:outline-none hover:bg-gray-50 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
                                                 >
                                                     <div className="flex items-start justify-between gap-3">
                                                         <div className="min-w-0">
-                                                            <p className="font-semibold text-amber-900 dark:text-white truncate">{cardTitle}</p>
-                                                            <p className="mt-1 text-xs text-amber-800/80 dark:text-slate-400">
-                                                                Yield: {harvest.yield_kg || '0'} kg • {harvest.harvest_date ? String(harvest.harvest_date).slice(0, 10) : '—'}
+                                                            <p className="font-semibold text-gray-900 dark:text-white truncate">{cardTitle}</p>
+                                                            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 truncate">
+                                                                {harvest.harvest_date ? `Harvested: ${formatDisplayDate(harvest.harvest_date)}` : 'Harvested: —'}
                                                             </p>
+                                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap">
+                                                                    Yield: {harvest.yield_kg || '0'} kg
+                                                                </span>
+                                                                {harvest.quality_grade && (
+                                                                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-slate-300 whitespace-nowrap capitalize">
+                                                                        {harvest.quality_grade}
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                         </div>
-                                                        <ChevronRight className={`h-5 w-5 text-amber-700 dark:text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                                        <ChevronRight className="h-5 w-5 text-gray-400 opacity-50 shrink-0" />
+                                                    </div>
+                                                    {/* Invisible spacer to guarantee identical card height to Active Plots */}
+                                                    <div className="mt-3 invisible pointer-events-none" aria-hidden="true">
+                                                        <div className="flex items-center justify-between text-[11px]">
+                                                            <span>Spacer</span>
+                                                            <span>0%</span>
+                                                        </div>
+                                                        <div className="mt-1 h-1.5 w-full"></div>
                                                     </div>
                                                 </button>
-
-                                                {isExpanded && (
-                                                    <div className="px-4 pb-4 border-t border-amber-200/60 dark:border-slate-700/60">
-                                                        <div className="mt-3 space-y-1 text-sm">
-                                                            <p><span className="font-semibold text-amber-900 dark:text-slate-300">Crop type:</span> <span className="text-amber-800 dark:text-slate-100">{harvest.planting_variety || planting?.variety || '—'}</span></p>
-                                                            <p><span className="font-semibold text-amber-900 dark:text-slate-300">Yield:</span> <span className="text-amber-800 dark:text-slate-100">{harvest.yield_kg || '0'} kg</span></p>
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => downloadHarvestCsv(harvest)}
-                                                            className="mt-3 inline-flex items-center rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:text-slate-300 hover:bg-amber-100 dark:hover:bg-slate-800 transition-colors"
-                                                        >
-                                                            Export CSV
-                                                        </button>
-                                                    </div>
-                                                )}
                                             </div>
                                         );
                                     })}
                                     {completedHarvests.length === 0 && (
-                                        <div className="sm:col-span-2 rounded-xl border border-dashed border-amber-200 p-6 text-center text-sm text-amber-700/70">
+                                        <div className="w-full rounded-xl border border-dashed border-amber-200 p-6 text-center text-sm text-amber-700/70">
                                             No completed harvest records found.
                                         </div>
                                     )}
@@ -1432,7 +1286,117 @@ const Dashboard = () => {
                     )}
                 </div>
 
+                {/* Right column of Grid 2: Critical Alerts & Calendar */}
+                <div className="lg:col-span-1 flex flex-col gap-6">
+                    <MiniCalendarWidget activities={activitiesList} />
+
+                    <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm flex-1 flex flex-col">
+                        <h2 className="text-lg font-bold">Critical Alerts</h2>
+
+                        <div className="mt-4 space-y-3">
+                            <div className={`flex items-start gap-3 rounded-xl p-4 ${overdueHarvestCount > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+                                <AlertTriangle className={`mt-0.5 h-5 w-5 ${overdueHarvestCount > 0 ? 'text-red-600' : 'text-gray-500'}`} />
+                                <div>
+                                    <p className="font-bold text-gray-900">Overdue Harvest</p>
+                                    <p className={`mt-1 text-xs ${overdueHarvestCount > 0 ? 'text-red-700' : 'text-gray-600'}`}>
+                                        {overdueHarvestCount > 0
+                                            ? `${overdueHarvestCount} planting(s) are past their expected harvest date. Review field conditions and harvest plans.`
+                                            : 'No plantings are past expected harvest date.'}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-start gap-3 rounded-xl p-4 bg-gray-50">
+                                <Clock className="mt-0.5 h-5 w-5 text-gray-600" />
+                                <div>
+                                    <p className="font-bold text-gray-900">Pending Activities</p>
+                                    <p className="mt-1 text-xs text-gray-600">
+                                        {pendingActivitiesThisMonthCount} pending/ongoing activity(ies) scheduled for this month.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-start gap-3 rounded-xl p-4 bg-yellow-50">
+                                <Info className="mt-0.5 h-5 w-5 text-yellow-700" />
+                                <div>
+                                    <p className="font-bold text-gray-900">
+                                        {activitiesThisMonthCount === 0 ? 'Low Activity' : 'Monthly Activity'}
+                                    </p>
+                                    <p className="mt-1 text-xs text-yellow-900/80">
+                                        {activitiesThisMonthCount === 0
+                                            ? 'No activities logged this month. Schedule key field operations to stay on track.'
+                                            : `${activitiesThisMonthCount} activity(ies) logged this month. Keep planning future tasks.`}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
+
+            {selectedPlotDetails && selectedPlotDetails.type === 'active' && (
+                <Modal
+                    isOpen={!!selectedPlotDetails}
+                    onClose={() => setSelectedPlotDetails(null)}
+                    title={`${selectedPlotDetails.data.variety || 'Plot'} Details`}
+                >
+                    <div className="p-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Field Name</p>
+                                <p className="mt-1 text-sm text-gray-900">{selectedPlotDetails.data.field_name || '—'}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Planting Date</p>
+                                <p className="mt-1 text-sm text-gray-900">
+                                    {selectedPlotDetails.data.planting_date ? formatDisplayDate(selectedPlotDetails.data.planting_date) : '—'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Status</p>
+                                <p className="mt-1 text-sm capitalize text-gray-900">{selectedPlotDetails.data.status || 'Active'}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Growth Stage</p>
+                                <p className="mt-1 text-sm capitalize text-gray-900">
+                                    {selectedPlotDetails.data.growth_stage ? String(selectedPlotDetails.data.growth_stage).replaceAll('_', ' ') : '—'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
+            {selectedPlotDetails && selectedPlotDetails.type === 'completed' && (
+                <Modal
+                    isOpen={!!selectedPlotDetails}
+                    onClose={() => setSelectedPlotDetails(null)}
+                    title={`${selectedPlotDetails.planting?.variety || selectedPlotDetails.data.planting_variety || 'Harvest'} Details`}
+                >
+                    <div className="p-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Field Name</p>
+                                <p className="mt-1 text-sm text-gray-900">{selectedPlotDetails.data.field_name || selectedPlotDetails.planting?.field_name || '—'}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Harvest Date</p>
+                                <p className="mt-1 text-sm text-gray-900">
+                                    {selectedPlotDetails.data.harvest_date ? formatDisplayDate(selectedPlotDetails.data.harvest_date) : '—'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Total Yield</p>
+                                <p className="mt-1 text-sm font-semibold text-amber-600">{selectedPlotDetails.data.yield_kg || '0'} kg</p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Quality Grade</p>
+                                <p className="mt-1 text-sm capitalize text-gray-900">{selectedPlotDetails.data.quality_grade || '—'}</p>
+                            </div>
+                        </div>
+                    </div>
+                </Modal>
+            )}
             <ActivePlantingsModal
                 isOpen={isPlantingsModalOpen}
                 onClose={() => setIsPlantingsModalOpen(false)}

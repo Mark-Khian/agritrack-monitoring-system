@@ -36,9 +36,9 @@ import ConfirmDialog from './ConfirmDialog';
 const TYPE_META = {
     activity_due: {
         icon: Clock,
-        iconClass: 'text-amber-600',
-        bgClass: 'bg-amber-50',
-        borderClass: 'border-amber-400',
+        iconClass: 'text-amber-600 dark:text-amber-400',
+        bgClass: 'bg-amber-50 dark:bg-amber-950/20',
+        borderClass: 'border-amber-400 dark:border-amber-600',
         label: 'Due Today',
     },
     activity_overdue: {
@@ -85,10 +85,10 @@ const relativeTime = (dateString) => {
     if (!dateString) return '';
     const diff = Date.now() - new Date(dateString).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1)   return 'just now';
-    if (mins < 60)  return `${mins}m ago`;
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
     const hrs = Math.floor(mins / 60);
-    if (hrs < 24)   return `${hrs}h ago`;
+    if (hrs < 24) return `${hrs}h ago`;
     const days = Math.floor(hrs / 24);
     return `${days}d ago`;
 };
@@ -97,14 +97,14 @@ const relativeTime = (dateString) => {
 
 const NotificationBell = ({ mode = 'activity' }) => {
     const [notifications, setNotifications] = useState([]);
-    const [unread, setUnread]               = useState(0);
-    const [open, setOpen]                   = useState(false);
-    const [loading, setLoading]             = useState(false);
-    const [markingAll, setMarkingAll]       = useState(false);
+    const [unread, setUnread] = useState(0);
+    const [open, setOpen] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [markingAll, setMarkingAll] = useState(false);
     const [deleteTargetId, setDeleteTargetId] = useState(null);
 
     const containerRef = useRef(null);
-    const intervalRef  = useRef(null);
+    const intervalRef = useRef(null);
 
     // Filter notifications and calculate unread count based on mode
     const filteredNotifications = notifications.filter((n) => {
@@ -115,15 +115,16 @@ const NotificationBell = ({ mode = 'activity' }) => {
         }
     });
 
-    const filteredUnread = filteredNotifications.filter(n => !n.is_read).length;
+    // We no longer rely on filteredUnread derived from the fetched array slice.
+    // We use the exact unread count from the backend, optimistically updated.
 
     // ── Fetch ─────────────────────────────────────────────────────────────────
 
     const fetchNotifications = useCallback(async () => {
         try {
             const res = await getNotifications();
-            setNotifications(res.data.data   || []);
-            setUnread(Number(res.data.unread) || 0);
+            setNotifications(res.data.data || []);
+            setUnread(mode === 'weather' ? Number(res.data.unread_weather || 0) : Number(res.data.unread_activity || 0));
         } catch {
             // silently fail — non-critical
         }
@@ -166,10 +167,10 @@ const NotificationBell = ({ mode = 'activity' }) => {
             const body = document.body;
             const originalHtmlOverflow = root.style.overflow;
             const originalBodyOverflow = body.style.overflow;
-            
+
             root.style.overflow = 'hidden';
             body.style.overflow = 'hidden';
-            
+
             return () => {
                 root.style.overflow = originalHtmlOverflow;
                 body.style.overflow = originalBodyOverflow;
@@ -184,6 +185,7 @@ const NotificationBell = ({ mode = 'activity' }) => {
         setNotifications((prev) =>
             prev.map((n) => (n.id === id ? { ...n, is_read: 1 } : n))
         );
+        setUnread(prev => Math.max(0, prev - 1));
         try {
             await markNotificationRead(id);
             // Refresh to sync unread counts correctly
@@ -197,6 +199,11 @@ const NotificationBell = ({ mode = 'activity' }) => {
     const handleDeleteNotif = async (id) => {
         // Optimistic update
         setNotifications((prev) => prev.filter((n) => n.id !== id));
+        // Find if it was unread to decrement the total count optimistically
+        const target = notifications.find(n => n.id === id);
+        if (target && !target.is_read) {
+            setUnread(prev => Math.max(0, prev - 1));
+        }
         try {
             await deleteNotification(id);
             fetchNotifications();
@@ -207,7 +214,7 @@ const NotificationBell = ({ mode = 'activity' }) => {
     };
 
     const handleMarkAllRead = async () => {
-        if (markingAll || filteredUnread === 0) return;
+        if (markingAll || unread === 0) return;
         setMarkingAll(true);
         setNotifications((prev) =>
             prev.map((n) => {
@@ -215,6 +222,7 @@ const NotificationBell = ({ mode = 'activity' }) => {
                 return matchesMode ? { ...n, is_read: 1 } : n;
             })
         );
+        setUnread(0);
         try {
             await markAllNotificationsRead(mode === 'weather' ? 'weather' : 'activity');
             fetchNotifications();
@@ -237,7 +245,7 @@ const NotificationBell = ({ mode = 'activity' }) => {
                 type="button"
                 onClick={() => setOpen((o) => !o)}
                 className={`relative flex items-center justify-center w-9 h-9 rounded-xl border transition-all shadow-xs cursor-pointer
-                    ${open 
+                    ${open
                         ? mode === 'weather'
                             ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900/30'
                             : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/30'
@@ -252,14 +260,14 @@ const NotificationBell = ({ mode = 'activity' }) => {
                 )}
 
                 {/* Unread badge */}
-                {filteredUnread > 0 && (
+                {unread > 0 && (
                     <span
                         className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center
                                    rounded-full bg-red-500 px-1 text-[10px] font-bold text-white
                                    ring-2 ring-white dark:ring-0 animate-bounce"
                         style={{ animationIterationCount: 1 }}
                     >
-                        {filteredUnread > 99 ? '99+' : filteredUnread}
+                        {unread > 99 ? '99+' : unread}
                     </span>
                 )}
             </button>
@@ -292,15 +300,15 @@ const NotificationBell = ({ mode = 'activity' }) => {
                             <span className="text-sm font-bold text-gray-900 dark:text-slate-100">
                                 {mode === 'weather' ? 'Weather Alerts' : 'Activities & Tasks'}
                             </span>
-                            {filteredUnread > 0 && (
+                            {unread > 0 && (
                                 <span className="inline-flex items-center rounded-full bg-red-100 dark:bg-red-950/40 px-2 py-0.5 text-[10px] font-bold text-red-700 dark:text-red-300">
-                                    {filteredUnread} new
+                                    {unread} new
                                 </span>
                             )}
                         </div>
 
                         <div className="flex items-center gap-2">
-                            {filteredUnread > 0 && (
+                            {unread > 0 && (
                                 <button
                                     type="button"
                                     onClick={handleMarkAllRead}
@@ -347,8 +355,8 @@ const NotificationBell = ({ mode = 'activity' }) => {
                             </div>
                         ) : (
                             filteredNotifications.map((notif) => {
-                                const meta  = TYPE_META[notif.type] || DEFAULT_META;
-                                const Icon  = meta.icon;
+                                const meta = TYPE_META[notif.type] || DEFAULT_META;
+                                const Icon = meta.icon;
                                 const isUnread = !notif.is_read;
 
                                 return (
@@ -358,9 +366,9 @@ const NotificationBell = ({ mode = 'activity' }) => {
                                                    border-b border-gray-50 dark:border-slate-800 last:border-0
                                                    transition-colors group
                                                    ${isUnread
-                                                        ? `${meta.bgClass} border-l-[3px] ${meta.borderClass}`
-                                                        : 'bg-white dark:bg-slate-900 border-l-[3px] border-transparent hover:bg-gray-50/50 dark:hover:bg-slate-800/20'
-                                                   }`}
+                                                ? `${meta.bgClass} border-l-[3px] ${meta.borderClass}`
+                                                : 'bg-white dark:bg-slate-900 border-l-[3px] border-transparent hover:bg-gray-50/50 dark:hover:bg-slate-800/20'
+                                            }`}
                                     >
                                         {/* Clickable Area to mark as read */}
                                         <div

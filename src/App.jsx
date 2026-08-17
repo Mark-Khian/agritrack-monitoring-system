@@ -7,6 +7,7 @@ import Plantings from './pages/Plantings';
 import Activities from './pages/Activities';
 import Harvests from './pages/Harvests';
 import Analytics from './pages/Analytics';
+import Calendar from './pages/Calendar';
 
 const ProtectedRoute = ({ children }) => {
   const { token, isInitializing } = useAuth();
@@ -53,6 +54,13 @@ function App() {
         <ProtectedRoute>
           <Layout>
             <Analytics />
+          </Layout>
+        </ProtectedRoute>
+      } />
+      <Route path="/calendar" element={
+        <ProtectedRoute>
+          <Layout>
+            <Calendar />
           </Layout>
         </ProtectedRoute>
       } />

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 
-const DownwardSelect = ({
+const Select = ({
     value,
     onChange,
     options = [],
@@ -112,10 +112,14 @@ const DownwardSelect = ({
     const hasError = className.includes('border-red-500');
     const baseClass = [
         'w-full border rounded-lg pl-4 pr-10 py-2.5 text-sm',
-        hasError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-green-500',
+        hasError 
+            ? 'border-red-500 focus:ring-red-500' 
+            : 'border-gray-300 dark:border-slate-700 focus:ring-green-500 dark:focus:ring-emerald-500',
         'focus:border-transparent outline-none transition-shadow',
         'flex items-center text-left cursor-pointer select-none relative',
-        disabled ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-800',
+        disabled 
+            ? 'bg-gray-50 text-gray-400 cursor-not-allowed dark:bg-slate-800/60 dark:text-slate-500' 
+            : 'bg-white text-gray-800 dark:bg-slate-900 dark:text-slate-200',
         className.replace('border-red-500', '').replace('focus:ring-red-500', ''),
     ]
         .filter(Boolean)
@@ -135,10 +139,10 @@ const DownwardSelect = ({
                 aria-expanded={open}
                 aria-required={required}
             >
-                <span className={value ? '' : 'text-gray-400'}>
+                <span className={value ? '' : 'text-gray-400 dark:text-slate-500'}>
                     {value ? selectedLabel : placeholder}
                 </span>
-                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400">
+                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400 dark:text-slate-500">
                     <ChevronDown
                         size={16}
                         className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
@@ -153,10 +157,10 @@ const DownwardSelect = ({
                         ref={panelRef}
                         role="listbox"
                         style={panelStyle}
-                        className="bg-white border border-gray-200 rounded-xl shadow-xl overflow-y-auto py-1 text-sm"
+                        className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl overflow-y-auto py-1 text-sm"
                     >
                         {normalised.length === 0 ? (
-                            <li className="px-4 py-2 text-gray-400 text-xs">No options</li>
+                            <li className="px-4 py-2 text-gray-400 dark:text-slate-500 text-xs">No options</li>
                         ) : (
                             normalised.map((opt) => (
                                 <li
@@ -167,8 +171,8 @@ const DownwardSelect = ({
                                     className={[
                                         'px-4 py-2 cursor-pointer transition-colors duration-100',
                                         String(opt.value) === String(value)
-                                            ? 'bg-green-50 text-green-700 font-semibold'
-                                            : 'text-gray-700 hover:bg-gray-50',
+                                            ? 'bg-green-50 text-green-700 dark:bg-emerald-900/40 dark:text-emerald-400 font-semibold'
+                                            : 'text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700/50',
                                     ].join(' ')}
                                 >
                                     {opt.label}
@@ -182,4 +186,4 @@ const DownwardSelect = ({
     );
 };
 
-export default DownwardSelect;
+export default Select;

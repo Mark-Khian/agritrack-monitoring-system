@@ -5,15 +5,18 @@ import {
     Shovel, Sprout, FlaskConical,
     Droplets, Bug, Scissors,
     Wheat, Package, Tractor, AlertTriangle, Cpu, ChevronRight, Eye, CheckCircle,
-    ChevronDown
+    ChevronDown, Loader2
 } from 'lucide-react';
 import Modal from '../components/Modal';
+import Select from '../components/Select';
 import Badge from '../components/Badge';
+import { formatActivityName } from '../utils/calendarUtils';
 import { getActivities, createActivity, updateActivity, getPlantings } from '../services/api';
+import { formatDisplayDate } from '../utils/dateFormatter';
 import { SkeletonTable } from '../components/Skeleton';
 import ConfirmDialog from '../components/ConfirmDialog';
 import MonthPicker from '../components/MonthPicker';
-import Toast from '../components/Toast';
+import { useToast } from '../context/ToastContext';
 
 // ── Activity Type Icon + Color Map ────────
 const ACTIVITY_ICONS = {
@@ -60,38 +63,46 @@ const Activities = () => {
     const [activities, setActivities] = useState([]);
     const [plantings, setPlantings] = useState([]);  // active plantings for dropdown
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+    const [isRetrying, setIsRetrying] = useState(false);
+    const [activitiesError, setActivitiesError] = useState(null);
+    const [plantingsError, setPlantingsError] = useState(null);
     const [saving, setSaving] = useState(false);
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
     const [formError, setFormError] = useState('');
     const [statusUpdatingId, setStatusUpdatingId] = useState(null);
-    const [expandedPlantingId, setExpandedPlantingId] = useState(null);
+    const [selectedPlotActivities, setSelectedPlotActivities] = useState(null);
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [activityToComplete, setActivityToComplete] = useState(null);
-    const [toast, setToast] = useState({ message: '', type: '' });
+    const toast = useToast();
 
     const [formData, setFormData] = useState({
         planting_id: '',
         activity_type: 'land preparation',
-        activity_date: '',
+        planned_date: '',
+        actual_date: '',
         notes: '',
-        status: 'pending'
+        status: 'PENDING'
     });
 
     const fetchData = useCallback(async () => {
         try {
-            setError(null);
-            const [aRes, pRes] = await Promise.all([
-                getActivities(),
-                getPlantings({ status: 'active' }),
-            ]);
+            const aRes = await getActivities();
             setActivities(aRes.data.data || []);
-            setPlantings(pRes.data.data || []);
+            setActivitiesError(null);
         } catch (err) {
-            setError('Failed to load activities. Please try again.');
-            console.error(err);
+            setActivitiesError('Failed to load activities. Please try again.');
+            console.error('Activities fetch error:', err);
+        }
+
+        try {
+            const pRes = await getPlantings({ status: 'active' });
+            setPlantings(pRes.data.data || []);
+            setPlantingsError(null);
+        } catch (err) {
+            setPlantingsError('Failed to verify active plantings.');
+            console.error('Plantings fetch error:', err);
         } finally {
             setLoading(false);
         }
@@ -103,6 +114,12 @@ const Activities = () => {
         return () => clearInterval(timer);
     }, [fetchData]);
 
+    const handleRetry = async () => {
+        setIsRetrying(true);
+        await fetchData();
+        setIsRetrying(false);
+    };
+
 
     const handleOpenModal = (item = null) => {
         setFormError('');
@@ -110,18 +127,20 @@ const Activities = () => {
             setFormData({
                 planting_id: item.planting_id,
                 activity_type: item.activity_type,
-                activity_date: item.activity_date?.slice(0, 10) || '',
+                planned_date: item.planned_date?.slice(0, 10) || '',
+                actual_date: item.actual_date?.slice(0, 10) || '',
                 notes: item.notes || '',
-                status: item.status
+                status: item.status || 'PENDING'
             });
             setEditingItem(item);
         } else {
             setFormData({
                 planting_id: '',
                 activity_type: 'land preparation',
-                activity_date: '',
+                planned_date: '',
+                actual_date: '',
                 notes: '',
-                status: 'pending'
+                status: 'PENDING'
             });
             setEditingItem(null);
         }
@@ -137,17 +156,21 @@ const Activities = () => {
                 await updateActivity(editingItem.id, {
                     planting_id: editingItem.planting_id,
                     activity_type: toApiActivityType(formData.activity_type),
-                    activity_date: formData.activity_date,
+                    planned_date: formData.planned_date,
+                    actual_date: formData.actual_date,
                     notes: formData.notes,
                     status: formData.status
                 });
+                toast.success('Activity updated successfully!');
             } else {
                 await createActivity({
                     planting_id: formData.planting_id,
                     activity_type: toApiActivityType(formData.activity_type),
-                    activity_date: formData.activity_date,
+                    planned_date: formData.planned_date,
+                    actual_date: formData.actual_date,
                     notes: formData.notes
                 });
+                toast.success('Activity created successfully!');
             }
             setIsModalOpen(false);
             await fetchData();
@@ -176,18 +199,19 @@ const Activities = () => {
 
     const confirmCompleteActivity = async () => {
         if (!activityToComplete) return;
-        const nextStatus = 'completed';
+        const nextStatus = 'COMPLETED';
         try {
             setStatusUpdatingId(activityToComplete.id);
             await updateActivity(activityToComplete.id, {
                 planting_id: activityToComplete.planting_id,
                 activity_type: toApiActivityType(activityToComplete.activity_type),
-                activity_date: activityToComplete.activity_date?.slice(0, 10) || activityToComplete.activity_date,
+                planned_date: activityToComplete.planned_date?.slice(0, 10) || null,
+                actual_date: new Date().toISOString().slice(0, 10),
                 notes: activityToComplete.notes,
                 status: nextStatus
             });
             await fetchData();
-            setToast({ message: 'Activity marked as completed successfully!', type: 'success' });
+            toast.success('Activity marked as completed successfully!');
             window.dispatchEvent(new CustomEvent('refresh-notifications'));
         } catch (err) {
             console.error('Update activity status error:', err);
@@ -203,11 +227,6 @@ const Activities = () => {
 
     return (
         <div className="space-y-6">
-            <Toast
-                message={toast.message}
-                type={toast.type}
-                onClose={() => setToast({ message: '', type: '' })}
-            />
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">Farm Activities</h1>
@@ -215,7 +234,7 @@ const Activities = () => {
                 </div>
                 <button
                     onClick={() => handleOpenModal()}
-                    disabled={plantings.length === 0}
+                    disabled={plantings.length === 0 || plantingsError}
                     className="flex items-center gap-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                 >
                     <Plus size={16} /> Log Activity
@@ -223,7 +242,20 @@ const Activities = () => {
             </div>
 
             {/* Dependency guard */}
-            {!loading && plantings.length === 0 && (
+            {!loading && plantingsError && (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl text-sm">
+                    <div className="flex items-start gap-3">
+                        <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="font-semibold">Unable to verify active plantings</p>
+                            <p className="text-red-700/80 dark:text-red-400/80 text-xs mt-1">
+                                Connection unavailable. Logging activities is temporarily disabled.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {!loading && !plantingsError && plantings.length === 0 && (
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl text-sm">
                     <div className="flex items-start gap-3">
                         <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
@@ -244,19 +276,38 @@ const Activities = () => {
                 </div>
             )}
 
-            {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex items-center justify-between">
-                    {error}
-                    <button onClick={fetchData} className="underline">Retry</button>
+            {loading || isRetrying ? (
+                <div className="space-y-4">
+                    {isRetrying && (
+                        <div className="flex justify-start">
+                            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 shadow-sm">
+                                <Loader2 size={14} className="animate-spin text-slate-500 dark:text-slate-400" />
+                                Retrying...
+                            </div>
+                        </div>
+                    )}
+                    <SkeletonTable 
+                        rows={6} 
+                        cols={7}
+                        columnHeaders={['Activity Type', 'Planting', 'Activity Date', 'Performed By', 'Notes', 'Status', 'Actions']}
+                    />
                 </div>
-            )}
-
-            {loading ? (
-                <SkeletonTable 
-                    rows={6} 
-                    cols={7}
-                    columnHeaders={['Activity Type', 'Planting', 'Activity Date', 'Performed By', 'Notes', 'Status', 'Actions']}
-                />
+            ) : activitiesError ? (
+                <div className="bg-red-50 dark:bg-slate-800/80 rounded-2xl shadow-sm border border-red-100 dark:border-red-900/50 px-6 py-16 text-center">
+                    <div className="flex flex-col items-center gap-3">
+                        <AlertTriangle size={40} className="text-red-400 dark:text-red-500" />
+                        <h3 className="text-lg font-semibold text-red-800 dark:text-red-400">Unable to load activities</h3>
+                        <p className="text-red-600 dark:text-red-300/80 text-sm font-medium max-w-md">
+                            Activity records could not be retrieved. Check the server connection and try again.
+                        </p>
+                        <button
+                            onClick={handleRetry}
+                            className="mt-2 px-4 py-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/40 dark:hover:bg-red-900/60 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-2"
+                        >
+                            Retry
+                        </button>
+                    </div>
+                </div>
             ) : (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
                     {visibleActivities.length === 0 ? (
@@ -298,6 +349,7 @@ const Activities = () => {
                                             acc[key] = {
                                                 plantingId: act.planting_id,
                                                 plantingVariety: act.planting_variety || 'Unassigned Plot',
+                                                fieldName: act.field_name || 'Unassigned Field',
                                                 activities: []
                                             };
                                         }
@@ -305,23 +357,18 @@ const Activities = () => {
                                         return acc;
                                     }, {})
                                 ).map((group) => {
-                                    const isExpanded = expandedPlantingId === group.plantingId;
                                     const headerLabel = group.plantingVariety;
                                     const isArchivedGroup = group.activities.length > 0 && group.activities.every(isCompletedActivity);
-                                    const subLabel = group.activities[0]?.field_name || 'Unassigned Field';
+                                    const subLabel = group.fieldName;
 
                                     return (
                                         <div
                                             key={group.plantingId || headerLabel}
-                                            className="rounded-xl border border-gray-100 bg-white overflow-hidden h-fit self-start"
+                                            className="rounded-xl border border-gray-100 bg-white overflow-hidden h-fit self-start hover:shadow-md transition-shadow"
                                         >
                                             <button
                                                 type="button"
-                                                onClick={() =>
-                                                    setExpandedPlantingId((prev) =>
-                                                        prev === group.plantingId ? null : group.plantingId
-                                                    )
-                                                }
+                                                onClick={() => setSelectedPlotActivities(group)}
                                                 className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors"
                                             >
                                                 <div className="flex items-center justify-between gap-3">
@@ -341,69 +388,10 @@ const Activities = () => {
                                                         </p>
                                                     </div>
                                                     <ChevronRight
-                                                        className={`h-5 w-5 text-gray-400 transition-transform ${
-                                                            isExpanded ? 'rotate-90' : ''
-                                                        }`}
+                                                        className="h-5 w-5 text-gray-400"
                                                     />
                                                 </div>
                                             </button>
-
-                                            {isExpanded && (
-                                                <div className="px-4 pb-3">
-                                                    <div className="flex gap-3 overflow-x-auto pb-2 pr-1 overscroll-x-contain">
-                                                        {group.activities.map((act) => {
-                                                            const isSystem = !!act.is_system_generated;
-                                                            const isCompleted = String(act.status || '').toLowerCase() === 'completed';
-                                                            const rowBg = isSystem
-                                                                ? 'bg-gray-50 dark:bg-slate-900/60'
-                                                                : 'bg-emerald-50/70 dark:bg-emerald-950/20';
-                                                            const textColor = isSystem
-                                                                ? 'text-gray-700 dark:text-slate-100'
-                                                                : 'text-emerald-900 dark:text-emerald-300';
-                                                            return (
-                                                                <div
-                                                                    key={act.id}
-                                                                    className={`flex-shrink-0 w-64 rounded-xl border border-gray-100 dark:border-slate-700 px-3 py-2.5 flex flex-col ${rowBg}`}
-                                                                >
-                                                                    <div className="flex items-start justify-between gap-2">
-                                                                        <div className="flex items-start gap-2 min-w-0">
-                                                                            {getActivityIcon(act.activity_type)}
-                                                                            <p className={`text-sm font-semibold capitalize truncate ${textColor}`}>
-                                                                                {act.activity_type?.replace('_', ' ')}
-                                                                            </p>
-                                                                        </div>
-                                                                        <Badge status={act.status} />
-                                                                    </div>
-
-                                                                    <p className="mt-2 text-xs text-gray-700 dark:text-slate-300 leading-relaxed line-clamp-3" title={act.notes || ''}>
-                                                                        {act.notes || '—'}
-                                                                    </p>
-
-                                                                    <div className="mt-auto pt-3 flex flex-col gap-2">
-                                                                        <p className="text-xs text-gray-500 dark:text-slate-400 whitespace-nowrap">
-                                                                            {act.activity_date?.slice(0, 10) || '—'}
-                                                                        </p>
-                                                                        {!isCompleted && (
-                                                                            <label className="inline-flex items-center gap-2 text-[11px] text-gray-600 dark:text-slate-400 cursor-pointer">
-                                                                                <input
-                                                                                    type="checkbox"
-                                                                                    checked={isCompleted}
-                                                                                    disabled={statusUpdatingId === act.id}
-                                                                                    onChange={(e) =>
-                                                                                        handleToggleStatus(act, e.target.checked)
-                                                                                    }
-                                                                                    className="h-3.5 w-3.5 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700"
-                                                                                />
-                                                                                <span>Mark as completed</span>
-                                                                            </label>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            )}
                                         </div>
                                     );
                                 })}
@@ -412,6 +400,82 @@ const Activities = () => {
                     )}
                 </div>
             )}
+
+            <Modal 
+                isOpen={!!selectedPlotActivities} 
+                onClose={() => setSelectedPlotActivities(null)} 
+                title={selectedPlotActivities ? `Activities for ${selectedPlotActivities.plantingVariety}` : 'Plot Activities'}
+                maxWidth="max-w-2xl"
+            >
+                {selectedPlotActivities && (
+                    <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                        {selectedPlotActivities.activities.map((act) => {
+                            const isSystem = !!act.is_system_generated;
+                            const statusStr = String(act.status || '').toLowerCase();
+                            const isTerminal = ['completed', 'cancelled', 'skipped'].includes(statusStr);
+                            const rowBg = isSystem
+                                ? 'bg-gray-50 dark:bg-slate-900/60'
+                                : 'bg-emerald-50/70 dark:bg-emerald-950/20';
+                            const textColor = isSystem
+                                ? 'text-gray-700 dark:text-slate-100'
+                                : 'text-emerald-900 dark:text-emerald-300';
+                            return (
+                                <div
+                                    key={act.id}
+                                    className={`rounded-xl border border-gray-100 dark:border-slate-700 p-4 flex flex-col sm:flex-row sm:items-start gap-4 ${rowBg}`}
+                                >
+                                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                                        {getActivityIcon(act.activity_type)}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className={`text-sm font-semibold truncate ${textColor}`}>
+                                                    {formatActivityName(act.activity_type)}
+                                                </p>
+                                                <Badge status={act.status} />
+                                            </div>
+                                            
+                                            <p className="mt-2 text-xs text-gray-700 dark:text-slate-300 leading-relaxed" title={act.notes || ''}>
+                                                {act.notes || 'No notes provided.'}
+                                            </p>
+
+                                            <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-slate-400">
+                                                <span>Plan: {act.planned_date ? formatDisplayDate(act.planned_date) : '—'}</span>
+                                                {act.actual_date && <span>Act: {formatDisplayDate(act.actual_date)}</span>}
+                                                
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <span className={`h-1.5 w-1.5 rounded-full ${isSystem ? 'bg-gray-400' : 'bg-emerald-500'}`} />
+                                                    {isSystem ? 'System' : 'Manual'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="mt-3 sm:mt-0 sm:pl-4 sm:border-l border-gray-200 dark:border-slate-600 flex items-center sm:items-start shrink-0">
+                                        {!isTerminal ? (
+                                            <label className="inline-flex items-center gap-2 text-xs text-gray-600 dark:text-slate-400 cursor-pointer hover:text-emerald-700 transition-colors">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={statusStr === 'completed'}
+                                                    disabled={statusUpdatingId === act.id}
+                                                    onChange={(e) =>
+                                                        handleToggleStatus(act, e.target.checked)
+                                                    }
+                                                    className="h-4 w-4 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700"
+                                                />
+                                                <span className="font-medium">Complete</span>
+                                            </label>
+                                        ) : (
+                                            <span className="text-xs font-medium text-gray-400 dark:text-slate-500 italic py-1">
+                                                No actions
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </Modal>
 
             <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingItem ? 'Edit Activity' : 'Log Activity'}>
                 <form onSubmit={handleSave} className="space-y-4">
@@ -423,20 +487,14 @@ const Activities = () => {
                         <div>
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Target Planting *</label>
                             <div className="relative">
-                                <select
+                                <Select
+                                    id="activity-planting-select"
                                     required
-                                    className="w-full border border-gray-300 rounded-lg pl-4 pr-10 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow appearance-none bg-white text-gray-800"
                                     value={formData.planting_id}
                                     onChange={e => setFormData({ ...formData, planting_id: e.target.value })}
-                                >
-                                    <option value="">Select Active Planting</option>
-                                    {plantings.map(p => (
-                                        <option key={p.id} value={p.id}>{p.variety} ({p.field_name})</option>
-                                    ))}
-                                </select>
-                                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400">
-                                    <ChevronDown size={16} />
-                                </span>
+                                    options={plantings.map(p => ({ value: String(p.id), label: `${p.variety} (${p.field_name})` }))}
+                                    placeholder="Select Active Planting"
+                                />
                             </div>
                         </div>
                     )}
@@ -444,49 +502,48 @@ const Activities = () => {
                         <div className="md:col-span-2">
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Activity Type *</label>
                             <div className="relative">
-                                <select
+                                <Select
+                                    id="activity-type-select"
                                     required
-                                    className="w-full border border-gray-300 rounded-lg pl-4 pr-10 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow appearance-none bg-white text-gray-800"
                                     value={formData.activity_type}
                                     onChange={e => setFormData({ ...formData, activity_type: e.target.value })}
-                                >
-                                    {Object.keys(ACTIVITY_ICONS).map(type => (
-                                        <option key={type} value={type}>
-                                            {type.charAt(0).toUpperCase() + type.slice(1)}
-                                        </option>
-                                    ))}
-                                </select>
-                                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400">
-                                    <ChevronDown size={16} />
-                                </span>
+                                    options={Object.keys(ACTIVITY_ICONS).map(type => ({ value: type, label: type.charAt(0).toUpperCase() + type.slice(1) }))}
+                                />
                             </div>
                         </div>
                         <div>
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Activity Date *</label>
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Planned Date *</label>
                             <MonthPicker
                                 required
-                                placeholder="Select activity date"
-                                value={formData.activity_date}
-                                onChange={e => setFormData({ ...formData, activity_date: e.target.value })}
+                                placeholder="Select planned date"
+                                value={formData.planned_date}
+                                onChange={e => setFormData({ ...formData, planned_date: e.target.value })}
                             />
                         </div>
                         <div>
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Actual Date (Optional)</label>
+                            <MonthPicker
+                                placeholder="Select actual completion date"
+                                value={formData.actual_date}
+                                onChange={e => setFormData({ ...formData, actual_date: e.target.value })}
+                            />
+                        </div>
+                        <div className="md:col-span-2">
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Status *</label>
                             <div className="relative">
-                                <select
+                                <Select
+                                    id="activity-status-select"
                                     required
-                                    disabled={editingItem && editingItem.status === 'completed'}
-                                    className="w-full border border-gray-300 rounded-lg pl-4 pr-10 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow disabled:bg-gray-50 disabled:text-gray-500 appearance-none bg-white text-gray-800"
+                                    disabled={editingItem && editingItem.status === 'COMPLETED'}
                                     value={formData.status}
                                     onChange={e => setFormData({ ...formData, status: e.target.value })}
-                                >
-                                    <option value="pending">Pending</option>
-                                    <option value="ongoing">Ongoing</option>
-                                    <option value="completed">Completed</option>
-                                </select>
-                                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400">
-                                    <ChevronDown size={16} />
-                                </span>
+                                    options={[
+                                        { value: 'PENDING', label: 'Pending' },
+                                        { value: 'COMPLETED', label: 'Completed' },
+                                        { value: 'CANCELLED', label: 'Cancelled' },
+                                        { value: 'SKIPPED', label: 'Skipped' }
+                                    ]}
+                                />
                             </div>
                         </div>
                         <div className="md:col-span-2">

@@ -17,6 +17,7 @@ const MonthPicker = ({
     className = '',
     id,
     placeholder = 'Select planting date',
+    maxDate, // Format: YYYY-MM-DD
 }) => {
     const [open, setOpen] = useState(false);
     const [panelStyle, setPanelStyle] = useState({});
@@ -107,6 +108,8 @@ const MonthPicker = ({
         const paddedDay = String(day).padStart(2, '0');
         const dateStr = `${viewYear}-${paddedMonth}-${paddedDay}`;
         
+        if (maxDate && dateStr > maxDate) return;
+
         onChange({ target: { value: dateStr } });
         closePanel();
     };
@@ -287,16 +290,25 @@ const MonthPicker = ({
                                 }
                                 
                                 const isSelected = selectedYear === viewYear && selectedMonth === viewMonth && selectedDay === day;
+                                
+                                const paddedMonth = String(viewMonth + 1).padStart(2, '0');
+                                const paddedDay = String(day).padStart(2, '0');
+                                const dateStr = `${viewYear}-${paddedMonth}-${paddedDay}`;
+                                const isDisabledDay = maxDate && dateStr > maxDate;
+
                                 return (
                                     <button
                                         key={`day-${day}`}
                                         type="button"
+                                        disabled={isDisabledDay}
                                         onClick={() => handleSelectDay(day)}
                                         className={[
                                             'w-8 h-8 mx-auto flex items-center justify-center text-sm font-medium rounded-full transition-all duration-150',
-                                            isSelected
-                                                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 font-semibold shadow-md'
-                                                : 'text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 active:bg-gray-200 dark:active:bg-slate-600',
+                                            isDisabledDay
+                                                ? 'text-gray-300 dark:text-slate-600 cursor-not-allowed'
+                                                : isSelected
+                                                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 font-semibold shadow-md'
+                                                    : 'text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 active:bg-gray-200 dark:active:bg-slate-600',
                                         ].join(' ')}
                                     >
                                         {day}

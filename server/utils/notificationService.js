@@ -163,7 +163,7 @@ const generateActivityNotifications = async () => {
             `SELECT
                 a.id            AS activity_id,
                 a.activity_type,
-                a.activity_date,
+                a.planned_date,
                 a.notes,
                 pl.user_id      AS user_id,
                 pl.variety,
@@ -172,8 +172,8 @@ const generateActivityNotifications = async () => {
              JOIN plantings pl ON a.planting_id = pl.id
              WHERE a.deleted_at IS NULL
                AND pl.deleted_at IS NULL
-               AND a.status IN ('pending', 'ongoing')
-               AND DATE(a.activity_date) = CURDATE()`
+               AND a.status = 'PENDING'
+               AND DATE(a.planned_date) = CURDATE()`
         );
 
         for (const row of rows) {
@@ -203,17 +203,17 @@ const generateOverdueNotifications = async () => {
             `SELECT
                 a.id            AS activity_id,
                 a.activity_type,
-                a.activity_date,
+                a.planned_date,
                 pl.user_id      AS user_id,
                 pl.variety,
                 pl.field_name   AS field_name,
-                DATEDIFF(CURDATE(), DATE(a.activity_date)) AS days_overdue
+                DATEDIFF(CURDATE(), DATE(a.planned_date)) AS days_overdue
              FROM activities a
              JOIN plantings pl ON a.planting_id = pl.id
              WHERE a.deleted_at IS NULL
                AND pl.deleted_at IS NULL
-               AND a.status IN ('pending', 'ongoing')
-               AND DATE(a.activity_date) < CURDATE()`
+               AND a.status = 'PENDING'
+               AND DATE(a.planned_date) < CURDATE()`
         );
 
         for (const row of rows) {
@@ -252,8 +252,7 @@ const generateLifecycleNotifications = async () => {
                 DATEDIFF(CURDATE(), DATE(pl.planting_date)) AS days_elapsed
              FROM plantings pl
              WHERE pl.deleted_at IS NULL
-               AND pl.status = 'active'
-               AND pl.lifecycle_state NOT IN ('HARVESTED', 'ABANDONED')`
+               AND pl.status = 'active'`
         );
 
         for (const row of rows) {
@@ -342,12 +341,10 @@ const pruneNotifications = async () => {
             WHERE n.type IN ('activity_due', 'activity_overdue')
               AND (
                   a.id IS NULL
-                  OR a.status = 'completed'
+                  OR a.status != 'PENDING'
                   OR a.deleted_at IS NOT NULL
                   OR pl.id IS NULL
-                  OR pl.status = 'completed'
-                  OR pl.lifecycle_state = 'HARVESTED'
-                  OR pl.lifecycle_state = 'ABANDONED'
+                  OR pl.status != 'active'
                   OR pl.deleted_at IS NOT NULL
               )
         `);
@@ -359,9 +356,7 @@ const pruneNotifications = async () => {
             WHERE n.type = 'lifecycle_update'
               AND (
                   pl.id IS NULL
-                  OR pl.status = 'completed'
-                  OR pl.lifecycle_state = 'HARVESTED'
-                  OR pl.lifecycle_state = 'ABANDONED'
+                  OR pl.status != 'active'
                   OR pl.deleted_at IS NOT NULL
               )
         `);

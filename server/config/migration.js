@@ -21,6 +21,32 @@ const runMigrations = async (db) => {
             return;
         }
 
+        // ── Notes Table ────────────────────────────────────────────────────────
+        const [[{ hasNotesTable }]] = await db.query(
+            `SELECT COUNT(*) as hasNotesTable
+             FROM INFORMATION_SCHEMA.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'notes'`
+        );
+
+        if (hasNotesTable === 0) {
+            console.log('🔹 Creating notes table...');
+            await db.query(`
+                CREATE TABLE notes (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    description TEXT NULL,
+                    note_date DATE NOT NULL,
+                    color VARCHAR(50) DEFAULT 'slate',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            `);
+            console.log('✅ Created notes table.');
+        }
+
         // ── Plantings ownership + embedded field metadata ───────────────────────
 
         const [[{ hasPlantingsUserId }]] = await db.query(
@@ -100,10 +126,9 @@ const runMigrations = async (db) => {
                     `UPDATE plantings p
                      JOIN fields f ON p.field_id = f.id
                      SET
-                       p.user_id = COALESCE(p.user_id, f.user_id),
                        p.field_name = COALESCE(p.field_name, f.name),
                        p.field_location = COALESCE(p.field_location, f.location),
-                       p.field_size = COALESCE(p.field_size, f.size),
+                       p.field_size = COALESCE(p.field_size, f.size_ha),
                        p.field_category = COALESCE(p.field_category, f.category)
                      WHERE p.deleted_at IS NULL`
                 );
@@ -197,16 +222,40 @@ const runMigrations = async (db) => {
         if (hasPlantingsFieldId > 0) {
             console.log('🔹 Dropping plantings.field_id dependency (legacy Fields module)...');
             try {
-                await db.query('ALTER TABLE plantings DROP FOREIGN KEY fk_plantings_field');
-            } catch {
-                try { await db.query('ALTER TABLE plantings DROP FOREIGN KEY plantings_ibfk_1'); }
-                catch { /* ignore */ }
+                const [fks] = await db.query(`
+                    SELECT CONSTRAINT_NAME
+                    FROM information_schema.KEY_COLUMN_USAGE
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'plantings'
+                      AND COLUMN_NAME = 'field_id'
+                      AND REFERENCED_TABLE_NAME IS NOT NULL
+                `);
+                for (const fk of fks) {
+                    console.log(`   Dropping FK: ${fk.CONSTRAINT_NAME}`);
+                    await db.query(`ALTER TABLE plantings DROP FOREIGN KEY ${fk.CONSTRAINT_NAME}`);
+                }
+            } catch (err) {
+                console.warn('⚠️ Could not drop field_id foreign keys:', err.message);
             }
+
             try {
                 await db.query('ALTER TABLE plantings DROP KEY uq_field_planting');
             } catch (err) {
                 /* ignore */
             }
+
+            try {
+                const [idxs] = await db.query(`
+                    SHOW INDEX FROM plantings WHERE Column_name = 'field_id'
+                `);
+                for (const idx of idxs) {
+                    console.log(`   Dropping index: ${idx.Key_name}`);
+                    await db.query(`ALTER TABLE plantings DROP INDEX ${idx.Key_name}`);
+                }
+            } catch (err) {
+                console.warn('⚠️ Could not drop field_id index:', err.message);
+            }
+
             await db.query('ALTER TABLE plantings DROP COLUMN field_id');
             console.log('✅ Dropped plantings.field_id.');
         }
@@ -270,9 +319,83 @@ const runMigrations = async (db) => {
             console.log('✅ Added financial_value to harvests.');
         }
 
+        // ── Plantings Crop Context and Stages ─────────────────────────────────
+        const checkColumn = async (table, column) => {
+            const [[{ hasCol }]] = await db.query(
+                `SELECT COUNT(*) as hasCol FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`, [table, column]
+            );
+            return hasCol > 0;
+        };
+
+        if (!(await checkColumn('plantings', 'cropping_season'))) {
+            console.log('🔹 Adding cropping_season to plantings...');
+            await db.query("ALTER TABLE plantings ADD COLUMN cropping_season ENUM('WET_SEASON', 'DRY_SEASON') NULL AFTER field_category");
+        }
+        if (!(await checkColumn('plantings', 'establishment_method'))) {
+            console.log('🔹 Adding establishment_method to plantings...');
+            await db.query("ALTER TABLE plantings ADD COLUMN establishment_method ENUM('TRANSPLANTED', 'DIRECT_SEEDED') NULL AFTER cropping_season");
+        }
+        if (!(await checkColumn('plantings', 'field_condition'))) {
+            console.log('🔹 Adding field_condition to plantings...');
+            await db.query("ALTER TABLE plantings ADD COLUMN field_condition ENUM('IRRIGATED', 'RAINFED') NULL AFTER establishment_method");
+        }
+        if (!(await checkColumn('plantings', 'expected_stage'))) {
+            console.log('🔹 Adding expected_stage to plantings...');
+            await db.query("ALTER TABLE plantings ADD COLUMN expected_stage VARCHAR(100) NULL AFTER field_condition");
+        }
+        if (!(await checkColumn('plantings', 'observed_stage'))) {
+            console.log('🔹 Adding observed_stage and observed_stage_date to plantings...');
+            await db.query("ALTER TABLE plantings ADD COLUMN observed_stage VARCHAR(100) NULL AFTER expected_stage");
+            await db.query("ALTER TABLE plantings ADD COLUMN observed_stage_date DATE NULL AFTER observed_stage");
+        }
+
+        // ── Activities Table Refactor ─────────────────────────────────────────
+        if (!(await checkColumn('activities', 'planned_date'))) {
+            console.log('🔹 Adding planned_date to activities...');
+            await db.query("ALTER TABLE activities ADD COLUMN planned_date DATE NULL AFTER activity_date");
+            // Backfill planned_date from legacy activity_date
+            await db.query("UPDATE activities SET planned_date = activity_date WHERE planned_date IS NULL");
+        }
+        if (!(await checkColumn('activities', 'actual_date'))) {
+            console.log('🔹 Adding actual_date to activities...');
+            await db.query("ALTER TABLE activities ADD COLUMN actual_date DATE NULL AFTER planned_date");
+            // Note: intentionally NOT fabricating actual_date for legacy completed activities.
+        }
+        if (!(await checkColumn('activities', 'activity_source'))) {
+            console.log('🔹 Adding activity_source to activities...');
+            await db.query("ALTER TABLE activities ADD COLUMN activity_source ENUM('SYSTEM_SCHEDULED', 'FARMER_MANUAL') DEFAULT 'SYSTEM_SCHEDULED' AFTER actual_date");
+            if (await checkColumn('activities', 'is_system_generated')) {
+                await db.query("UPDATE activities SET activity_source = IF(is_system_generated = 1, 'SYSTEM_SCHEDULED', 'FARMER_MANUAL')");
+            }
+        }
+        if (!(await checkColumn('activities', 'category'))) {
+            console.log('🔹 Adding category to activities...');
+            await db.query("ALTER TABLE activities ADD COLUMN category VARCHAR(100) NULL AFTER activity_source");
+        }
+        if (!(await checkColumn('activities', 'details'))) {
+            console.log('🔹 Adding details to activities...');
+            await db.query("ALTER TABLE activities ADD COLUMN details JSON NULL AFTER category");
+        }
+        
+        // Ensure status handles string explicitly to decouple from rigid enum for now, and normalize
+        const [[{ isStatusEnumAct }]] = await db.query(
+            `SELECT COUNT(*) as isStatusEnumAct FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'activities' AND COLUMN_NAME = 'status' AND DATA_TYPE = 'enum'`
+        );
+        if (isStatusEnumAct > 0) {
+            console.log('🔹 Modifying activities.status from ENUM to VARCHAR(50)...');
+            await db.query('ALTER TABLE activities MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT "PENDING"');
+        }
+        
+        // Normalize existing statuses to the restricted persisted states
+        await db.query("UPDATE activities SET status = 'PENDING' WHERE status IN ('pending', 'ongoing', 'due', 'overdue')");
+        await db.query("UPDATE activities SET status = 'COMPLETED' WHERE status = 'completed'");
+        await db.query("UPDATE activities SET status = 'SKIPPED' WHERE status = 'skipped'");
+        await db.query("UPDATE activities SET status = 'CANCELLED' WHERE status = 'cancelled'");
+
         console.log('🎉 Migrations completed successfully!');
     } catch (err) {
         console.error('❌ Migration failed:', err.message);
+        throw err; // Re-throw to ensure caller (startup process) catches and aborts
     }
 };
 

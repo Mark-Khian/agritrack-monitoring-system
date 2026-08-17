@@ -62,31 +62,8 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ── DB Connection ─────────────────────────
-require('./config/db');
-
-// ── Start Backup Scheduler ────────────────
-scheduleBackups();
-
-// ── Notification Scheduler ────────────────
-// Every 6 hours: activity due, overdue, lifecycle stage transitions
-cron.schedule('0 */6 * * *', async () => {
-    console.log('⏰ [Notifications] Running activity/lifecycle cycle...');
-    await runActivityCycle();
-}, { timezone: 'Asia/Manila' });
-
-// Every 12 hours: weather alerts
-cron.schedule('0 */12 * * *', async () => {
-    console.log('⏰ [Notifications] Running weather alert cycle...');
-    await runWeatherCycle();
-}, { timezone: 'Asia/Manila' });
-
-// Run once at startup so notifications are immediately available
-setTimeout(() => {
-    runActivityCycle().catch((e) => console.error('[Notifications] Startup cycle error:', e.message));
-    runWeatherCycle().catch((e) => console.error('[Notifications] Startup weather error:', e.message));
-}, 5000); // 5-second delay lets DB connections stabilise
-
-console.log('🔔 Notification scheduler registered (6h activity/lifecycle, 12h weather)');
+const db = require('./config/db');
+const runMigrations = require('./config/migration');
 
 // ── Routes ───────────────────────────────
 app.use('/api/v1', require('./routes/v1/index'));
@@ -112,22 +89,58 @@ app.use((err, req, res, next) => {
     });
 });
 
-// ── Start Server ──────────────────────────
-const PORT = process.env.PORT || 5000;
-const HTTPS_PORT = process.env.HTTPS_PORT || 5443;
+async function startServer() {
+    try {
+        console.log('🚀 Starting application...');
+        
+        // 1. Run migrations synchronously
+        await runMigrations(db);
 
-const sslCerts = generateCerts();
+        // 2. Start Backup Scheduler
+        scheduleBackups();
 
-// HTTP Server
-http.createServer(app).listen(PORT, () => {
-    console.log(`🌐 HTTP  running on http://localhost:${PORT}`);
-});
+        // 3. Register Notification/Weather Schedulers
+        // Every 6 hours: activity due, overdue, lifecycle stage transitions
+        cron.schedule('0 */6 * * *', async () => {
+            console.log('⏰ [Notifications] Running activity/lifecycle cycle...');
+            await runActivityCycle();
+        }, { timezone: 'Asia/Manila' });
 
-// HTTPS Server
-if (sslCerts) {
-    https.createServer(sslCerts, app).listen(HTTPS_PORT, () => {
-        console.log(`🔒 HTTPS running on https://localhost:${HTTPS_PORT}`);
-    });
-} else {
-    console.log('⚠️  HTTPS disabled — SSL certificates not available.');
+        // Every 12 hours: weather alerts
+        cron.schedule('0 */12 * * *', async () => {
+            console.log('⏰ [Notifications] Running weather alert cycle...');
+            await runWeatherCycle();
+        }, { timezone: 'Asia/Manila' });
+
+        console.log('🔔 Notification scheduler registered (6h activity/lifecycle, 12h weather)');
+
+        // 4. Start HTTP/HTTPS servers
+        const PORT = process.env.PORT || 5000;
+        const HTTPS_PORT = process.env.HTTPS_PORT || 5443;
+        const sslCerts = generateCerts();
+
+        http.createServer(app).listen(PORT, () => {
+            console.log(`🌐 HTTP  running on http://localhost:${PORT}`);
+        });
+
+        if (sslCerts) {
+            https.createServer(sslCerts, app).listen(HTTPS_PORT, () => {
+                console.log(`🔒 HTTPS running on https://localhost:${HTTPS_PORT}`);
+            });
+        } else {
+            console.log('⚠️  HTTPS disabled — SSL certificates not available.');
+        }
+
+        // 5. Run initial background jobs (delayed slightly to ensure server is ready)
+        setTimeout(() => {
+            runActivityCycle().catch((e) => console.error('[Notifications] Startup cycle error:', e.message));
+            runWeatherCycle().catch((e) => console.error('[Notifications] Startup weather error:', e.message));
+        }, 5000);
+
+    } catch (err) {
+        console.error('❌ Application startup failed due to initialization error:', err.message);
+        process.exit(1);
+    }
 }
+
+startServer();

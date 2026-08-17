@@ -9,9 +9,14 @@ const ATTENTION_OVERDUE_THRESHOLD = 3;
 
 const getGrowthStageForPlanting = (planting, harvestExists, progressEstimate) => {
     if (planting.growth_stage_recorded) return planting.growth_stage_recorded;
-    if (harvestExists || planting.lifecycle_state === 'HARVESTED' || planting.status === 'completed') return 'Harvest Stage';
-    if (planting.lifecycle_state === 'ABANDONED' || planting.status === 'failed') return 'Abandoned';
-    if (planting.lifecycle_state === 'PLANNED') return 'Seedling Stage';
+    if (planting.observed_stage) return planting.observed_stage;
+    if (harvestExists || planting.status === 'completed') return 'Harvest Stage';
+    if (planting.status === 'failed') return 'Abandoned';
+    
+    // Check if it's explicitly saved as expected_stage
+    if (planting.expected_stage) return planting.expected_stage;
+
+    // Fallback to progress calculation
 
     const progress = progressEstimate != null ? progressEstimate : 0;
     if (progress < 0.15) {
@@ -39,11 +44,11 @@ const getPlantingPresentation = (
     { harvestExists = false, overdueActivityCount = 0, todayYmd = null }
 ) => {
     const today = todayYmd || utcTodayYmd();
-    const storedState = planting.lifecycle_state || 'ACTIVE';
-    const effectiveLifecycle = harvestExists ? 'HARVESTED' : storedState;
+    const isCompleted = harvestExists || planting.status === 'completed';
+    const isFailed = planting.status === 'failed';
 
     let progressEstimate = null;
-    if (harvestExists || effectiveLifecycle === 'HARVESTED') {
+    if (isCompleted) {
         progressEstimate = 1;
     } else {
         const duration =
@@ -58,7 +63,7 @@ const getPlantingPresentation = (
 
     const alerts = [];
     if (!harvestExists && planting.expected_harvest && today > planting.expected_harvest) {
-        if (effectiveLifecycle !== 'HARVESTED' && effectiveLifecycle !== 'ABANDONED') {
+        if (!isCompleted && !isFailed) {
             alerts.push({
                 code: 'PAST_EXPECTED_WINDOW',
                 message: 'Current date is past the planned expected harvest window (estimate).',
@@ -75,7 +80,6 @@ const getPlantingPresentation = (
     const attentionNeeded = overdueActivityCount >= ATTENTION_OVERDUE_THRESHOLD;
 
     return {
-        lifecycle_state: effectiveLifecycle,
         progress_estimate: progressEstimate,
         progress_is_estimate: !harvestExists,
         overdue_activity_count: overdueActivityCount,
@@ -89,9 +93,8 @@ const legacyGrowthStageForApi = (planting, harvestExists = false, progressEstima
 
     let pe = progressEstimate;
     if (pe == null) {
-        const storedState = planting.lifecycle_state || 'ACTIVE';
-        const effectiveLifecycle = harvestExists ? 'HARVESTED' : storedState;
-        if (effectiveLifecycle === 'HARVESTED') {
+        const isCompleted = harvestExists || planting.status === 'completed';
+        if (isCompleted) {
             pe = 1.0;
         } else {
             const duration = Number(planting.expected_growth_days || 0) + Number(planting.adjustment_days || 0);
@@ -123,8 +126,8 @@ const loadPresentationContext = async (db, plantingIds) => {
     const [overdueRows] = await db.query(
         `SELECT planting_id, COUNT(*) AS c FROM activities
          WHERE deleted_at IS NULL
-           AND status IN ('pending','ongoing')
-           AND activity_date < CURDATE()
+           AND status IN ('PENDING')
+           AND planned_date < CURDATE()
            AND planting_id IN (${ph})
          GROUP BY planting_id`,
         plantingIds
@@ -143,9 +146,15 @@ const enrichPlantingRow = (planting, ctx, todayYmd = null) => {
         todayYmd,
     });
 
+    const legacyGrowthStage = legacyGrowthStageForApi(planting, harvestExists, presentation.progress_estimate);
+    const expected_stage = planting.expected_stage || legacyGrowthStage;
+    const observed_stage = planting.observed_stage || null;
+
     return {
         ...planting,
-        growth_stage: legacyGrowthStageForApi(planting, harvestExists, presentation.progress_estimate),
+        growth_stage: legacyGrowthStage,
+        expected_stage,
+        observed_stage,
         presentation,
         progress_estimate: presentation.progress_estimate,
         overdue_activity_count: presentation.overdue_activity_count,

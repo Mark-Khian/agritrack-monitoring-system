@@ -285,3 +285,109 @@
   -ms-overflow-style: none !important;  /* IE and Edge */
   scrollbar-width: none !important;  /* Firefox */
 }
+
+/* Subtle Hover Scrollbars (for Calendar cells) */
+.calendar-cell-scroll {
+  scrollbar-width: none; /* Hidden by default in Firefox */
+}
+
+.calendar-cell-scroll:hover,
+.group:hover .calendar-cell-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.5) transparent; /* Light mode thumb */
+}
+
+html.dark .calendar-cell-scroll:hover,
+html.dark .group:hover .calendar-cell-scroll {
+  scrollbar-color: rgba(100, 116, 139, 0.5) transparent; /* Dark mode thumb */
+}
+
+.calendar-cell-scroll::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.calendar-cell-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.calendar-cell-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.calendar-cell-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 9999px;
+}
+
+/* Light Mode Webkit Hover */
+.calendar-cell-scroll:hover::-webkit-scrollbar-thumb,
+.group:hover .calendar-cell-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5); /* Soft gray */
+}
+
+.calendar-cell-scroll::-webkit-scrollbar-thumb:hover,
+.group:hover .calendar-cell-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.7); /* Slightly brighter/darker on direct hover */
+}
+
+/* Dark Mode Webkit Hover */
+html.dark .calendar-cell-scroll:hover::-webkit-scrollbar-thumb,
+html.dark .group:hover .calendar-cell-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.5); /* Muted slate gray */
+}
+
+html.dark .calendar-cell-scroll::-webkit-scrollbar-thumb:hover,
+html.dark .group:hover .calendar-cell-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.7); /* Brighter slate gray on direct hover */
+}
+
+/* 3D Flip Overlay Animation */
+.flip-container {
+  perspective: 1000px;
+}
+.flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-style: preserve-3d;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flip-inner {
+    transition: none;
+  }
+}
+.flip-inner.is-flipped {
+  transform: rotateY(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .flip-inner.is-flipped {
+    transform: none;
+  }
+  .flip-front {
+    transition: opacity 0.6s ease;
+  }
+  .flip-inner.is-flipped .flip-front {
+    opacity: 0;
+  }
+  .flip-back {
+    transition: opacity 0.6s ease;
+    opacity: 0;
+  }
+  .flip-inner.is-flipped .flip-back {
+    opacity: 1;
+    transform: none !important;
+  }
+}
+.flip-front, .flip-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+}
+.flip-back {
+  transform: rotateY(180deg);
+}

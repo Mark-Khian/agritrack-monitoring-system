@@ -24,11 +24,18 @@ const getNotifications = async (req, res) => {
              ORDER BY created_at DESC`
         );
 
-        const [[{ unread }]] = await db.query(
-            `SELECT COUNT(*) AS unread FROM notifications WHERE is_read = 0`
+        const [[{ unread_weather, unread_activity }]] = await db.query(
+            `SELECT 
+                SUM(CASE WHEN type = 'weather_alert' THEN 1 ELSE 0 END) AS unread_weather,
+                SUM(CASE WHEN type != 'weather_alert' THEN 1 ELSE 0 END) AS unread_activity
+             FROM notifications WHERE is_read = 0`
         );
 
-        res.status(200).json({ data: rows, unread: Number(unread) });
+        res.status(200).json({ 
+            data: rows, 
+            unread_weather: Number(unread_weather || 0),
+            unread_activity: Number(unread_activity || 0) 
+        });
     } catch (err) {
         console.error('getNotifications error:', err.message);
         res.status(500).json({ message: 'Server error.' });

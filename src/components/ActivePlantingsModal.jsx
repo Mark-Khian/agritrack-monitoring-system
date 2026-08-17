@@ -18,23 +18,16 @@ const normalize = (val) => (val || '').toLowerCase().trim();
 const isCompletedPlanting = (p) => {
     const status = normalize(p?.status);
     const stage = normalize(p?.growth_stage);
-    const lc = normalize(p?.lifecycle_state);
-    return status === 'completed' || stage === 'harvested' || lc === 'harvested';
+    return status === 'completed' || status === 'failed' || stage === 'harvested';
 };
 
-const getLifecycleStageIndex = (growthStage, lifecycleState) => {
+const getLifecycleStageIndex = (growthStage) => {
     const s = normalize(growthStage);
     if (s.includes('seedling')) return 0;
     if (s.includes('vegetative')) return 1;
     if (s.includes('reproductive') || s.includes('booting') || s.includes('heading')) return 2;
     if (s.includes('ripening')) return 3;
-    if (s.includes('harvest') || normalize(lifecycleState) === 'harvested') return 4;
-
-    const ls = normalize(lifecycleState).replace(/_/g, ' ');
-    if (ls === 'harvested' || ls === 'abandoned') return 4;
-    if (ls === 'ready for harvest') return 3;
-    if (ls === 'maturing') return 2;
-    if (ls === 'active' || ls === 'planned') return 0;
+    if (s.includes('harvest')) return 4;
 
     if (s === 'land preparation' || s === 'seeding' || s === 'transplanting') return 0;
     if (s === 'tillering') return 1;
@@ -228,7 +221,7 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
                                                 const currentLifecycleDay = plantingDate
                                                     ? Math.max(0, Math.round((today - plantingDate) / (1000 * 60 * 60 * 24)))
                                                     : 0;
-                                                const stageIndex = getLifecycleStageIndex(p.growth_stage, p.lifecycle_state);
+                                                const stageIndex = getLifecycleStageIndex(p.expected_stage || p.observed_stage || p.growth_stage);
 
                                                 return (
                                                     <div

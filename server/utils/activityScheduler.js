@@ -6,17 +6,35 @@
 const db = require('../config/db');
 const { addCalendarDays } = require('./plantingDates');
 
+const getAnchorRatio = (method) => {
+    if (method === 'TRANSPLANTED') {
+        const template = LIFECYCLE_ACTIVITY_TEMPLATES.find(t => t.activityType === 'transplanting');
+        return template ? template.ratio : 0.15;
+    } else if (method === 'DIRECT_SEEDED') {
+        const template = LIFECYCLE_ACTIVITY_TEMPLATES.find(t => t.activityType === 'direct_seeding');
+        return template ? template.ratio : 0.0;
+    }
+    return 0.0;
+};
+
+const calculateNormalizedOffset = (templateRatio, anchorRatio, egd) => {
+    if (anchorRatio >= 1.0) anchorRatio = 0.0; // fallback
+    const normalizedRatio = (templateRatio - anchorRatio) / (1 - anchorRatio);
+    return Math.round(normalizedRatio * egd);
+};
+
 const LIFECYCLE_ACTIVITY_TEMPLATES = [
-    { ratio: 0.0, activityType: 'seeding', notes: 'System: Initial seedling preparation and monitoring.', status: 'pending' },
-    { ratio: 0.15, activityType: 'transplanting', notes: 'System: Transfer seedlings into the assigned plot/field.', status: 'pending' },
-    { ratio: 0.20, activityType: 'irrigation', notes: 'System: Begin continuous water management and irrigation checks.', status: 'pending' },
-    { ratio: 0.30, activityType: 'first_fertilizing', notes: 'System: First fertilizer application during early vegetative/tillering stage.', status: 'pending' },
-    { ratio: 0.45, activityType: 'pest_control', notes: 'System: Continuous crop inspection for pests and diseases.', status: 'pending' },
-    { ratio: 0.60, activityType: 'second_fertilizing', notes: 'System: Second/top dressing fertilizer application during later growth stage.', status: 'pending' },
-    { ratio: 0.75, activityType: 'crop_monitoring', notes: 'System: Monitor crop growth, field condition, weed presence, nutrient deficiencies, and overall plant health throughout the growing season.', status: 'pending' },
-    { ratio: 0.85, activityType: 'final_pest_inspection', notes: 'System: Final pest and disease inspection before harvest.', status: 'pending' },
-    { ratio: 0.92, activityType: 'drain_irrigation', notes: 'System: Drain excess water and prepare field for harvesting.', status: 'pending' },
-    { ratio: 1.0, activityType: 'harvesting', notes: 'System: Record harvest date, yield quantity, and harvest completion.', status: 'pending' }
+    { ratio: 0.0, category: 'Crop Establishment', activityType: 'seeding', notes: 'System: Initial seedling preparation and monitoring.', status: 'PENDING', conditions: { establishment_method: 'TRANSPLANTED' } },
+    { ratio: 0.0, category: 'Crop Establishment', activityType: 'direct_seeding', notes: 'System: Direct seeding into the field.', status: 'PENDING', conditions: { establishment_method: 'DIRECT_SEEDED' } },
+    { ratio: 0.15, category: 'Crop Establishment', activityType: 'transplanting', notes: 'System: Transfer seedlings into the assigned plot/field.', status: 'PENDING', conditions: { establishment_method: 'TRANSPLANTED' } },
+    { ratio: 0.20, category: 'Water Management', activityType: 'irrigation', notes: 'System: Begin continuous water management and irrigation checks.', status: 'PENDING' },
+    { ratio: 0.30, category: 'Nutrient Management', activityType: 'first_fertilizing', notes: 'System: First fertilizer application during early vegetative/tillering stage.', status: 'PENDING' },
+    { ratio: 0.45, category: 'Pest/Disease Management', activityType: 'pest_control', notes: 'System: Continuous crop inspection for pests and diseases.', status: 'PENDING' },
+    { ratio: 0.60, category: 'Nutrient Management', activityType: 'second_fertilizing', notes: 'System: Second/top dressing fertilizer application during later growth stage.', status: 'PENDING' },
+    { ratio: 0.75, category: 'Crop Monitoring', activityType: 'crop_monitoring', notes: 'System: Monitor crop growth, field condition, weed presence, nutrient deficiencies, and overall plant health throughout the growing season.', status: 'PENDING' },
+    { ratio: 0.85, category: 'Pest/Disease Management', activityType: 'final_pest_inspection', notes: 'System: Final pest and disease inspection before harvest.', status: 'PENDING' },
+    { ratio: 0.92, category: 'Water Management', activityType: 'drain_irrigation', notes: 'System: Drain excess water and prepare field for harvesting.', status: 'PENDING' },
+    { ratio: 1.0, category: 'Harvest Management', activityType: 'harvesting', notes: 'System: Record harvest date, yield quantity, and harvest completion.', status: 'PENDING' }
 ];
 
 const TEMPLATE_COUNT = LIFECYCLE_ACTIVITY_TEMPLATES.length;
@@ -26,7 +44,7 @@ const getExistingTemplateIndices = async (plantingId, connection = null) => {
     const [rows] = await q.query(
         `SELECT lifecycle_template_index FROM activities
          WHERE planting_id = ?
-           AND is_system_generated = 1
+           AND activity_source = 'SYSTEM_SCHEDULED'
            AND deleted_at IS NULL
            AND lifecycle_template_index IS NOT NULL`,
         [plantingId]
@@ -34,19 +52,26 @@ const getExistingTemplateIndices = async (plantingId, connection = null) => {
     return new Set(rows.map((r) => r.lifecycle_template_index));
 };
 
-const insertSingleTemplate = async (q, plantingId, plantingDate, expectedGrowthDays, templateIndex) => {
+const insertSingleTemplate = async (q, plantingId, plantingDate, expectedGrowthDays, templateIndex, method, adjustmentDays = 0) => {
     const t = LIFECYCLE_ACTIVITY_TEMPLATES[templateIndex];
     if (!t) return;
     const egd = Math.max(1, Number(expectedGrowthDays) || 1);
-    const offset = Math.max(0, Math.round(t.ratio * egd));
+    
+    const anchorRatio = getAnchorRatio(method);
+    let offset = calculateNormalizedOffset(t.ratio, anchorRatio, egd);
+    
+    if (t.ratio >= 1.0) {
+        offset += adjustmentDays;
+    }
+    
     const activityDate = addCalendarDays(plantingDate, offset);
-    const initialStatus = t.status || 'pending';
+    const initialStatus = t.status || 'PENDING';
     await q.query(
         `INSERT INTO activities
-         (planting_id, activity_type, activity_date, original_scheduled_date,
-          notes, performed_by, status, is_system_generated, schedule_ratio, lifecycle_template_index)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, 1, ?, ?)`,
-        [plantingId, t.activityType, activityDate, activityDate, t.notes, initialStatus, t.ratio, templateIndex]
+         (planting_id, activity_type, planned_date, original_scheduled_date,
+          notes, performed_by, status, activity_source, is_system_generated, schedule_ratio, lifecycle_template_index, category)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, 'SYSTEM_SCHEDULED', 1, ?, ?, ?)`,
+        [plantingId, t.activityType, activityDate, activityDate, t.notes, initialStatus, t.ratio, templateIndex, t.category || null]
     );
 };
 
@@ -54,7 +79,7 @@ const insertSingleTemplate = async (q, plantingId, plantingDate, expectedGrowthD
  * Insert templates for the given indices; skips indices already present.
  * @returns {number} rows inserted
  */
-const generateTemplateIndices = async (plantingId, plantingDate, expectedGrowthDays, indices, connection = null) => {
+const generateTemplateIndices = async (plantingId, plantingDate, expectedGrowthDays, indices, method, adjustmentDays = 0, connection = null) => {
     const q = connection || db;
     const existing = await getExistingTemplateIndices(plantingId, q);
     let inserted = 0;
@@ -63,7 +88,7 @@ const generateTemplateIndices = async (plantingId, plantingDate, expectedGrowthD
     );
     for (const i of sorted) {
         if (existing.has(i)) continue;
-        await insertSingleTemplate(q, plantingId, plantingDate, expectedGrowthDays, i);
+        await insertSingleTemplate(q, plantingId, plantingDate, expectedGrowthDays, i, method, adjustmentDays);
         existing.add(i);
         inserted++;
     }
@@ -73,10 +98,22 @@ const generateTemplateIndices = async (plantingId, plantingDate, expectedGrowthD
     return inserted;
 };
 
-/** Full set (same as all indices) — skips existing slots. */
+/** Full set (same as all indices) — skips existing slots, applies conditions. */
 const ensureAllSystemTemplates = async (plantingId, plantingDate, expectedGrowthDays, connection = null) => {
-    const all = LIFECYCLE_ACTIVITY_TEMPLATES.map((_, i) => i);
-    return generateTemplateIndices(plantingId, plantingDate, expectedGrowthDays, all, connection);
+    const q = connection || db;
+    const [rows] = await q.query('SELECT establishment_method, adjustment_days FROM plantings WHERE id = ?', [plantingId]);
+    const method = rows.length > 0 ? rows[0].establishment_method : null;
+    const adjustmentDays = rows.length > 0 ? Number(rows[0].adjustment_days || 0) : 0;
+    const anchorRatio = getAnchorRatio(method);
+
+    const all = LIFECYCLE_ACTIVITY_TEMPLATES.map((t, i) => {
+        if (t.conditions && t.conditions.establishment_method) {
+             if (t.conditions.establishment_method !== method) return -1;
+        }
+        if (t.ratio < anchorRatio) return -1; // skip pre-establishment tasks automatically
+        return i;
+    }).filter((i) => i >= 0);
+    return generateTemplateIndices(plantingId, plantingDate, expectedGrowthDays, all, method, adjustmentDays, connection);
 };
 
 /** @deprecated name kept for callers — now idempotent (fills only missing template slots). */
@@ -91,11 +128,16 @@ const rescheduleFutureSystemActivities = async (plantingId, plantingDate, expect
     const q = connection || db;
     const egd = Math.max(1, Number(expectedGrowthDays) || 1);
 
+    const [rows] = await q.query('SELECT establishment_method, adjustment_days FROM plantings WHERE id = ?', [plantingId]);
+    const method = rows.length > 0 ? rows[0].establishment_method : null;
+    const adjustmentDays = rows.length > 0 ? Number(rows[0].adjustment_days || 0) : 0;
+    const anchorRatio = getAnchorRatio(method);
+
     const [pending] = await q.query(
-        `SELECT id, activity_date, schedule_ratio, lifecycle_template_index FROM activities
+        `SELECT id, planned_date, schedule_ratio, lifecycle_template_index FROM activities
          WHERE planting_id = ?
-           AND is_system_generated = 1
-           AND status IN ('pending', 'ongoing')
+           AND activity_source = 'SYSTEM_SCHEDULED'
+           AND status = 'PENDING'
            AND deleted_at IS NULL
          ORDER BY COALESCE(lifecycle_template_index, 255), id ASC`,
         [plantingId]
@@ -109,60 +151,38 @@ const rescheduleFutureSystemActivities = async (plantingId, plantingDate, expect
         if (ratio == null || Number.isNaN(ratio)) {
             ratio = 0.5;
         }
-        const offset = Math.max(0, Math.round(ratio * egd));
+
+        if (ratio < anchorRatio) {
+            // Obsolete pre-establishment activity on already established crop
+            await q.query(
+                `UPDATE activities
+                 SET status = 'CANCELLED',
+                     notes = CONCAT(COALESCE(notes, ''), '\\nSystem: Cancelled obsolete pre-establishment activity due to schedule realignment.')
+                 WHERE id = ?`,
+                [row.id]
+            );
+            continue;
+        }
+
+        let offset = calculateNormalizedOffset(ratio, anchorRatio, egd);
+        if (ratio >= 1.0) {
+            offset += adjustmentDays;
+        }
+        
         const newDate = addCalendarDays(plantingDate, offset);
         await q.query(
             `UPDATE activities
-             SET activity_date = ?,
+             SET planned_date = ?,
                  original_scheduled_date = COALESCE(original_scheduled_date, ?),
                  schedule_ratio = ?,
                  reschedule_count = reschedule_count + 1
              WHERE id = ?`,
-            [newDate, row.activity_date, ratio, row.id]
+            [newDate, row.planned_date, ratio, row.id]
         );
     }
 };
 
-/**
- * Automatically transitions activity statuses based on today's date.
- */
-const syncActivityStatuses = async (connection = null) => {
-    const q = connection || db;
-    // Get date helper today's date in YYYY-MM-DD format
-    const { utcTodayYmd } = require('./plantingDates');
-    const today = utcTodayYmd();
 
-    // 1. Continuous activities whose date has arrived/passed and are pending -> ongoing
-    await q.query(
-        `UPDATE activities
-         SET status = 'ongoing'
-         WHERE status = 'pending'
-           AND activity_type IN ('irrigation', 'pest_control', 'crop_monitoring')
-           AND activity_date <= ?
-           AND deleted_at IS NULL`,
-        [today]
-    );
-
-    // 2. Continuous activities whose date is in the future and are ongoing -> pending
-    await q.query(
-        `UPDATE activities
-         SET status = 'pending'
-         WHERE status = 'ongoing'
-           AND activity_type IN ('irrigation', 'pest_control', 'crop_monitoring')
-           AND activity_date > ?
-           AND deleted_at IS NULL`,
-        [today]
-    );
-
-    // 3. One-time activities that are ongoing -> pending (to align with the rule)
-    await q.query(
-        `UPDATE activities
-         SET status = 'pending'
-         WHERE status = 'ongoing'
-           AND activity_type NOT IN ('irrigation', 'pest_control', 'crop_monitoring')
-           AND deleted_at IS NULL`
-    );
-};
 
 module.exports = {
     LIFECYCLE_ACTIVITY_TEMPLATES,
@@ -171,6 +191,5 @@ module.exports = {
     ensureAllSystemTemplates,
     autoGenerateActivities,
     rescheduleFutureSystemActivities,
-    getExistingTemplateIndices,
-    syncActivityStatuses,
+    getExistingTemplateIndices
 };

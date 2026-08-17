@@ -4,6 +4,8 @@ import useAuth from '../context/useAuth';
 import { loginUser } from '../services/api';
 import { Eye, EyeOff, AlertCircle, Wheat, CheckCircle2, Loader2 } from 'lucide-react';
 import heroRice from '../assets/hero-rice.png';
+import crmLogo from '../assets/CRM-logo.png';
+import FlipOverlay from '../components/FlipOverlay';
 
 const Landing = () => {
   const [username, setUsername] = useState('');
@@ -14,7 +16,7 @@ const Landing = () => {
   const [captchaToken, setCaptchaToken] = useState('');
   const [captchaError, setCaptchaError] = useState('');
   const [captchaRequired, setCaptchaRequired] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
+  const [authPhase, setAuthPhase] = useState('idle');
   const captchaRef = useRef(null);
   const captchaRendered = useRef(false);
   const { login } = useAuth();
@@ -98,27 +100,32 @@ const Landing = () => {
       return;
     }
 
+    setAuthPhase('loading');
     setIsLoading(true);
     try {
-      const res = await loginUser({
-        username,
-        password,
-        captchaToken: captchaRequired ? captchaToken : undefined
-      });
+      const delay = new Promise(resolve => setTimeout(resolve, 800));
+      const [res] = await Promise.all([
+        loginUser({
+          username,
+          password,
+          captchaToken: captchaRequired ? captchaToken : undefined
+        }),
+        delay
+      ]);
       login(res.data.user, res.data.token, res.data.refreshToken);
 
       // Show success screen then redirect
-      setShowSuccess(true);
+      setAuthPhase('success');
       setTimeout(() => navigate('/dashboard'), 2000);
 
     } catch (error) {
+      setAuthPhase('idle');
       const data = error?.response?.data;
       if (data?.captchaRequired) setCaptchaRequired(true);
       const msg = data?.message || error.message || 'Login failed.';
       setErrorMsg(msg);
       if (window.grecaptcha && captchaRendered.current) window.grecaptcha.reset();
       setCaptchaToken('');
-    } finally {
       setIsLoading(false);
     }
   };
@@ -136,38 +143,30 @@ const Landing = () => {
       <div className="absolute inset-0 bg-linear-to-b from-black/50 via-black/40 to-black/50 backdrop-blur-[4px]" />
 
       {/* Success Screen Overlay */}
-      {showSuccess && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-6 text-center">
-            <div className="w-24 h-24 bg-green-500 rounded-full flex items-center justify-center shadow-2xl shadow-green-500/40 animate-bounce">
-              <CheckCircle2 className="w-12 h-12 text-white" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-white mb-2">Login successful</h2>
-              <p className="text-green-200 text-sm">Redirecting to dashboard...</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-            </div>
-          </div>
-        </div>
+      {authPhase !== 'idle' && (
+        <FlipOverlay 
+          isPending={authPhase === 'loading'} 
+          isSuccess={authPhase === 'success'} 
+          title="Login successful" 
+          subtitle="Redirecting to dashboard..." 
+        />
       )}
 
       {/* Admin Login Container */}
-      <div className="relative z-10 min-h-screen w-full flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
+      <div className="relative z-10 min-h-[100dvh] w-full flex flex-col overflow-y-auto px-4 sm:px-6 lg:px-8 py-[clamp(24px,4vh,56px)]">
+        <div className="my-auto w-full flex flex-col items-center">
 
         {/* Logo and Title */}
-        <div className="mb-8 sm:mb-12 text-center">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <Wheat className="w-8 h-8 sm:w-10 sm:h-10 text-green-300" />
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white tracking-tight">
-              Rice Crop Monitoring
+          <div className="flex flex-col items-center text-center w-full mb-[clamp(20px,3vh,36px)]">
+            <img 
+              src={crmLogo} 
+              alt="AgriTrack CRM Logo" 
+              className="w-[72px] h-[72px] sm:w-[84px] sm:h-[84px] lg:w-[96px] lg:h-[96px] object-contain mb-[clamp(10px,1.5vh,14px)] drop-shadow-xl"
+            />
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white tracking-tight text-center max-w-[260px] sm:max-w-[300px] lg:max-w-[340px] mx-auto leading-tight">
+              Rice Crop Record Management
             </h1>
           </div>
-          <p className="text-green-100 text-xs sm:text-sm md:text-base mt-2">Admin Portal</p>
-        </div>
 
         {/* Login Card */}
         <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-8 sm:p-10 border border-white/20">
@@ -261,7 +260,6 @@ const Landing = () => {
               )}
             </button>
 
-
           </form>
 
           {/* Footer note */}
@@ -273,11 +271,7 @@ const Landing = () => {
 
         </div>
 
-        {/* System Info */}
-        <p className="mt-8 sm:mt-12 text-green-100 text-xs sm:text-sm text-center max-w-md">
-          Rice Crop Monitoring System Single-Beneficiary Farm Management
-        </p>
-
+        </div>{/* End my-auto wrapper */}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { CheckCircle2, AlertCircle, X, Info, AlertTriangle } from 'lucide-react';
 
 const Toast = ({ message, type = 'success', onClose, duration = 3000 }) => {
@@ -46,35 +46,32 @@ const Toast = ({ message, type = 'success', onClose, duration = 3000 }) => {
         }
     };
 
+    if (!message) return null;
+
     const config = typeConfig[type] || typeConfig.success;
 
     return (
-        <AnimatePresence>
-            {message && (
-                <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] w-full max-w-sm px-4 pointer-events-none">
-                    <motion.div
-                        initial={{ opacity: 0, y: -40, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                        transition={{ type: 'spring', stiffness: 350, damping: 25 }}
-                        style={config.style}
-                        className="pointer-events-auto flex items-center justify-between gap-3 border backdrop-blur-md px-4 py-3 rounded-2xl shadow-xl shadow-black/5"
-                    >
-                        <div className="flex items-center gap-3">
-                            {config.icon}
-                            <span className="text-sm font-semibold">{message}</span>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            style={{ color: 'inherit' }}
-                            className="opacity-60 hover:opacity-100 transition-opacity p-1.5 rounded-xl hover:bg-black/5 cursor-pointer"
-                        >
-                            <X size={16} />
-                        </button>
-                    </motion.div>
-                </div>
-            )}
-        </AnimatePresence>
+        <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            style={config.style}
+            className="pointer-events-auto flex items-center justify-between gap-3 border backdrop-blur-md px-4 py-3 rounded-2xl shadow-xl shadow-black/5 w-full"
+            layout
+        >
+            <div className="flex items-center gap-3">
+                {config.icon}
+                <span className="text-sm font-semibold">{message}</span>
+            </div>
+            <button
+                onClick={onClose}
+                style={{ color: 'inherit' }}
+                className="opacity-60 hover:opacity-100 transition-opacity p-1.5 rounded-xl hover:bg-black/5 cursor-pointer flex-shrink-0"
+            >
+                <X size={16} />
+            </button>
+        </motion.div>
     );
 };
 

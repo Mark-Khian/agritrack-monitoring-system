@@ -37,7 +37,16 @@ const validatePlanting = [
 
     body('planting_date')
         .notEmpty().withMessage('Planting date is required.')
-        .isDate().withMessage('Planting date must be a valid date.'),
+        .isDate().withMessage('Planting date must be a valid date.')
+        .custom((val) => {
+            if (!val) return true;
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            if (val > todayStr) {
+                throw new Error('Planting date cannot be in the future.');
+            }
+            return true;
+        }),
 
     body('expected_harvest')
         .optional()
@@ -75,14 +84,17 @@ const validatePlanting = [
         .isBoolean()
         .withMessage('growth_plan_manual_override must be boolean.'),
 
-    body('generate_template_indices')
-        .optional()
-        .isArray({ max: 10 })
-        .withMessage('generate_template_indices must be an array (max 10).')
-        .custom((arr) => {
-            if (!Array.isArray(arr) || arr.length === 0) return true;
-            return arr.every((x) => Number.isInteger(Number(x)) && Number(x) >= 0 && Number(x) <= 9);
-        }),
+    body('cropping_season')
+        .notEmpty().withMessage('Cropping Season is required.')
+        .isIn(['WET_SEASON', 'DRY_SEASON']).withMessage('Cropping Season must be WET_SEASON or DRY_SEASON.'),
+
+    body('establishment_method')
+        .notEmpty().withMessage('Establishment method is required.')
+        .isIn(['TRANSPLANTED', 'DIRECT_SEEDED']).withMessage('Establishment method must be TRANSPLANTED or DIRECT_SEEDED.'),
+
+    body('field_condition')
+        .notEmpty().withMessage('Field condition is required.')
+        .isIn(['IRRIGATED', 'RAINFED']).withMessage('Field condition must be IRRIGATED or RAINFED.'),
 
     body('season')
         .notEmpty().withMessage('Season is required.')
@@ -120,7 +132,16 @@ const validatePlantingUpdate = [
 
     body('planting_date')
         .optional()
-        .isDate().withMessage('Planting date must be a valid date.'),
+        .isDate().withMessage('Planting date must be a valid date.')
+        .custom((val) => {
+            if (!val) return true;
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            if (val > todayStr) {
+                throw new Error('Planting date cannot be in the future.');
+            }
+            return true;
+        }),
 
     body('expected_harvest')
         .optional()
@@ -176,14 +197,17 @@ const validatePlantingUpdate = [
         .isBoolean()
         .withMessage('growth_plan_manual_override must be boolean.'),
 
-    body('generate_template_indices')
-        .optional()
-        .isArray({ max: 10 })
-        .withMessage('generate_template_indices must be an array (max 10).')
-        .custom((arr) => {
-            if (!Array.isArray(arr) || arr.length === 0) return true;
-            return arr.every((x) => Number.isInteger(Number(x)) && Number(x) >= 0 && Number(x) <= 9);
-        }),
+    body('cropping_season')
+        .optional({ nullable: true })
+        .isIn(['WET_SEASON', 'DRY_SEASON', '']).withMessage('Cropping Season must be WET_SEASON or DRY_SEASON.'),
+
+    body('establishment_method')
+        .optional({ nullable: true })
+        .isIn(['TRANSPLANTED', 'DIRECT_SEEDED', '']).withMessage('Establishment method must be TRANSPLANTED or DIRECT_SEEDED.'),
+
+    body('field_condition')
+        .optional({ nullable: true })
+        .isIn(['IRRIGATED', 'RAINFED', '']).withMessage('Field condition must be IRRIGATED or RAINFED.'),
 
     body('status')
         .optional()
@@ -209,9 +233,13 @@ const validateActivity = [
             'weeding', 'harvesting', 'other'
         ]).withMessage('Invalid activity type.'),
 
-    body('activity_date')
-        .notEmpty().withMessage('Activity date is required.')
-        .isDate().withMessage('Activity date must be a valid date.'),
+    body('planned_date')
+        .optional({ nullable: true })
+        .isDate().withMessage('Planned date must be a valid date.'),
+
+    body('actual_date')
+        .optional({ nullable: true })
+        .isDate().withMessage('Actual date must be a valid date.'),
 
     body('notes')
         .optional()
@@ -221,8 +249,45 @@ const validateActivity = [
 
     body('status')
         .optional()
-        .isIn(['pending', 'ongoing', 'completed', 'cancelled'])
-        .withMessage('Status must be pending, ongoing, completed, or cancelled.'),
+        .isIn(['pending', 'ongoing', 'completed', 'cancelled', 'skipped', 'SKIPPED', 'COMPLETED', 'PENDING', 'ONGOING', 'CANCELLED'])
+        .withMessage('Status must be pending, ongoing, completed, cancelled, or skipped.'),
+
+    handleValidation
+];
+
+const validateActivityUpdate = [
+    body('planting_id')
+        .optional()
+        .isInt({ min: 1 }).withMessage('Planting ID must be a valid positive number.'),
+
+    body('activity_type')
+        .optional()
+        .isIn([
+            'land_preparation', 'seeding', 'transplanting',
+            'fertilizing', 'first_fertilizing', 'second_fertilizing',
+            'irrigation', 'drain_irrigation', 'pest_control',
+            'final_pest_inspection', 'crop_monitoring',
+            'weeding', 'harvesting', 'other'
+        ]).withMessage('Invalid activity type.'),
+
+    body('planned_date')
+        .optional({ nullable: true })
+        .isDate().withMessage('Planned date must be a valid date.'),
+
+    body('actual_date')
+        .optional({ nullable: true })
+        .isDate().withMessage('Actual date must be a valid date.'),
+
+    body('notes')
+        .optional()
+        .trim()
+        .isLength({ max: 1000 }).withMessage('Notes cannot exceed 1000 characters.')
+        .escape(),
+
+    body('status')
+        .optional()
+        .isIn(['pending', 'ongoing', 'completed', 'cancelled', 'skipped', 'SKIPPED', 'COMPLETED', 'PENDING', 'ONGOING', 'CANCELLED'])
+        .withMessage('Status must be pending, ongoing, completed, cancelled, or skipped.'),
 
     handleValidation
 ];
@@ -274,6 +339,7 @@ module.exports = {
     validatePlanting,
     validatePlantingUpdate,
     validateActivity,
+    validateActivityUpdate,
     validateHarvest,
     validateId
 };

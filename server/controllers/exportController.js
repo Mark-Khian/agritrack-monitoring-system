@@ -1,211 +1,266 @@
 const db = require('../config/db');
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
 
-// Helper: Format Date
+// ── Helpers ────────────────────────────────────────────────────────
 const formatDate = (d) => {
     if (!d) return 'N/A';
     return new Date(d).toISOString().slice(0, 10);
 };
 
-// Helper: Format Currency
 const formatCurrency = (val) => {
     if (val === null || val === undefined) return '₱0.00';
     return '₱' + parseFloat(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-// ── 1. BULK CSV EXPORT ──────────────────────────────────────────────
-const exportPlantingsCSV = async (req, res) => {
-    const { startDate, endDate, cropType, fieldLocation, plantingId } = req.query;
-
-    try {
-        let sql = `
-            SELECT 
-                p.id AS planting_id,
-                p.field_name,
-                p.field_location,
-                p.field_size,
-                p.field_category,
-                p.variety_class AS crop_type,
-                p.variety AS crop_variety,
-                p.planting_date,
-                p.expected_harvest,
-                p.season,
-                p.lifecycle_state,
-                h.harvest_date,
-                h.yield_kg,
-                h.quality_grade,
-                h.remarks AS harvest_remarks,
-                h.financial_value,
-                DATEDIFF(h.harvest_date, p.planting_date) AS cycle_duration
-            FROM plantings p
-            INNER JOIN harvests h ON p.id = h.planting_id
-            WHERE p.status = 'completed'
-              AND p.deleted_at IS NULL
-              AND h.deleted_at IS NULL
-        `;
-
-        const params = [];
-
-        if (startDate) {
-            sql += ` AND p.planting_date >= ?`;
-            params.push(startDate);
-        }
-        if (endDate) {
-            sql += ` AND p.planting_date <= ?`;
-            params.push(endDate);
-        }
-        if (cropType) {
-            sql += ` AND (p.variety_class = ? OR p.variety = ?)`;
-            params.push(cropType, cropType);
-        }
-        if (fieldLocation) {
-            sql += ` AND (p.field_location LIKE ? OR p.field_name LIKE ?)`;
-            params.push(`%${fieldLocation}%`, `%${fieldLocation}%`);
-        }
-        if (plantingId) {
-            sql += ` AND p.id = ?`;
-            params.push(plantingId);
-        }
-
-        sql += ` ORDER BY h.harvest_date DESC`;
-
-        const [rows] = await db.query(sql, params);
-
-        const fields = [
-            { label: 'Planting ID', value: 'planting_id' },
-            { label: 'Field Name', value: 'field_name' },
-            { label: 'Field Location', value: 'field_location' },
-            { label: 'Field Size (ha)', value: 'field_size' },
-            { label: 'Field Category', value: 'field_category' },
-            { label: 'Crop Type', value: 'crop_type' },
-            { label: 'Crop Variety', value: 'crop_variety' },
-            { label: 'Season', value: 'season' },
-            { label: 'Planting Date', value: 'planting_date' },
-            { label: 'Expected Harvest Date', value: 'expected_harvest' },
-            { label: 'Actual Harvest Date', value: 'harvest_date' },
-            { label: 'Cycle Duration (days)', value: 'cycle_duration' },
-            { label: 'Yield (kg)', value: 'yield_kg' },
-            { label: 'Quality Grade', value: 'quality_grade' },
-            { label: 'Financial Value (PHP)', value: 'financial_value' },
-            { label: 'Remarks', value: 'harvest_remarks' }
-        ];
-
-        let csvData = '';
-        try {
-            // Attempt importing json2csv dynamically
-            const { Parser } = require('json2csv');
-            const parser = new Parser({ fields });
-            csvData = parser.parse(rows);
-        } catch (err) {
-            // Fallback manual CSV generation for maximum resilience
-            const headers = fields.map(f => `"${f.label.replace(/"/g, '""')}"`).join(',');
-            const csvRows = rows.map(row => 
-                fields.map(f => {
-                    let val = row[f.value];
-                    if (val === null || val === undefined) return '""';
-                    // format dates nicely
-                    if (['planting_date', 'expected_harvest', 'harvest_date'].includes(f.value)) {
-                        val = formatDate(val);
-                    }
-                    return `"${String(val).replace(/"/g, '""')}"`;
-                }).join(',')
-            );
-            csvData = [headers, ...csvRows].join('\n');
-        }
-
-        const dateStr = new Date().toISOString().slice(0, 10);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename=completed_plantings_report_${dateStr}.csv`);
-        return res.status(200).send(csvData);
-
-    } catch (err) {
-        console.error('CSV Export error:', err);
-        return res.status(500).json({ message: 'Server error. Failed to export CSV.' });
-    }
+const formatQualityGrade = (val) => {
+    if (!val) return '';
+    const v = String(val).toUpperCase();
+    if (v === 'REJECTED') return 'Rejected';
+    if (['A', 'B', 'C'].includes(v)) return 'Grade ' + v;
+    return val;
 };
 
-// ── 2. SINGLE PLANTING PDF EXPORT ──────────────────────────────────
-const exportPlantingPDF = async (req, res) => {
-    const plantingId = req.params.id;
+const formatEnum = (val) => {
+    if (!val) return '';
+    return String(val)
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+};
 
-    try {
-        const [plantings] = await db.query(`
-            SELECT 
-                p.id AS planting_id,
-                p.field_name,
-                p.field_location,
-                p.field_size,
-                p.field_category,
-                p.variety_class AS crop_type,
-                p.variety AS crop_variety,
-                p.planting_date,
-                p.expected_harvest,
-                p.season,
-                p.status,
-                h.harvest_date,
-                h.yield_kg,
-                h.quality_grade,
-                h.financial_value,
-                h.remarks AS harvest_remarks,
-                DATEDIFF(h.harvest_date, p.planting_date) AS cycle_duration
-            FROM plantings p
-            LEFT JOIN harvests h ON p.id = h.planting_id
-            WHERE p.id = ?
-              AND p.deleted_at IS NULL
-              AND (h.deleted_at IS NULL OR h.id IS NULL)
-        `, [plantingId]);
+// CRM Logo Base64
+let crmLogoBase64 = '';
+try {
+    const logoPath = path.join(__dirname, '../../src/assets/CRM-logo.png');
+    if (fs.existsSync(logoPath)) {
+        const logoData = fs.readFileSync(logoPath);
+        crmLogoBase64 = 'data:image/png;base64,' + logoData.toString('base64');
+    }
+} catch (err) {
+    console.error('Failed to load CRM logo for PDF export:', err);
+}
 
-        if (plantings.length === 0) {
-            return res.status(404).json({ message: 'Planting record not found.' });
-        }
+// ── Shared Data Fetching ───────────────────────────────────────────
+const getCompletedCropRecords = async (req, isPlantings) => {
+    // isPlantings: boolean (true if request comes from Plantings endpoint, false if Harvests)
+    let sql = `
+        SELECT 
+            p.field_name,
+            p.variety AS crop_variety,
+            p.cropping_season,
+            p.establishment_method,
+            p.field_condition,
+            p.planting_date,
+            p.expected_harvest,
+            h.harvest_date,
+            h.yield_kg,
+            h.quality_grade,
+            h.financial_value,
+            h.remarks AS harvest_remarks,
+            DATEDIFF(h.harvest_date, p.planting_date) AS cycle_duration
+        FROM plantings p
+        INNER JOIN harvests h ON p.id = h.planting_id
+        WHERE p.status = 'completed'
+          AND p.deleted_at IS NULL
+          AND h.deleted_at IS NULL
+    `;
 
-        const planting = plantings[0];
+    const queryParams = [];
 
-        // Fetch activity counts summary
-        const [activities] = await db.query(`
-            SELECT activity_type, COUNT(*) as count
-            FROM activities
-            WHERE planting_id = ?
-              AND status = 'completed'
-              AND deleted_at IS NULL
-            GROUP BY activity_type
-        `, [plantingId]);
-
-        const activityCounts = {
-            fertilizing: 0,
-            irrigation: 0,
-            pest_control: 0
-        };
-
-        activities.forEach(act => {
-            const type = String(act.activity_type || '').toLowerCase();
-            const count = Number(act.count || 0);
-
-            if (type.includes('fertiliz')) {
-                activityCounts.fertilizing += count;
-            } else if (type.includes('irrigation')) {
-                activityCounts.irrigation += count;
-            } else if (type.includes('pest')) {
-                activityCounts.pest_control += count;
+    if (isPlantings) {
+        const plantingId = req.query.plantingId || (req.params && req.params.id); // Support both query and path param
+        if (plantingId) {
+            const parsedId = Number(plantingId);
+            if (!Number.isInteger(parsedId) || parsedId <= 0) {
+                throw { status: 400, message: 'Validation failed.', errors: [{ field: 'plantingId', message: 'Invalid planting ID.' }] };
             }
-        });
+            sql += ` AND p.id = ?`;
+            queryParams.push(parsedId);
+        } else if (typeof req.query.plantingIds === 'string' && req.query.plantingIds.trim() !== '') {
+            const ids = req.query.plantingIds.split(',').map(id => Number(id)).filter(id => Number.isInteger(id) && id > 0);
+            if (ids.length === 0) {
+                throw { status: 400, message: 'Validation failed.', errors: [{ field: 'plantingIds', message: 'No valid planting IDs provided.' }] };
+            }
+            sql += ` AND p.id IN (?)`;
+            queryParams.push(ids);
+        } else {
+            throw { status: 400, message: 'Validation failed.', errors: [{ field: 'plantingIds', message: 'Select at least one planting record to export.' }] };
+        }
+    } else {
+        const harvestId = req.query.harvestId || (req.params && req.params.id);
+        if (harvestId) {
+            const parsedId = Number(harvestId);
+            if (!Number.isInteger(parsedId) || parsedId <= 0) {
+                throw { status: 400, message: 'Validation failed.', errors: [{ field: 'harvestId', message: 'Invalid harvest ID.' }] };
+            }
+            sql += ` AND h.id = ?`;
+            queryParams.push(parsedId);
+        } else if (typeof req.query.harvestIds === 'string' && req.query.harvestIds.trim() !== '') {
+            const ids = req.query.harvestIds.split(',').map(id => Number(id)).filter(id => Number.isInteger(id) && id > 0);
+            if (ids.length === 0) {
+                throw { status: 400, message: 'Validation failed.', errors: [{ field: 'harvestIds', message: 'No valid harvest IDs provided.' }] };
+            }
+            sql += ` AND h.id IN (?)`;
+            queryParams.push(ids);
+        } else {
+            throw { status: 400, message: 'Validation failed.', errors: [{ field: 'harvestIds', message: 'Select at least one harvest record to export.' }] };
+        }
+    }
 
-        // HTML/CSS Template for PDF
-        const htmlContent = `
+    sql += ` ORDER BY h.harvest_date DESC`;
+
+    const [rows] = await db.query(sql, queryParams);
+    return rows;
+};
+
+// ── Shared CSV Generator ───────────────────────────────────────────
+const generateCompletedCropsCSV = (rows) => {
+    const formattedRows = rows.map(row => ({
+        'Planting Name': row.field_name || '',
+        'Rice Variety': row.crop_variety || '',
+        'Season': formatEnum(row.cropping_season),
+        'Establishment Method': formatEnum(row.establishment_method),
+        'Field Condition': formatEnum(row.field_condition),
+        'Planting Date': row.planting_date ? formatDate(row.planting_date) : '',
+        'Expected Harvest Date': row.expected_harvest ? formatDate(row.expected_harvest) : '',
+        'Actual Harvest Date': row.harvest_date ? formatDate(row.harvest_date) : '',
+        'Cycle Duration (Days)': row.cycle_duration !== null && row.cycle_duration !== undefined ? Number(row.cycle_duration) : '',
+        'Yield (kg)': row.yield_kg !== null && row.yield_kg !== undefined ? Number(row.yield_kg) : '',
+        'Quality Grade': formatQualityGrade(row.quality_grade),
+        'Financial Value (PHP)': row.financial_value !== null && row.financial_value !== undefined ? Number(row.financial_value) : '',
+        'Remarks': row.harvest_remarks || ''
+    }));
+
+    const fields = [
+        'Planting Name', 'Rice Variety', 'Season', 'Establishment Method',
+        'Field Condition', 'Planting Date', 'Expected Harvest Date', 'Actual Harvest Date',
+        'Cycle Duration (Days)', 'Yield (kg)', 'Quality Grade', 'Financial Value (PHP)', 'Remarks'
+    ];
+
+    let csvData = '';
+    try {
+        const { Parser } = require('json2csv');
+        const parser = new Parser({ fields });
+        csvData = parser.parse(formattedRows);
+    } catch (err) {
+        const headers = fields.map(f => `"${f.replace(/"/g, '""')}"`).join(',');
+        const csvRows = formattedRows.map(row => 
+            fields.map(f => {
+                let val = row[f];
+                if (val === null || val === undefined || val === '') return '""';
+                return `"${String(val).replace(/"/g, '""')}"`;
+            }).join(',')
+        );
+        csvData = [headers, ...csvRows].join('\n');
+    }
+    return csvData;
+};
+
+// ── Shared PDF Generator ───────────────────────────────────────────
+const generateCompletedCropsPDFBuffer = async (rows) => {
+    const totalCount = rows.length;
+    const totalYield = rows.reduce((sum, r) => sum + Number(r.yield_kg || 0), 0);
+    const totalValue = rows.reduce((sum, r) => sum + Number(r.financial_value || 0), 0);
+    const avgDuration = totalCount > 0 
+        ? rows.reduce((sum, r) => sum + Number(r.cycle_duration || 0), 0) / totalCount 
+        : 0;
+
+    const cardsHtml = rows.map(r => `
+        <div class="crop-card">
+            <h2 class="crop-card-title">${r.field_name || 'Unnamed Planting'}</h2>
+            
+            <div class="crop-grid">
+                <!-- Column 1: Crop Information -->
+                <div class="crop-section">
+                    <div class="section-title">Crop Information</div>
+                    
+                    <div class="field-row">
+                        <div class="field-label">Planting Name</div>
+                        <div class="field-value">${r.field_name || '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Rice Variety</div>
+                        <div class="field-value">${r.crop_variety || '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Season</div>
+                        <div class="field-value">${formatEnum(r.cropping_season) || '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Establishment Method</div>
+                        <div class="field-value">${formatEnum(r.establishment_method) || '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Field Condition</div>
+                        <div class="field-value">${formatEnum(r.field_condition) || '—'}</div>
+                    </div>
+                </div>
+
+                <!-- Column 2: Crop Schedule -->
+                <div class="crop-section">
+                    <div class="section-title">Crop Schedule</div>
+                    
+                    <div class="field-row">
+                        <div class="field-label">Planting Date</div>
+                        <div class="field-value">${r.planting_date ? formatDate(r.planting_date) : '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Expected Harvest Date</div>
+                        <div class="field-value">${r.expected_harvest ? formatDate(r.expected_harvest) : '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Actual Harvest Date</div>
+                        <div class="field-value">${r.harvest_date ? formatDate(r.harvest_date) : '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Cycle Duration</div>
+                        <div class="field-value">${r.cycle_duration !== null ? Number(r.cycle_duration) + ' Days' : '—'}</div>
+                    </div>
+                </div>
+
+                <!-- Column 3: Harvest Result -->
+                <div class="crop-section">
+                    <div class="section-title">Harvest Result</div>
+                    
+                    <div class="field-row">
+                        <div class="field-label">Yield</div>
+                        <div class="field-value">${r.yield_kg !== null ? Number(r.yield_kg).toLocaleString() + ' kg' : '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Quality Grade</div>
+                        <div class="field-value">${formatQualityGrade(r.quality_grade) || '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Financial Value</div>
+                        <div class="field-value">${r.financial_value !== null ? formatCurrency(r.financial_value) : '—'}</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-label">Remarks</div>
+                        <div class="field-value remarks-value">${r.harvest_remarks || '—'}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    const htmlContent = `
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Planting Report #${planting.planting_id}</title>
+    <title>Completed Crop Records Report</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         body {
             font-family: 'Inter', sans-serif;
             color: #1e293b;
             margin: 0;
-            padding: 20px;
-            font-size: 13px;
-            line-height: 1.5;
+            padding: 0;
+            font-size: 11px;
+            line-height: 1.4;
+            background-color: #ffffff;
         }
         .header {
             border-bottom: 2px solid #15803d;
@@ -213,12 +268,16 @@ const exportPlantingPDF = async (req, res) => {
             margin-bottom: 25px;
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-end;
         }
         .logo-container {
             display: flex;
             align-items: center;
             gap: 8px;
+        }
+        .logo-image {
+            height: 32px;
+            width: auto;
         }
         .logo-text {
             font-size: 22px;
@@ -232,20 +291,21 @@ const exportPlantingPDF = async (req, res) => {
             text-align: right;
         }
         .report-title {
-            font-size: 16px;
+            font-size: 15px;
             color: #0f172a;
-            margin: 0 0 5px 0;
+            margin: 0 0 4px 0;
             font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .report-meta {
-            font-size: 11px;
+            font-size: 10px;
             color: #64748b;
         }
         .kpi-container {
             display: flex;
             justify-content: space-between;
-            gap: 15px;
+            gap: 12px;
             margin-bottom: 30px;
         }
         .kpi-card {
@@ -253,479 +313,91 @@ const exportPlantingPDF = async (req, res) => {
             background-color: #f8fafc;
             border: 1px solid #e2e8f0;
             border-radius: 8px;
-            padding: 15px;
+            padding: 14px 12px;
             text-align: center;
         }
         .kpi-value {
-            font-size: 18px;
+            font-size: 17px;
             font-weight: 700;
             color: #0f172a;
-            margin-top: 5px;
+            margin-top: 6px;
         }
         .kpi-label {
-            font-size: 10px;
+            font-size: 9px;
             color: #64748b;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            font-weight: 600;
-        }
-        .section-title {
-            font-size: 14px;
             font-weight: 700;
-            color: #0f172a;
-            border-left: 4px solid #15803d;
-            padding-left: 10px;
-            margin: 25px 0 15px 0;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
-        .grid-details {
-            display: flex;
-            gap: 30px;
-            margin-bottom: 25px;
-        }
-        .grid-col {
-            flex: 1;
-        }
-        table.info-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        table.info-table td {
-            padding: 8px 12px;
-            border-bottom: 1px solid #f1f5f9;
-        }
-        table.info-table td.label {
-            font-weight: 500;
-            color: #64748b;
-            width: 45%;
-        }
-        table.info-table td.value {
-            font-weight: 600;
-            color: #1e293b;
-        }
-        .activity-summary {
-            display: flex;
-            justify-content: space-around;
-            background-color: #f0fdf4;
-            border: 1px solid #bbf7d0;
+        .crop-card {
+            border: 1px solid #e2e8f0;
             border-radius: 8px;
-            padding: 20px;
-            margin-top: 15px;
-        }
-        .activity-item {
-            text-align: center;
-        }
-        .activity-count {
-            font-size: 24px;
-            font-weight: 700;
-            color: #15803d;
-        }
-        .activity-label {
-            font-size: 11px;
-            color: #166534;
-            font-weight: 600;
-            margin-top: 5px;
-        }
-        .footer {
-            margin-top: 60px;
-            border-top: 1px solid #e2e8f0;
-            padding-top: 15px;
-            font-size: 10px;
-            color: #94a3b8;
-            text-align: center;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="logo-container">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M10 20V8a3 3 0 0 1 6 0v12" />
-                <path d="M10 12a3 3 0 0 0-6 0v8h6" />
-                <path d="M7 20h10" />
-            </svg>
-            <div class="logo-text">Agri<span class="logo-accent">Track</span></div>
-        </div>
-        <div class="report-title-container">
-            <div class="report-title">Crop Performance Report</div>
-            <div class="report-meta">Generated: ${new Date().toLocaleString()} &bull; Planting ID: #${planting.planting_id}</div>
-        </div>
-    </div>
-
-    <!-- KPIs -->
-    <div class="kpi-container">
-        <div class="kpi-card">
-            <div class="kpi-label">Yield</div>
-            <div class="kpi-value">${planting.yield_kg ? Number(planting.yield_kg).toLocaleString() + ' kg' : 'N/A'}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Quality Grade</div>
-            <div class="kpi-value">${planting.quality_grade || 'N/A'}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Financial Value</div>
-            <div class="kpi-value">${formatCurrency(planting.financial_value)}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Cycle Duration</div>
-            <div class="kpi-value">${planting.cycle_duration ? planting.cycle_duration + ' Days' : 'N/A'}</div>
-        </div>
-    </div>
-
-    <div class="grid-details">
-        <div class="grid-col">
-            <div class="section-title">Planting & Field Details</div>
-            <table class="info-table">
-                <tr>
-                    <td class="label">Field Name</td>
-                    <td class="value">${planting.field_name}</td>
-                </tr>
-                <tr>
-                    <td class="label">Field Location</td>
-                    <td class="value">${planting.field_location || 'N/A'}</td>
-                </tr>
-                <tr>
-                    <td class="label">Field Size</td>
-                    <td class="value">${planting.field_size ? planting.field_size + ' ha' : 'N/A'}</td>
-                </tr>
-                <tr>
-                    <td class="label">Field Category</td>
-                    <td class="value">${planting.field_category || 'N/A'}</td>
-                </tr>
-                <tr>
-                    <td class="label">Crop Type</td>
-                    <td class="value">${planting.crop_type || 'Unclassified'}</td>
-                </tr>
-                <tr>
-                    <td class="label">Crop Variety</td>
-                    <td class="value">${planting.crop_variety}</td>
-                </tr>
-                <tr>
-                    <td class="label">Season</td>
-                    <td class="value" style="text-transform: capitalize;">${planting.season}</td>
-                </tr>
-            </table>
-        </div>
-
-        <div class="grid-col">
-            <div class="section-title">Harvest & Life-cycle</div>
-            <table class="info-table">
-                <tr>
-                    <td class="label">Planting Date</td>
-                    <td class="value">${formatDate(planting.planting_date)}</td>
-                </tr>
-                <tr>
-                    <td class="label">Expected Harvest</td>
-                    <td class="value">${formatDate(planting.expected_harvest)}</td>
-                </tr>
-                <tr>
-                    <td class="label">Actual Harvest Date</td>
-                    <td class="value">${formatDate(planting.harvest_date)}</td>
-                </tr>
-                <tr>
-                    <td class="label">Status</td>
-                    <td class="value" style="text-transform: capitalize; color: #16a34a; font-weight: 700;">${planting.status || 'Completed'}</td>
-                </tr>
-                <tr>
-                    <td class="label">Remarks</td>
-                    <td class="value">${planting.harvest_remarks || 'No remarks recorded.'}</td>
-                </tr>
-            </table>
-        </div>
-    </div>
-
-    <div class="section-title">Completed Activity Summary</div>
-    <p style="color: #64748b; font-size: 11px; margin-top: -5px; margin-bottom: 12px;">Successful operational events executed during this crop cycle:</p>
-    <div class="activity-summary">
-        <div class="activity-item">
-            <div class="activity-count">${activityCounts.fertilizing}</div>
-            <div class="activity-label">Fertilization Events</div>
-        </div>
-        <div class="activity-item">
-            <div class="activity-count">${activityCounts.irrigation}</div>
-            <div class="activity-label">Irrigation Events</div>
-        </div>
-        <div class="activity-item">
-            <div class="activity-count">${activityCounts.pest_control}</div>
-            <div class="activity-label">Pest Control Events</div>
-        </div>
-    </div>
-
-    <div class="footer">
-        AgriTrack Monitoring System &copy; 2026. Generated by user authorization. Confidential.
-    </div>
-</body>
-</html>
-        `;
-
-        // Generate PDF using Puppeteer
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        const page = await browser.newPage();
-        await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: {
-                top: '15mm',
-                bottom: '15mm',
-                left: '15mm',
-                right: '15mm'
-            }
-        });
-
-        await browser.close();
-
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=planting_report_${plantingId}.pdf`);
-        return res.send(pdfBuffer);
-
-    } catch (err) {
-        console.error('Single PDF Export error:', err);
-        return res.status(500).json({ message: 'Server error. Failed to generate PDF.' });
-    }
-};
-
-// ── 3. BULK PDF SUMMARY EXPORT (STRETCH GOAL) ──────────────────────
-const exportPlantingsPDF = async (req, res) => {
-    const { startDate, endDate, cropType, fieldLocation, plantingId } = req.query;
-
-    try {
-        let sql = `
-            SELECT 
-                p.id AS planting_id,
-                p.field_name,
-                p.field_location,
-                p.variety_class AS crop_type,
-                p.variety AS crop_variety,
-                p.planting_date,
-                p.season,
-                h.harvest_date,
-                h.yield_kg,
-                h.quality_grade,
-                h.financial_value,
-                DATEDIFF(h.harvest_date, p.planting_date) AS cycle_duration
-            FROM plantings p
-            INNER JOIN harvests h ON p.id = h.planting_id
-            WHERE p.status = 'completed'
-              AND p.deleted_at IS NULL
-              AND h.deleted_at IS NULL
-        `;
-
-        const params = [];
-
-        if (startDate) {
-            sql += ` AND p.planting_date >= ?`;
-            params.push(startDate);
-        }
-        if (endDate) {
-            sql += ` AND p.planting_date <= ?`;
-            params.push(endDate);
-        }
-        if (cropType) {
-            sql += ` AND (p.variety_class = ? OR p.variety = ?)`;
-            params.push(cropType, cropType);
-        }
-        if (fieldLocation) {
-            sql += ` AND (p.field_location LIKE ? OR p.field_name LIKE ?)`;
-            params.push(`%${fieldLocation}%`, `%${fieldLocation}%`);
-        }
-        if (plantingId) {
-            sql += ` AND p.id = ?`;
-            params.push(plantingId);
-        }
-
-        sql += ` ORDER BY h.harvest_date DESC`;
-
-        const [rows] = await db.query(sql, params);
-
-        // Calculate KPIs
-        const totalCount = rows.length;
-        const totalYield = rows.reduce((sum, r) => sum + Number(r.yield_kg || 0), 0);
-        const totalValue = rows.reduce((sum, r) => sum + Number(r.financial_value || 0), 0);
-        const avgDuration = totalCount > 0 
-            ? rows.reduce((sum, r) => sum + Number(r.cycle_duration || 0), 0) / totalCount 
-            : 0;
-
-        const filtersDesc = {
-            dateRange: (startDate && endDate) ? `${startDate} to ${endDate}` : (startDate ? `From ${startDate}` : (endDate ? `Until ${endDate}` : 'All dates')),
-            cropType: cropType || 'All crop types',
-            fieldLocation: fieldLocation || 'All locations'
-        };
-
-        const rowsHtml = rows.map(r => `
-            <tr>
-                <td>#${r.planting_id}</td>
-                <td>${r.field_name}</td>
-                <td>
-                    <div style="font-weight: 600;">${r.crop_variety}</div>
-                    <div style="font-size: 8px; color: #64748b;">${r.crop_type || 'Unclassified'}</div>
-                </td>
-                <td style="text-transform: capitalize;">${r.season}</td>
-                <td>${formatDate(r.harvest_date)}</td>
-                <td class="text-right font-semibold">${Number(r.yield_kg || 0).toLocaleString()} kg</td>
-                <td class="text-center font-bold">${r.quality_grade || 'N/A'}</td>
-                <td class="text-right font-semibold">${formatCurrency(r.financial_value)}</td>
-            </tr>
-        `).join('');
-
-        const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Completed Plantings Summary Report</title>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            color: #1e293b;
-            margin: 0;
-            padding: 20px;
-            font-size: 11px;
-            line-height: 1.4;
-        }
-        .header {
-            border-bottom: 2px solid #15803d;
-            padding-bottom: 12px;
             margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .logo-container {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .logo-text {
-            font-size: 20px;
-            font-weight: 700;
-            color: #0f172a;
-        }
-        .logo-accent {
-            color: #15803d;
-        }
-        .report-title-container {
-            text-align: right;
-        }
-        .report-title {
-            font-size: 14px;
-            color: #0f172a;
-            margin: 0 0 3px 0;
-            font-weight: 700;
-            text-transform: uppercase;
-        }
-        .report-meta {
-            font-size: 10px;
-            color: #64748b;
-        }
-        .filters-badge {
-            background-color: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 10px;
-            margin-bottom: 20px;
-            font-size: 10px;
-            color: #475569;
-        }
-        .kpi-container {
-            display: flex;
-            justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        .kpi-card {
-            flex: 1;
-            background-color: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 12px 10px;
-            text-align: center;
-        }
-        .kpi-value {
-            font-size: 16px;
-            font-weight: 700;
-            color: #0f172a;
-            margin-top: 4px;
-        }
-        .kpi-label {
-            font-size: 9px;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-weight: 600;
-        }
-        table.report-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }
-        table.report-table th, table.report-table td {
-            border: 1px solid #e2e8f0;
-            padding: 8px 10px;
-            text-align: left;
-        }
-        table.report-table th {
-            background-color: #f8fafc;
-            font-weight: 600;
-            color: #334155;
-            text-transform: uppercase;
-            font-size: 9px;
-            letter-spacing: 0.5px;
-        }
-        table.report-table tr:nth-child(even) {
-            background-color: #f8fafc;
-        }
-        table.report-table tr {
+            padding: 16px;
             page-break-inside: avoid;
         }
-        .footer {
-            margin-top: 40px;
-            border-top: 1px solid #e2e8f0;
-            padding-top: 10px;
-            font-size: 9px;
-            color: #94a3b8;
-            text-align: center;
-        }
-        .text-right {
-            text-align: right;
-        }
-        .text-center {
-            text-align: center;
-        }
-        .font-semibold {
-            font-weight: 600;
-        }
-        .font-bold {
+        .crop-card-title {
+            font-size: 14px;
             font-weight: 700;
+            color: #15803d;
+            margin: 0 0 12px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .crop-grid {
+            display: flex;
+            gap: 20px;
+        }
+        .crop-section {
+            flex: 1;
+        }
+        .section-title {
+            font-size: 10px;
+            font-weight: 700;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .field-row {
+            margin-bottom: 6px;
+        }
+        .field-label {
+            font-size: 9px;
+            color: #64748b;
+            margin-bottom: 2px;
+        }
+        .field-value {
+            font-size: 11px;
+            font-weight: 500;
+            color: #0f172a;
+        }
+        .remarks-value {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .no-records {
+            text-align: center;
+            padding: 40px;
+            color: #64748b;
+            font-style: italic;
+            border: 1px dashed #cbd5e1;
+            border-radius: 8px;
         }
     </style>
 </head>
 <body>
     <div class="header">
         <div class="logo-container">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M10 20V8a3 3 0 0 1 6 0v12" />
-                <path d="M10 12a3 3 0 0 0-6 0v8h6" />
-                <path d="M7 20h10" />
-            </svg>
+            ${crmLogoBase64 ? `<img src="${crmLogoBase64}" class="logo-image" alt="Logo" />` : ''}
             <div class="logo-text">Agri<span class="logo-accent">Track</span></div>
         </div>
         <div class="report-title-container">
-            <div class="report-title">Bulk Performance Report</div>
-            <div class="report-meta">Generated: ${new Date().toLocaleString()} &bull; Total records: ${totalCount}</div>
+            <h1 class="report-title">COMPLETED CROP RECORDS REPORT</h1>
+            <div class="report-meta">Generated: ${new Date().toLocaleString()} &bull; Total Records: ${totalCount}</div>
         </div>
     </div>
 
-    <div class="filters-badge">
-        <strong>Active Filters:</strong> &bull; Date Range: ${filtersDesc.dateRange} &bull; Crop Type/Variety: ${filtersDesc.cropType} &bull; Location Query: ${filtersDesc.fieldLocation}
-    </div>
-
-    <!-- KPIs -->
     <div class="kpi-container">
         <div class="kpi-card">
             <div class="kpi-label">Completed Crops</div>
@@ -737,65 +409,122 @@ const exportPlantingsPDF = async (req, res) => {
         </div>
         <div class="kpi-card">
             <div class="kpi-label">Total Crop Value</div>
-            <div class="kpi-value">₱${totalValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            <div class="kpi-value">${totalValue ? formatCurrency(totalValue) : '₱0.00'}</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">Avg Crop Duration</div>
+            <div class="kpi-label">Average Crop Duration</div>
             <div class="kpi-value">${avgDuration.toFixed(1)} Days</div>
         </div>
     </div>
 
-    <table class="report-table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Field Name</th>
-                <th>Variety Info</th>
-                <th>Season</th>
-                <th>Harvest Date</th>
-                <th class="text-right">Yield (kg)</th>
-                <th class="text-center">Grade</th>
-                <th class="text-right">Value (PHP)</th>
-            </tr>
-        </thead>
-        <tbody>
-            ${totalCount > 0 ? rowsHtml : `<tr><td colspan="8" style="text-align: center; color: #94a3b8; padding: 25px;">No completed plantings found matching the criteria.</td></tr>`}
-        </tbody>
-    </table>
-
-    <div class="footer">
-        AgriTrack Monitoring System &copy; 2026 &bull; Summary performance export &bull; Confidential
+    <div class="records-container">
+        ${totalCount > 0 ? cardsHtml : '<div class="no-records">No completed crop records found.</div>'}
     </div>
 </body>
 </html>
-        `;
+`;
 
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        const page = await browser.newPage();
-        await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: {
-                top: '15mm',
-                bottom: '15mm',
-                left: '15mm',
-                right: '15mm'
-            }
-        });
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        displayHeaderFooter: true,
+        headerTemplate: '<span></span>',
+        footerTemplate: `
+            <div style="font-size: 8px; color: #64748b; width: 100%; text-align: center; font-family: Inter, sans-serif; padding: 0 15px;">
+                AgriTrack Record Management System &copy; 2026 &bull; Page <span class="pageNumber"></span> of <span class="totalPages"></span>
+            </div>
+        `,
+        margin: {
+            top: '15mm',
+            bottom: '20mm',
+            left: '15mm',
+            right: '15mm'
+        }
+    });
 
-        await browser.close();
+    await browser.close();
+    return pdfBuffer;
+};
 
+// ── Endpoints ──────────────────────────────────────────────────────
+
+const exportPlantingsCSV = async (req, res) => {
+    try {
+        const rows = await getCompletedCropRecords(req, true);
+        const csvData = generateCompletedCropsCSV(rows);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.csv"`);
+        return res.status(200).send(csvData);
+    } catch (err) {
+        if (err.status) return res.status(err.status).json({ message: err.message, errors: err.errors });
+        console.error('Error generating Plantings CSV:', err);
+        return res.status(500).json({ message: 'Server error. Failed to generate CSV.' });
+    }
+};
+
+const exportHarvestsCSV = async (req, res) => {
+    try {
+        const rows = await getCompletedCropRecords(req, false);
+        const csvData = generateCompletedCropsCSV(rows);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.csv"`);
+        return res.status(200).send(csvData);
+    } catch (err) {
+        if (err.status) return res.status(err.status).json({ message: err.message, errors: err.errors });
+        console.error('Error generating Harvests CSV:', err);
+        return res.status(500).json({ message: 'Server error. Failed to generate CSV.' });
+    }
+};
+
+const exportPlantingPDF = async (req, res) => {
+    try {
+        const rows = await getCompletedCropRecords(req, true);
+        const pdfBuffer = await generateCompletedCropsPDFBuffer(rows);
         const dateStr = new Date().toISOString().slice(0, 10);
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=completed_plantings_summary_${dateStr}.pdf`);
+        res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.pdf"`);
         return res.send(pdfBuffer);
-
     } catch (err) {
-        console.error('Bulk PDF Export error:', err);
+        if (err.status) return res.status(err.status).json({ message: err.message, errors: err.errors });
+        console.error('Error generating Plantings PDF:', err);
+        return res.status(500).json({ message: 'Server error. Failed to generate PDF.' });
+    }
+};
+
+const exportPlantingsPDF = async (req, res) => {
+    try {
+        const rows = await getCompletedCropRecords(req, true);
+        const pdfBuffer = await generateCompletedCropsPDFBuffer(rows);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.pdf"`);
+        return res.send(pdfBuffer);
+    } catch (err) {
+        if (err.status) return res.status(err.status).json({ message: err.message, errors: err.errors });
+        console.error('Error generating Plantings PDF:', err);
+        return res.status(500).json({ message: 'Server error. Failed to generate PDF.' });
+    }
+};
+
+const exportHarvestsPDF = async (req, res) => {
+    try {
+        const rows = await getCompletedCropRecords(req, false);
+        const pdfBuffer = await generateCompletedCropsPDFBuffer(rows);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.pdf"`);
+        return res.send(pdfBuffer);
+    } catch (err) {
+        if (err.status) return res.status(err.status).json({ message: err.message, errors: err.errors });
+        console.error('Error generating Harvests PDF:', err);
         return res.status(500).json({ message: 'Server error. Failed to generate PDF.' });
     }
 };
@@ -803,5 +532,7 @@ const exportPlantingsPDF = async (req, res) => {
 module.exports = {
     exportPlantingsCSV,
     exportPlantingPDF,
-    exportPlantingsPDF
+    exportPlantingsPDF,
+    exportHarvestsCSV,
+    exportHarvestsPDF
 };

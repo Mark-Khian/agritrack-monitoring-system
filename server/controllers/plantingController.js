@@ -7,7 +7,7 @@ const {
     TEMPLATE_COUNT,
 } = require('../utils/activityScheduler');
 const { calendarDaysBetween, expectedHarvestFromPlan } = require('../utils/plantingDates');
-const { validateTransition } = require('../services/lifecycleTransitionService');
+
 const {
     loadPresentationContext,
     enrichPlantingRow,
@@ -72,6 +72,12 @@ const PLANTING_SELECT = `
     plantings.planting_date,
     plantings.expected_harvest,
     plantings.season,
+    plantings.cropping_season,
+    plantings.establishment_method,
+    plantings.field_condition,
+    plantings.expected_stage,
+    plantings.observed_stage,
+    plantings.observed_stage_date,
     plantings.lifecycle_state,
     plantings.expected_growth_days,
     plantings.adjustment_days,
@@ -218,17 +224,16 @@ const getPlantingById = async (req, res) => {
 
 const createPlanting = async (req, res) => {
     const {
-        field_name, variety_class, variety, planting_date, season
+        field_name, variety_class, variety, planting_date, season,
+        cropping_season, establishment_method, field_condition
     } = req.body;
     const normalizedFieldName = (field_name || '').trim();
     const normalizedVarietyClass = (variety_class || '').trim();
     const normalizedVariety = (variety || '').trim();
 
-    const lifecycleState =
-        req.body.lifecycle_state === 'PLANNED' ? 'PLANNED' : 'ACTIVE';
+    const lifecycleState = 'ACTIVE';
 
     const manualOverride = parseManualOverrideFlag(req.body.growth_plan_manual_override) === true;
-    const partialIndices = normalizeTemplateIndices(req.body.generate_template_indices || []);
 
     try {
         if (!normalizedFieldName) {
@@ -295,9 +300,10 @@ const createPlanting = async (req, res) => {
         const [result] = await db.query(
             `INSERT INTO plantings
              (user_id, field_name, variety_class, variety, variety_id, planting_date, expected_harvest, season,
+              cropping_season, establishment_method, field_condition,
               lifecycle_state, expected_growth_days, adjustment_days, growth_plan_manual_override,
               lifecycle_state_changed_at, lifecycle_state_reason)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
             [
                 req.user.id, // admin user_id preserved in DB for data integrity
                 normalizedFieldName,
@@ -307,21 +313,20 @@ const createPlanting = async (req, res) => {
                 planting_date,
                 expectedHarvest,
                 season,
+                cropping_season || null,
+                establishment_method || null,
+                field_condition || null,
                 lifecycleState,
                 expectedGrowthDays,
                 adjustmentDays,
                 manualOverride ? 1 : 0,
-                lifecycleState === 'PLANNED' ? 'Created as planned' : 'Created as active crop',
+                'Created as active crop',
             ]
         );
 
         const pid = result.insertId;
 
-        if (lifecycleState === 'ACTIVE') {
-            await ensureAllSystemTemplates(pid, planting_date, expectedGrowthDays);
-        } else if (partialIndices.length > 0) {
-            await generateTemplateIndices(pid, planting_date, expectedGrowthDays, partialIndices);
-        }
+        await ensureAllSystemTemplates(pid, planting_date, expectedGrowthDays);
 
         await logActivity({
             user_id: req.user.id,
@@ -339,22 +344,8 @@ const createPlanting = async (req, res) => {
                 ip_address: req.ip
             });
         }
-        if (partialIndices.length > 0) {
-            await logActivity({
-                user_id: req.user.id,
-                action: 'PLANTING_PARTIAL_ACTIVITIES',
-                entity: 'plantings',
-                entity_id: pid,
-                ip_address: req.ip
-            });
-        }
 
-        const msg =
-            lifecycleState === 'PLANNED'
-                ? (partialIndices.length
-                    ? 'Planting created as planned with selected system activities.'
-                    : 'Planting created as planned. Activate the crop to generate all system activities.')
-                : 'Planting created! System activities have been ensured for this crop.';
+        const msg = 'Planting created! System activities have been generated for this crop.';
 
         res.status(201).json({
             message: msg,
@@ -387,6 +378,8 @@ const updatePlanting = async (req, res) => {
         growth_stage_recorded, growth_stage_source,
         planting_date: bodyPlantingDate,
         variety_id: bodyVarietyId,
+        cropping_season, establishment_method, field_condition,
+        expected_stage, observed_stage, observed_stage_date
     } = req.body;
     const normalizedVarietyClass = (variety_class || '').trim();
     const normalizedVariety = (variety || '').trim();
@@ -462,9 +455,8 @@ const updatePlanting = async (req, res) => {
         }
 
         let nextLifecycle = cur.lifecycle_state || 'ACTIVE';
+        // validateTransition is removed as lifecycle_state is now just a legacy compatibility column.
         if (lifecycle_state != null && lifecycle_state !== '') {
-            const v = validateTransition(cur.lifecycle_state || 'ACTIVE', lifecycle_state);
-            if (!v.ok) return res.status(400).json({ message: v.message });
             nextLifecycle = lifecycle_state;
         }
 
@@ -498,10 +490,8 @@ const updatePlanting = async (req, res) => {
             adjOut !== Number(cur.adjustment_days || 0) ||
             varietyChanged;
 
-        let nextStatus = status != null && status !== '' ? status : cur.status;
-        if (nextLifecycle === 'ABANDONED') {
-            nextStatus = 'failed';
-        }
+        // Ignore arbitrary status changes from generic update endpoint
+        let nextStatus = cur.status;
 
         const lsChanged = nextLifecycle !== cur.lifecycle_state;
         const activatedNow =
@@ -534,7 +524,9 @@ const updatePlanting = async (req, res) => {
                  lifecycle_state_reason = ?,
                  growth_stage_recorded = ?,
                  growth_stage_source = ?,
-                 status = ?
+                 status = ?,
+                 cropping_season = ?, establishment_method = ?, field_condition = ?,
+                 expected_stage = ?, observed_stage = ?, observed_stage_date = ?
              WHERE id = ? AND deleted_at IS NULL`,
             [
                 nextFieldName,
@@ -552,6 +544,12 @@ const updatePlanting = async (req, res) => {
                 gsrVal,
                 gss,
                 nextStatus,
+                cropping_season !== undefined ? cropping_season : cur.cropping_season,
+                establishment_method !== undefined ? establishment_method : cur.establishment_method,
+                field_condition !== undefined ? field_condition : cur.field_condition,
+                expected_stage !== undefined ? expected_stage : cur.expected_stage,
+                observed_stage !== undefined ? observed_stage : cur.observed_stage,
+                observed_stage_date !== undefined ? observed_stage_date : cur.observed_stage_date,
                 req.params.id
             ]
         );

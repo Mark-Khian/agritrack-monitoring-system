@@ -30,12 +30,6 @@ const Badge = ({ status }) => {
         'reproductive stage': 'bg-lime-100 text-lime-700 border border-lime-200',
         'ripening stage': 'bg-orange-100 text-orange-700 border border-orange-200',
         'harvest stage': 'bg-green-100 text-green-700 border border-green-200',
-        
-        // Quality Grade Badges
-        'a': 'bg-green-100 text-green-700',
-        'b': 'bg-yellow-100 text-yellow-700',
-        'c': 'bg-orange-100 text-orange-600',
-        'rejected': 'bg-red-100 text-red-700',
     };
 
     if (colorMap[normalized]) {

@@ -11,7 +11,7 @@
 const db = require('../config/db');
 const { utcTodayYmd, calendarDaysBetween } = require('../utils/plantingDates');
 const { loadPresentationContext, enrichPlantingRow } = require('../services/plantingPresentationService');
-const { LIFECYCLE_ACTIVITY_TEMPLATES, syncActivityStatuses } = require('../utils/activityScheduler');
+const { LIFECYCLE_ACTIVITY_TEMPLATES } = require('../utils/activityScheduler');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -29,10 +29,10 @@ const activitySummary = (activities) => {
 
     for (const a of activities) {
         const status = String(a.status || '').toLowerCase();
-        const date   = String(a.activity_date || '').slice(0, 10);
+        const date   = String(a.planned_date || '').slice(0, 10);
         const isPast = date < today;
 
-        if (status === 'completed' || status === 'cancelled') {
+        if (status === 'completed' || status === 'cancelled' || status === 'skipped') {
             completed++;
         } else if ((status === 'pending' || status === 'ongoing') && isPast) {
             overdue++;
@@ -47,10 +47,10 @@ const activitySummary = (activities) => {
     const upcoming = activities
         .filter((a) => {
             const s = String(a.status || '').toLowerCase();
-            const d = String(a.activity_date || '').slice(0, 10);
+            const d = String(a.planned_date || '').slice(0, 10);
             return (s === 'pending' || s === 'ongoing') && d >= today;
         })
-        .sort((a, b) => a.activity_date.localeCompare(b.activity_date))[0] || null;
+        .sort((a, b) => String(a.planned_date || '').localeCompare(String(b.planned_date || '')))[0] || null;
 
     return { pending, ongoing, overdue, completed, next_activity: upcoming };
 };
@@ -66,7 +66,6 @@ const daysRemaining = (expectedHarvest) => {
 
 const getLifecycleMonitoring = async (req, res) => {
     try {
-        await syncActivityStatuses(db);
         const today = utcTodayYmd();
 
         // 1. Fetch all non-deleted, non-completed, non-abandoned plantings
@@ -83,6 +82,12 @@ const getLifecycleMonitoring = async (req, res) => {
                 p.planting_date,
                 p.expected_harvest,
                 p.season,
+                p.cropping_season,
+                p.establishment_method,
+                p.field_condition,
+                p.expected_stage,
+                p.observed_stage,
+                p.observed_stage_date,
                 p.lifecycle_state,
                 p.expected_growth_days,
                 p.adjustment_days,
@@ -100,7 +105,6 @@ const getLifecycleMonitoring = async (req, res) => {
              LEFT JOIN varieties v ON p.variety_id = v.id
              WHERE p.deleted_at IS NULL
                AND p.status NOT IN ('completed', 'failed')
-               AND p.lifecycle_state NOT IN ('HARVESTED', 'ABANDONED')
              ORDER BY p.planting_date ASC`
         );
 
@@ -121,12 +125,12 @@ const getLifecycleMonitoring = async (req, res) => {
         const ph = ids.map(() => '?').join(',');
         const [allActivities] = await db.query(
             `SELECT
-                id, planting_id, activity_type, activity_date,
+                id, planting_id, activity_type, planned_date,
                 status, notes, is_system_generated, lifecycle_template_index
              FROM activities
              WHERE planting_id IN (${ph})
                AND deleted_at IS NULL
-             ORDER BY activity_date ASC`,
+             ORDER BY planned_date ASC`,
             ids
         );
 
@@ -180,16 +184,22 @@ const getLifecycleMonitoring = async (req, res) => {
                 variety_class:    p.variety_class,
                 variety_id:       p.variety_id        || null,
                 season:           p.season,
+                cropping_season:  p.cropping_season   || null,
+                establishment_method: p.establishment_method || null,
+                field_condition:  p.field_condition   || null,
                 planting_date:    String(p.planting_date).slice(0, 10),
                 expected_harvest: p.expected_harvest
                     ? String(p.expected_harvest).slice(0, 10)
                     : null,
 
                 // Lifecycle
-                lifecycle_state:          enriched.lifecycle_state,
+                lifecycle_state:          p.lifecycle_state || null,
                 lifecycle_state_reason:   p.lifecycle_state_reason   || null,
                 lifecycle_state_changed_at: p.lifecycle_state_changed_at || null,
                 growth_stage:             enriched.growth_stage,
+                expected_stage:           enriched.expected_stage || p.expected_stage || null,
+                observed_stage:           enriched.observed_stage || p.observed_stage || null,
+                observed_stage_date:      p.observed_stage_date || null,
                 growth_stage_recorded:    p.growth_stage_recorded    || null,
 
                 // Progress

@@ -88,6 +88,12 @@ const createHarvest = async (req, res) => {
         financial_value
     } = req.body;
 
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    if (harvest_date && harvest_date > todayStr) {
+        return res.status(400).json({ message: 'Harvest Date cannot be in the future.' });
+    }
+
     const connection = await db.getConnection();
 
     try {
@@ -131,7 +137,10 @@ const createHarvest = async (req, res) => {
                 quality_grade || null, remarks || null, financial_value != null ? parseFloat(financial_value) : null]
         );
 
-        // Terminal lifecycle: harvest is the only automatic closer
+        // Terminal lifecycle: harvest is the only automatic closer.
+        // NOTE: The write to lifecycle_state = 'HARVESTED' is for one-way legacy
+        // backward compatibility only. The true authoritative business state is
+        // status = 'completed'. Do not read lifecycle_state as authoritative.
         await connection.query(
             `UPDATE plantings
              SET status = 'completed',
@@ -142,13 +151,35 @@ const createHarvest = async (req, res) => {
             [planting_id]
         );
 
+        // ── Reconcile Harvesting Activity ─────────
+        await connection.query(
+            `UPDATE activities
+             SET status = 'COMPLETED', actual_date = ?
+             WHERE planting_id = ?
+               AND activity_type = 'harvesting'
+               AND status = 'PENDING'
+               AND deleted_at IS NULL`,
+            [harvest_date, planting_id]
+        );
+
         // ── Cancel remaining operational activities (execution layer) ─────────
         await connection.query(
             `UPDATE activities
-             SET status = 'cancelled'
+             SET status = 'CANCELLED'
              WHERE planting_id = ?
-               AND status IN ('pending','ongoing')
+               AND status = 'PENDING'
+               AND actual_date IS NULL
                AND deleted_at IS NULL`,
+            [planting_id]
+        );
+
+        // ── Clear notifications for cancelled/completed activities ─────────
+        await connection.query(
+            `DELETE FROM notifications 
+             WHERE type IN ('activity_due', 'activity_overdue')
+               AND related_id IN (
+                   SELECT id FROM activities WHERE planting_id = ?
+               )`,
             [planting_id]
         );
 
@@ -177,6 +208,12 @@ const createHarvest = async (req, res) => {
 
 const updateHarvest = async (req, res) => {
     const { harvest_date, yield_kg, quality_grade, remarks, financial_value } = req.body;
+
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    if (harvest_date && harvest_date > todayStr) {
+        return res.status(400).json({ message: 'Harvest Date cannot be in the future.' });
+    }
 
     try {
         const [result] = await db.query(

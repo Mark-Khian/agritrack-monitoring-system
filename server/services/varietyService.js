@@ -32,7 +32,7 @@ const resolveVarietyForPlanting = async ({ variety_id, variety_class, variety })
 const countSystemGeneratedActivities = async (plantingId) => {
     const [[{ c }]] = await db.query(
         `SELECT COUNT(*) AS c FROM activities
-         WHERE planting_id = ? AND is_system_generated = 1 AND deleted_at IS NULL`,
+         WHERE planting_id = ? AND activity_source = 'SYSTEM_SCHEDULED' AND deleted_at IS NULL`,
         [plantingId]
     );
     return Number(c) || 0;
