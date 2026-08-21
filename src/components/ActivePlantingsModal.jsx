@@ -12,6 +12,13 @@ const CLASSES = [
 
 const FULL_STAGE_NAMES = ['Seedling', 'Vegetative', 'Reproductive', 'Ripening', 'Harvest'];
 const LIFECYCLE_STAGE_LABELS = ['SEEDLING', 'VEGETATIVE', 'REPROD.', 'RIPENING', 'HARVEST'];
+const STAGE_COLORS = [
+    { text: 'text-green-700 dark:text-green-400', hover: 'hover:text-green-400 dark:hover:text-green-400', bg: 'bg-green-600' },
+    { text: 'text-lime-700 dark:text-lime-400', hover: 'hover:text-lime-400 dark:hover:text-lime-400', bg: 'bg-lime-600' },
+    { text: 'text-blue-700 dark:text-blue-400', hover: 'hover:text-blue-400 dark:hover:text-blue-400', bg: 'bg-blue-600' },
+    { text: 'text-orange-700 dark:text-orange-400', hover: 'hover:text-orange-400 dark:hover:text-orange-400', bg: 'bg-orange-600' },
+    { text: 'text-yellow-600 dark:text-yellow-400', hover: 'hover:text-yellow-400 dark:hover:text-yellow-400', bg: 'bg-yellow-500' }
+];
 
 const normalize = (val) => (val || '').toLowerCase().trim();
 
@@ -29,7 +36,7 @@ const getLifecycleStageIndex = (growthStage) => {
     if (s.includes('ripening')) return 3;
     if (s.includes('harvest')) return 4;
 
-    if (s === 'land preparation' || s === 'seeding' || s === 'transplanting') return 0;
+    if (s === 'land preparation' || s === 'seeding' || s === 'direct seeding' || s === 'transplanting') return 0;
     if (s === 'tillering') return 1;
     return 0;
 };
@@ -254,7 +261,7 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
                                                                 {LIFECYCLE_STAGE_LABELS.map((lbl, idx) => (
                                                                     <span
                                                                         key={lbl}
-                                                                        className={idx === stageIndex ? 'text-emerald-600 dark:text-emerald-400 font-extrabold' : 'text-gray-400 dark:text-slate-500'}
+                                                                        className={`cursor-default transition-colors ${idx === stageIndex ? `${STAGE_COLORS[idx].text} font-extrabold` : STAGE_COLORS[idx].hover}`}
                                                                     >
                                                                         {lbl}
                                                                     </span>
@@ -263,7 +270,7 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
                                                             {/* Progress bar */}
                                                             <div className="mt-2 h-1.5 w-full rounded-full bg-gray-200 dark:bg-slate-800 overflow-hidden border border-gray-200 dark:border-slate-700/20">
                                                                 <div
-                                                                    className="h-full bg-emerald-500 rounded-full"
+                                                                    className={`h-full ${STAGE_COLORS[stageIndex]?.bg || 'bg-emerald-500'} rounded-full`}
                                                                     style={{ width: `${((stageIndex + 1) / 5) * 100}%` }}
                                                                 />
                                                             </div>

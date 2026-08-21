@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 
-const Modal = ({ isOpen, onClose, title, children, maxWidth = 'max-w-md' }) => {
+const Modal = ({ isOpen, onClose, title, children, maxWidth = 'max-w-md', hideCloseButton = false }) => {
     // Close on escape key and lock body scrolling
     useEffect(() => {
         const handleEsc = (e) => {
@@ -31,14 +31,16 @@ const Modal = ({ isOpen, onClose, title, children, maxWidth = 'max-w-md' }) => {
     return (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center overflow-hidden p-4">
             <div className={`bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full ${maxWidth} p-5 md:p-6 mx-auto relative animate-zoom-in max-h-[90vh] overflow-y-auto scrollbar-none`}>
-                <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-xl font-semibold text-gray-800 tracking-tight">{title}</h2>
-                    <button 
-                        onClick={onClose}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200"
-                    >
-                        <X size={20} />
-                    </button>
+                <div className={`flex items-center ${hideCloseButton ? 'justify-center' : 'justify-between'} mb-6`}>
+                    <h2 className="text-xl font-semibold text-gray-800 tracking-tight dark:text-white">{title}</h2>
+                    {!hideCloseButton && (
+                        <button 
+                            onClick={onClose}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200"
+                        >
+                            <X size={20} />
+                        </button>
+                    )}
                 </div>
                 <div>
                     {children}

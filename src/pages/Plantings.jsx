@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal';
 import { useToast } from '../context/ToastContext';
-import Toast from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Badge from '../components/Badge';
 import Select from '../components/Select';
@@ -109,7 +108,7 @@ const Plantings = () => {
     const [isRetrying, setIsRetrying] = useState(false);
     const [error, setError] = useState(null);
     const [saving, setSaving] = useState(false);
-    const [toast, setToast] = useState({ message: '', type: '' });
+
     const globalToast = useToast();
     const [validationErrors, setValidationErrors] = useState({});
 
@@ -254,6 +253,8 @@ const Plantings = () => {
                 growth_plan_manual_override: !!Number(item.growth_plan_manual_override),
                 lifecycle_state: item.lifecycle_state || 'ACTIVE',
                 cropping_season: item.cropping_season || '',
+                establishment_method: item.establishment_method || '',
+                field_condition: item.field_condition || '',
                 status: item.status
             });
             setEditVarietyBaseline({
@@ -274,6 +275,8 @@ const Plantings = () => {
                 growth_plan_manual_override: false,
                 lifecycle_state: 'ACTIVE',
                 cropping_season: '',
+                establishment_method: '',
+                field_condition: '',
                 status: 'active'
             });
             setEditVarietyBaseline(null);
@@ -378,11 +381,13 @@ const Plantings = () => {
                     adjustment_days: Number(formData.adjustment_days || 0),
                     growth_plan_manual_override: !!formData.growth_plan_manual_override,
                     cropping_season: formData.cropping_season,
+                    establishment_method: formData.establishment_method,
+                    field_condition: formData.field_condition,
                     lifecycle_state: formData.lifecycle_state,
                     status: formData.status,
                     generate_template_indices: partialPayload,
                 });
-                setToast({ message: 'Planting updated successfully!', type: 'success' });
+                globalToast.success('Planting updated successfully!');
             } else {
                 await createPlanting({
                     field_name: normalizedFieldName,
@@ -396,15 +401,24 @@ const Plantings = () => {
                         : undefined,
                     adjustment_days: Number(formData.adjustment_days || 0),
                     growth_plan_manual_override: !!formData.growth_plan_manual_override,
+                    cropping_season: formData.cropping_season,
+                    establishment_method: formData.establishment_method,
+                    field_condition: formData.field_condition,
                     lifecycle_state: formData.lifecycle_state,
                     generate_template_indices: partialPayload,
                 });
-                setToast({ message: 'Planting created successfully!', type: 'success' });
+                globalToast.success('Planting created successfully!');
             }
             handleCloseModal();
             await fetchData();
         } catch (err) {
-            setFormError(err.response?.data?.message || 'Failed to save planting.');
+            if (err.response?.status === 400 && err.response?.data?.errors) {
+                const errs = {};
+                err.response.data.errors.forEach(e => { errs[e.field] = e.message; });
+                setValidationErrors(errs);
+            } else {
+                setFormError(err.response?.data?.message || 'Failed to save planting.');
+            }
         } finally {
             setSaving(false);
         }
@@ -415,7 +429,7 @@ const Plantings = () => {
         try {
             await deletePlanting(deletingId);
             await fetchData();
-            setToast({ message: 'Planting deleted successfully!', type: 'success' });
+            globalToast.success('Planting deleted successfully!');
         }
         catch (err) { console.error('Delete planting error:', err); }
     };
@@ -559,11 +573,7 @@ const Plantings = () => {
 
     return (
         <div className="space-y-6">
-            <Toast
-                message={toast.message}
-                type={toast.type}
-                onClose={() => setToast({ message: '', type: '' })}
-            />
+
             <div className="flex flex-col gap-4 mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">Crop Plantings</h1>
@@ -600,7 +610,7 @@ const Plantings = () => {
                             type="button"
                             onClick={() => {
                                 if (!hasCompleted) {
-                                    setToast({ message: 'No completed plantings available to export yet.', type: 'info' });
+                                    globalToast.info('No completed plantings available to export yet.');
                                     return;
                                 }
                                 setIsExportDrawerOpen(true);
@@ -1130,6 +1140,86 @@ const Plantings = () => {
                         </div>
 
 
+
+                        {/* Establishment Method */}
+                        <div className="col-span-1 lg:col-span-1">
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Establishment Method {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}</label>
+                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                                <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
+                                    {formData.establishment_method === 'TRANSPLANTED' ? 'Transplanted' : formData.establishment_method === 'DIRECT_SEEDED' ? 'Direct Seeded' : formData.establishment_method || '—'}
+                                </div>
+                            ) : (
+                                <>
+                                    <div id="form-field-establishment_method">
+                                        <Select
+                                            id="establishment-method-select"
+                                            value={formData.establishment_method}
+                                            onChange={e => {
+                                                setFormData({ ...formData, establishment_method: e.target.value });
+                                                if (validationErrors.establishment_method) {
+                                                    setValidationErrors(prev => ({ ...prev, establishment_method: null }));
+                                                }
+                                            }}
+                                            options={[
+                                                { value: 'TRANSPLANTED', label: 'Transplanted' },
+                                                { value: 'DIRECT_SEEDED', label: 'Direct Seeded' }
+                                            ]}
+                                            placeholder="Select method"
+                                            required
+                                            className={validationErrors.establishment_method ? 'border-red-500 focus:ring-red-500' : ''}
+                                        />
+                                    </div>
+                                    {validationErrors.establishment_method && (
+                                        <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                                            <AlertTriangle size={12} className="shrink-0" /> {validationErrors.establishment_method}
+                                        </p>
+                                    )}
+                                </>
+                            )}
+                            <p className="text-xs text-gray-500 mt-2">
+                                How the rice crop is established in the field (transplanted or direct seeded).
+                            </p>
+                        </div>
+
+                        {/* Field Condition */}
+                        <div className="col-span-1 lg:col-span-1">
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Field Condition {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}</label>
+                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                                <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
+                                    {formData.field_condition === 'IRRIGATED' ? 'Irrigated' : formData.field_condition === 'RAINFED' ? 'Rainfed' : formData.field_condition || '—'}
+                                </div>
+                            ) : (
+                                <>
+                                    <div id="form-field-field_condition">
+                                        <Select
+                                            id="field-condition-select"
+                                            value={formData.field_condition}
+                                            onChange={e => {
+                                                setFormData({ ...formData, field_condition: e.target.value });
+                                                if (validationErrors.field_condition) {
+                                                    setValidationErrors(prev => ({ ...prev, field_condition: null }));
+                                                }
+                                            }}
+                                            options={[
+                                                { value: 'IRRIGATED', label: 'Irrigated' },
+                                                { value: 'RAINFED', label: 'Rainfed' }
+                                            ]}
+                                            placeholder="Select condition"
+                                            required
+                                            className={validationErrors.field_condition ? 'border-red-500 focus:ring-red-500' : ''}
+                                        />
+                                    </div>
+                                    {validationErrors.field_condition && (
+                                        <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
+                                            <AlertTriangle size={12} className="shrink-0" /> {validationErrors.field_condition}
+                                        </p>
+                                    )}
+                                </>
+                            )}
+                            <p className="text-xs text-gray-500 mt-2">
+                                Indicates whether the field is irrigated or primarily rainfed.
+                            </p>
+                        </div>
 
                         {/* Season */}
                         <div className="col-span-1 lg:col-span-1">

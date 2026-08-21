@@ -96,10 +96,6 @@ const validatePlanting = [
         .notEmpty().withMessage('Field condition is required.')
         .isIn(['IRRIGATED', 'RAINFED']).withMessage('Field condition must be IRRIGATED or RAINFED.'),
 
-    body('season')
-        .notEmpty().withMessage('Season is required.')
-        .isIn(['wet', 'dry']).withMessage('Season must be wet or dry.'),
-
     body('status')
         .optional()
         .isIn(['active', 'completed', 'failed'])
@@ -226,7 +222,7 @@ const validateActivity = [
     body('activity_type')
         .notEmpty().withMessage('Activity type is required.')
         .isIn([
-            'land_preparation', 'seeding', 'transplanting',
+            'land_preparation', 'seeding', 'direct_seeding', 'transplanting',
             'fertilizing', 'first_fertilizing', 'second_fertilizing',
             'irrigation', 'drain_irrigation', 'pest_control',
             'final_pest_inspection', 'crop_monitoring',
@@ -263,7 +259,7 @@ const validateActivityUpdate = [
     body('activity_type')
         .optional()
         .isIn([
-            'land_preparation', 'seeding', 'transplanting',
+            'land_preparation', 'seeding', 'direct_seeding', 'transplanting',
             'fertilizing', 'first_fertilizing', 'second_fertilizing',
             'irrigation', 'drain_irrigation', 'pest_control',
             'final_pest_inspection', 'crop_monitoring',

@@ -40,8 +40,8 @@ const ADMIN_PASSWORD = 'admin1234';
         } else {
             // Insert fresh admin account
             const [result] = await db.query(
-                `INSERT INTO users (name, email, password, role, is_active, is_verified)
-                 VALUES (?, ?, ?, 'admin', 1, 1)`,
+                `INSERT INTO users (name, email, password, role, is_active)
+                 VALUES (?, ?, ?, 'admin', 1)`,
                 [ADMIN_NAME, ADMIN_EMAIL, hash]
             );
             console.log(`✅ Admin account created. ID: ${result.insertId}`);

@@ -10,8 +10,8 @@ const { checkRole } = require('../middleware/authMiddleware');
 const { validateHarvest,
     validateId } = require('../middleware/validateData');
 
-router.get('/export/csv', protect, checkRole(['admin', 'manager']), exportLimiter, exportHarvestsCSV);
-router.get('/export/pdf', protect, checkRole(['admin', 'manager']), exportLimiter, exportHarvestsPDF);
+router.get('/export/csv', protect, checkRole(['admin']), exportLimiter, exportHarvestsCSV);
+router.get('/export/pdf', protect, checkRole(['admin']), exportLimiter, exportHarvestsPDF);
 router.get('/', protect, getAllHarvests);
 router.get('/:id', protect, validateId, getHarvestById);
 router.post('/', protect, validateHarvest, createHarvest);

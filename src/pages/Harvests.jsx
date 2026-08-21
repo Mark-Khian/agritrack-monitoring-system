@@ -8,6 +8,7 @@ import Badge from '../components/Badge';
 import { getHarvests, createHarvest, updateHarvest, deleteHarvest, getPlantings, exportHarvestsCSV, exportHarvestsPDF } from '../services/api';
 import { SkeletonTable } from '../components/Skeleton';
 import MonthPicker from '../components/MonthPicker';
+import Select from '../components/Select';
 import { formatDisplayDate } from '../utils/dateFormatter';
 
 const Harvests = () => {
@@ -434,24 +435,18 @@ const Harvests = () => {
                     {!editingItem && (
                         <div>
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Source Planting *</label>
-                            <div className="relative">
-                                <select
-                                    required
-                                    className="w-full border border-gray-300 rounded-lg pl-4 pr-10 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow appearance-none bg-white text-gray-800"
-                                    value={formData.planting_id}
-                                    onChange={e => setFormData({ ...formData, planting_id: e.target.value })}
-                                >
-                                    <option value="">Select Active Planting</option>
-                                    {activePlantings.map(p => (
-                                        <option key={p.id} value={p.id}>{p.variety} ({p.field_name})</option>
-                                    ))}
-                                </select>
-                                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400">
-                                    <ChevronDown size={16} />
-                                </span>
-                            </div>
+                            <Select
+                                id="planting-id-select"
+                                value={formData.planting_id}
+                                onChange={e => setFormData({ ...formData, planting_id: e.target.value })}
+                                options={activePlantings.map(p => ({
+                                    value: p.id,
+                                    label: `${p.variety} (${p.field_name})`
+                                }))}
+                                placeholder="Select Active Planting"
+                                required
+                            />
                             <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3" />
                                 Recording a harvest will mark the planting as completed and archive pending activities.
                             </p>
                         </div>
@@ -478,22 +473,19 @@ const Harvests = () => {
                         </div>
                         <div>
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Quality Grade *</label>
-                            <div className="relative">
-                                <select
-                                    required
-                                    className="w-full border border-gray-300 rounded-lg pl-4 pr-10 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-shadow appearance-none bg-white text-gray-800"
-                                    value={formData.quality_grade}
-                                    onChange={e => setFormData({ ...formData, quality_grade: e.target.value })}
-                                >
-                                    <option value="A">Grade A (Premium)</option>
-                                    <option value="B">Grade B (Standard)</option>
-                                    <option value="C">Grade C (Substandard)</option>
-                                    <option value="rejected">Rejected / Unmarketable</option>
-                                </select>
-                                <span className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-gray-400">
-                                    <ChevronDown size={16} />
-                                </span>
-                            </div>
+                            <Select
+                                id="quality-grade-select"
+                                value={formData.quality_grade}
+                                onChange={e => setFormData({ ...formData, quality_grade: e.target.value })}
+                                options={[
+                                    { value: 'A', label: 'Grade A (Premium)' },
+                                    { value: 'B', label: 'Grade B (Standard)' },
+                                    { value: 'C', label: 'Grade C (Substandard)' },
+                                    { value: 'rejected', label: 'Rejected / Unmarketable' }
+                                ]}
+                                placeholder="Select quality grade"
+                                required
+                            />
                         </div>
                         <div>
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Financial Value (PHP)</label>

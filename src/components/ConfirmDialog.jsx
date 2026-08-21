@@ -11,10 +11,11 @@ const ConfirmDialog = ({
     confirmText = 'Delete',
     confirmColor = 'bg-red-600 hover:bg-red-700 shadow-red-600/30 text-white',
     iconBg = 'bg-red-100 text-red-600',
-    icon = <AlertTriangle size={32} />
+    icon = <AlertTriangle size={32} />,
+    hideCloseButton = false
 }) => {
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={title}>
+        <Modal isOpen={isOpen} onClose={onClose} title={title} hideCloseButton={hideCloseButton}>
             <div className="flex flex-col items-center text-center">
                 <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-6 ${iconBg}`}>
                     {icon}

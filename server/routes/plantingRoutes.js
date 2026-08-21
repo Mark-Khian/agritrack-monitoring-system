@@ -11,8 +11,8 @@ const { validatePlanting,
     validateId } = require('../middleware/validateData');
 
 router.get('/', protect, getAllPlantings);
-router.get('/export/csv', protect, checkRole(['admin', 'manager']), exportLimiter, exportPlantingsCSV);
-router.get('/export/pdf', protect, checkRole(['admin', 'manager']), exportLimiter, exportPlantingsPDF);
+router.get('/export/csv', protect, checkRole(['admin']), exportLimiter, exportPlantingsCSV);
+router.get('/export/pdf', protect, checkRole(['admin']), exportLimiter, exportPlantingsPDF);
 router.get('/:id/export/pdf', protect, validateId, exportLimiter, exportPlantingPDF);
 router.get('/:id', protect, validateId, getPlantingById);
 router.post('/', protect, validatePlanting, createPlanting);

@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const db = require('../config/db');
 const { publicKey } = require('../config/keys');
 
@@ -30,6 +31,16 @@ const protect = async (req, res, next) => {
             return res.status(401).json({ message: 'Account no longer exists.' });
         if (!users[0].is_active)
             return res.status(403).json({ message: 'Your account has been disabled.' });
+
+        // Check active session
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const [session] = await db.query(
+            'SELECT id FROM sessions WHERE token_hash = ? AND user_id = ? AND is_active = 1 LIMIT 1',
+            [tokenHash, decoded.id]
+        );
+        if (session.length === 0) {
+            return res.status(401).json({ message: 'Session invalidated.' });
+        }
 
         req.user = decoded;
         req.token = token;

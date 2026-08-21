@@ -161,7 +161,7 @@ const Landing = () => {
             <img 
               src={crmLogo} 
               alt="AgriTrack CRM Logo" 
-              className="w-[72px] h-[72px] sm:w-[84px] sm:h-[84px] lg:w-[96px] lg:h-[96px] object-contain mb-[clamp(10px,1.5vh,14px)] drop-shadow-xl"
+              className="w-[72px] h-[72px] sm:w-[84px] sm:h-[84px] lg:w-[96px] lg:h-[96px] object-contain mb-1 drop-shadow-xl"
             />
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white tracking-tight text-center max-w-[260px] sm:max-w-[300px] lg:max-w-[340px] mx-auto leading-tight">
               Rice Crop Record Management

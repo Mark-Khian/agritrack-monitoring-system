@@ -224,7 +224,7 @@ const getPlantingById = async (req, res) => {
 
 const createPlanting = async (req, res) => {
     const {
-        field_name, variety_class, variety, planting_date, season,
+        field_name, variety_class, variety, planting_date,
         cropping_season, establishment_method, field_condition
     } = req.body;
     const normalizedFieldName = (field_name || '').trim();
@@ -297,8 +297,13 @@ const createPlanting = async (req, res) => {
                 message: 'This field already has an active planting.'
             });
 
-        const [result] = await db.query(
-            `INSERT INTO plantings
+        let pid;
+        const connection = await db.getConnection();
+        try {
+            await connection.beginTransaction();
+
+            const [result] = await connection.query(
+                `INSERT INTO plantings
              (user_id, field_name, variety_class, variety, variety_id, planting_date, expected_harvest, season,
               cropping_season, establishment_method, field_condition,
               lifecycle_state, expected_growth_days, adjustment_days, growth_plan_manual_override,
@@ -312,7 +317,7 @@ const createPlanting = async (req, res) => {
                 varietyIdToStore,
                 planting_date,
                 expectedHarvest,
-                season,
+                cropping_season === 'WET_SEASON' ? 'wet' : cropping_season === 'DRY_SEASON' ? 'dry' : null,
                 cropping_season || null,
                 establishment_method || null,
                 field_condition || null,
@@ -324,25 +329,37 @@ const createPlanting = async (req, res) => {
             ]
         );
 
-        const pid = result.insertId;
+            pid = result.insertId;
 
-        await ensureAllSystemTemplates(pid, planting_date, expectedGrowthDays);
+            await ensureAllSystemTemplates(pid, planting_date, expectedGrowthDays, connection);
 
-        await logActivity({
-            user_id: req.user.id,
-            action: 'CREATE_PLANTING',
-            entity: 'plantings',
-            entity_id: pid,
-            ip_address: req.ip
-        });
-        if (manualOverride) {
+            await connection.commit();
+        } catch (txnErr) {
+            await connection.rollback();
+            throw txnErr;
+        } finally {
+            connection.release();
+        }
+
+        try {
             await logActivity({
                 user_id: req.user.id,
-                action: 'PLANTING_GROWTH_MANUAL_OVERRIDE',
+                action: 'CREATE_PLANTING',
                 entity: 'plantings',
                 entity_id: pid,
                 ip_address: req.ip
             });
+            if (manualOverride) {
+                await logActivity({
+                    user_id: req.user.id,
+                    action: 'PLANTING_GROWTH_MANUAL_OVERRIDE',
+                    entity: 'plantings',
+                    entity_id: pid,
+                    ip_address: req.ip
+                });
+            }
+        } catch (auditErr) {
+            console.error('Audit log failed:', auditErr.message);
         }
 
         const msg = 'Planting created! System activities have been generated for this crop.';
@@ -511,8 +528,15 @@ const updatePlanting = async (req, res) => {
             lsReason = lifecycle_state_reason === '' ? null : lifecycle_state_reason;
         }
 
-        const [result] = await db.query(
-            `UPDATE plantings
+        const connection = await db.getConnection();
+        try {
+            await connection.beginTransaction();
+
+            const effCroppingSeason = cropping_season !== undefined ? cropping_season : cur.cropping_season;
+            const legacySeason = effCroppingSeason === 'WET_SEASON' ? 'wet' : effCroppingSeason === 'DRY_SEASON' ? 'dry' : null;
+
+            const [result] = await connection.query(
+                `UPDATE plantings
              SET field_name = ?,
                  variety_class = ?, variety = ?, variety_id = ?,
                  planting_date = ?,
@@ -525,6 +549,7 @@ const updatePlanting = async (req, res) => {
                  growth_stage_recorded = ?,
                  growth_stage_source = ?,
                  status = ?,
+                 season = ?,
                  cropping_season = ?, establishment_method = ?, field_condition = ?,
                  expected_stage = ?, observed_stage = ?, observed_stage_date = ?
              WHERE id = ? AND deleted_at IS NULL`,
@@ -544,7 +569,8 @@ const updatePlanting = async (req, res) => {
                 gsrVal,
                 gss,
                 nextStatus,
-                cropping_season !== undefined ? cropping_season : cur.cropping_season,
+                legacySeason,
+                effCroppingSeason,
                 establishment_method !== undefined ? establishment_method : cur.establishment_method,
                 field_condition !== undefined ? field_condition : cur.field_condition,
                 expected_stage !== undefined ? expected_stage : cur.expected_stage,
@@ -553,53 +579,71 @@ const updatePlanting = async (req, res) => {
                 req.params.id
             ]
         );
-        if (result.affectedRows === 0)
+        if (result.affectedRows === 0) {
+            await connection.rollback();
+            // Do not release here, let finally handle it
             return res.status(404).json({ message: 'Planting not found.' });
+        }
 
         if (activatedNow) {
-            await ensureAllSystemTemplates(req.params.id, plantingDate, egd);
+            await ensureAllSystemTemplates(req.params.id, plantingDate, egd, connection);
         }
 
         if (partialIndices.length > 0) {
-            await generateTemplateIndices(req.params.id, plantingDate, egd, partialIndices);
-            await logActivity({
-                user_id: req.user.id,
-                action: 'PLANTING_PARTIAL_ACTIVITIES',
-                entity: 'plantings',
-                entity_id: parseInt(req.params.id, 10),
-                ip_address: req.ip
-            });
+            await generateTemplateIndices(req.params.id, plantingDate, egd, partialIndices, undefined, undefined, connection);
         }
 
         if (growthPlanChanged && (await countSystemGeneratedActivities(req.params.id)) > 0) {
-            await rescheduleFutureSystemActivities(req.params.id, plantingDate, egd);
+            await rescheduleFutureSystemActivities(req.params.id, plantingDate, egd, connection);
         }
 
-        await logActivity({
-            user_id: req.user.id,
-            action: 'UPDATE_PLANTING',
-            entity: 'plantings',
-            entity_id: parseInt(req.params.id, 10),
-            ip_address: req.ip
-        });
+        await connection.commit();
+        } catch (txnErr) {
+            await connection.rollback();
+            throw txnErr;
+        } finally {
+            connection.release();
+        }
 
-        if (varietyChanged) {
+        try {
+            if (partialIndices.length > 0) {
+                await logActivity({
+                    user_id: req.user.id,
+                    action: 'PLANTING_PARTIAL_ACTIVITIES',
+                    entity: 'plantings',
+                    entity_id: parseInt(req.params.id, 10),
+                    ip_address: req.ip
+                });
+            }
+
             await logActivity({
                 user_id: req.user.id,
-                action: 'PLANTING_VARIETY_CHANGED',
+                action: 'UPDATE_PLANTING',
                 entity: 'plantings',
                 entity_id: parseInt(req.params.id, 10),
                 ip_address: req.ip
             });
-        }
-        if (bodyMo !== undefined && bodyMo !== !!Number(cur.growth_plan_manual_override)) {
-            await logActivity({
-                user_id: req.user.id,
-                action: bodyMo ? 'PLANTING_GROWTH_MANUAL_OVERRIDE_ON' : 'PLANTING_GROWTH_MANUAL_OVERRIDE_OFF',
-                entity: 'plantings',
-                entity_id: parseInt(req.params.id, 10),
-                ip_address: req.ip
-            });
+
+            if (varietyChanged) {
+                await logActivity({
+                    user_id: req.user.id,
+                    action: 'PLANTING_VARIETY_CHANGED',
+                    entity: 'plantings',
+                    entity_id: parseInt(req.params.id, 10),
+                    ip_address: req.ip
+                });
+            }
+            if (bodyMo !== undefined && bodyMo !== !!Number(cur.growth_plan_manual_override)) {
+                await logActivity({
+                    user_id: req.user.id,
+                    action: bodyMo ? 'PLANTING_GROWTH_MANUAL_OVERRIDE_ON' : 'PLANTING_GROWTH_MANUAL_OVERRIDE_OFF',
+                    entity: 'plantings',
+                    entity_id: parseInt(req.params.id, 10),
+                    ip_address: req.ip
+                });
+            }
+        } catch (auditErr) {
+            console.error('Audit log failed:', auditErr.message);
         }
 
         res.status(200).json({ message: 'Planting updated!' });

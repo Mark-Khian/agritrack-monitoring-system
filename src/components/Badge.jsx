@@ -19,6 +19,7 @@ const Badge = ({ status }) => {
         // Growth Stage Badges
         'land preparation': 'bg-gray-100 text-gray-600',
         'seeding': 'bg-sky-100 text-sky-600',
+        'direct seeding': 'bg-sky-100 text-sky-600',
         'transplanting': 'bg-cyan-100 text-cyan-600',
         'tillering': 'bg-teal-100 text-teal-600',
         'booting': 'bg-lime-100 text-lime-600',

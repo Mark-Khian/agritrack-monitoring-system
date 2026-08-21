@@ -385,7 +385,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                 }}
             >
                 {/* ── SECTION 1: Primary weather summary card ── */}
-                <div className={`rounded-xl border p-5 flex items-center justify-between gap-4 lg:w-80 lg:shrink-0 relative z-10 transition-all duration-300 hover:scale-[1.02] cursor-pointer ${cardBg} ${cardShadow}`}>
+                <div className={`rounded-xl border p-5 flex items-center justify-between gap-4 lg:w-80 lg:shrink-0 relative z-10 transition-all duration-300 hover:scale-[1.02] cursor-default ${cardBg} ${cardShadow}`}>
                     <div className="min-w-0">
                         <p className={`text-[10px] lg:text-[11px] font-bold uppercase tracking-widest mb-1.5 ${isDarkMode ? 'text-emerald-300/70' : 'text-emerald-700/80'}`}>
                             Local Weather
@@ -420,7 +420,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                     {/* ── SECTION 2: Key metrics grid (3-column) ── */}
                     <div className="grid grid-cols-3 gap-2 lg:gap-3">
                         {/* Humidity */}
-                        <div className={`rounded-xl border px-3 py-2.5 lg:px-4 lg:py-3.5 transition-all duration-300 hover:scale-[1.03] cursor-pointer ${cardBg} ${cardShadow}`}>
+                        <div className={`rounded-xl border px-3 py-2.5 lg:px-4 lg:py-3.5 transition-all duration-300 hover:scale-[1.03] cursor-default ${cardBg} ${cardShadow}`}>
                             <div className={`flex items-center gap-1.5 mb-1 ${isDarkMode ? 'text-emerald-200/70' : 'text-emerald-700/80'}`}>
                                 <Droplets size={13} className="lg:size-[15px]" />
                                 <span className="text-[10px] lg:text-[11px] font-semibold uppercase tracking-wider">Humidity</span>
@@ -429,7 +429,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                         </div>
 
                         {/* Rain probability */}
-                        <div className={`rounded-xl border px-3 py-2.5 lg:px-4 lg:py-3.5 transition-all duration-300 hover:scale-[1.03] cursor-pointer ${cardBg} ${cardShadow}`}>
+                        <div className={`rounded-xl border px-3 py-2.5 lg:px-4 lg:py-3.5 transition-all duration-300 hover:scale-[1.03] cursor-default ${cardBg} ${cardShadow}`}>
                             <div className={`flex items-center gap-1.5 mb-1 ${isDarkMode ? 'text-blue-200/70' : 'text-blue-700/80'}`}>
                                 <CloudRain size={13} className="lg:size-[15px]" />
                                 <span className="text-[10px] lg:text-[11px] font-semibold uppercase tracking-wider">Rain</span>
@@ -438,7 +438,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                         </div>
 
                         {/* Wind speed */}
-                        <div className={`rounded-xl border px-3 py-2.5 lg:px-4 lg:py-3.5 transition-all duration-300 hover:scale-[1.03] cursor-pointer ${cardBg} ${cardShadow}`}>
+                        <div className={`rounded-xl border px-3 py-2.5 lg:px-4 lg:py-3.5 transition-all duration-300 hover:scale-[1.03] cursor-default ${cardBg} ${cardShadow}`}>
                             <div className={`flex items-center gap-1.5 mb-1 ${isDarkMode ? 'text-white/50' : 'text-slate-500/80'}`}>
                                 <Wind size={13} className="lg:size-[15px]" />
                                 <span className="text-[10px] lg:text-[11px] font-semibold uppercase tracking-wider">Wind</span>
@@ -451,7 +451,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                     </div>
 
                     {/* ── SECTION 3: Smart recommendation banner ── */}
-                    <div className={`rounded-xl border px-4 py-3 lg:px-5 lg:py-4 flex items-start gap-3 transition-all duration-300 hover:scale-[1.01] cursor-pointer ${cardBg} ${cardShadow}`}>
+                    <div className={`rounded-xl border px-4 py-3 lg:px-5 lg:py-4 flex items-start gap-3 transition-all duration-300 hover:scale-[1.01] cursor-default ${cardBg} ${cardShadow}`}>
                         {/* Icon */}
                         <div className={`shrink-0 mt-0.5 rounded-lg p-1.5 lg:p-2 ${isDarkMode ? 'bg-white/10' : 'bg-slate-900/5'}`}>
                             <Thermometer size={14} className={`${isDarkMode ? 'text-emerald-300' : 'text-emerald-600'} lg:size-[16px]`} />

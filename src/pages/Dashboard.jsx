@@ -17,8 +17,11 @@ import {
 import WeatherWidget from '../components/WeatherWidget';
 import ActivePlantingsModal from '../components/ActivePlantingsModal';
 import Modal from '../components/Modal';
+import Badge from '../components/Badge';
+import QualityGradeBadge from '../components/QualityGradeBadge';
 import { formatDisplayDate } from '../utils/dateFormatter';
 import MiniCalendarWidget from '../components/calendar/MiniCalendarWidget';
+import ConfirmDialog from '../components/ConfirmDialog';
 import {
     SkeletonPageHeader,
     SkeletonStatCard,
@@ -53,6 +56,7 @@ const getIconForType = (type) => {
     const icons = {
         'land preparation': <Shovel size={16} className="text-amber-600 dark:text-amber-400" />,
         'seeding': <Sprout size={16} className="text-green-600 dark:text-green-400" />,
+        'direct seeding': <Sprout size={16} className="text-green-600 dark:text-green-400" />,
         'transplanting': <Sprout size={16} className="text-teal-600 dark:text-teal-400" />,
         'fertilizing': <FlaskConical size={16} className="text-blue-600 dark:text-blue-400" />,
         'first fertilizing': <FlaskConical size={16} className="text-blue-600 dark:text-blue-400" />,
@@ -195,6 +199,7 @@ const Dashboard = () => {
         }
     });
     const [quickTaskInput, setQuickTaskInput] = useState('');
+    const [deletingQuickTaskId, setDeletingQuickTaskId] = useState(null);
 
     useEffect(() => {
         localStorage.setItem('agritrack_quick_tasks', JSON.stringify(quickTasks));
@@ -437,7 +442,7 @@ const Dashboard = () => {
         const t = normalize(activityType);
         const base = 'inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold';
 
-        if (t === 'seeding' || t === 'fertilizing') {
+        if (t === 'seeding' || t === 'direct seeding' || t === 'fertilizing') {
             return <span className={`${base} bg-green-100 text-green-700`}>PRIORITY</span>;
         }
         if (t === 'irrigation' || t === 'pest control') {
@@ -453,7 +458,7 @@ const Dashboard = () => {
         const t = normalize(activityType);
         const baseBox = 'h-10 w-10 rounded-xl flex items-center justify-center shrink-0';
 
-        if (t === 'seeding') return <div className={`${baseBox} bg-green-50`}><Sprout size={18} className="text-[#166534]" /></div>;
+        if (t === 'seeding' || t === 'direct seeding') return <div className={`${baseBox} bg-green-50`}><Sprout size={18} className="text-[#166534]" /></div>;
         if (t === 'fertilizing') return <div className={`${baseBox} bg-blue-50`}><FlaskConical size={18} className="text-blue-700" /></div>;
         if (t === 'transplanting') return <div className={`${baseBox} bg-teal-50`}><Sprout size={18} className="text-teal-700" /></div>;
         if (t === 'irrigation') return <div className={`${baseBox} bg-cyan-50`}><Droplets size={18} className="text-cyan-700" /></div>;
@@ -497,7 +502,7 @@ const Dashboard = () => {
         if (ls === 'maturing') return 2;
         if (ls === 'active' || ls === 'planned') return 0;
 
-        if (s === 'land preparation' || s === 'seeding' || s === 'transplanting') return 0;
+        if (s === 'land preparation' || s === 'seeding' || s === 'direct seeding' || s === 'transplanting') return 0;
         if (s === 'tillering') return 1;
         return 0;
     };
@@ -519,13 +524,25 @@ const Dashboard = () => {
     const activePlantings = plantingsList.filter((p) => !isCompletedPlanting(p));
     const mostRecentPlanting = activePlantings
         .slice()
-        .sort((a, b) => new Date(b.planting_date || 0) - new Date(a.planting_date || 0))[0] || null;
+        .sort((a, b) => {
+            const dateA = new Date(a.planting_date || 0).getTime();
+            const dateB = new Date(b.planting_date || 0).getTime();
+            if (dateA !== dateB) return dateA - dateB;
+            return (a.id || 0) - (b.id || 0);
+        })[0] || null;
 
     const lifecycleStageIndex = mostRecentPlanting
         ? getLifecycleStageIndex(mostRecentPlanting.growth_stage, mostRecentPlanting.lifecycle_state)
         : 0;
     const lifecycleStageLabels = ['SDL', 'VEG', 'REP', 'RIP', 'HRV'];
     const FULL_STAGE_NAMES = ['Seedling', 'Vegetative', 'Reproductive', 'Ripening', 'Harvest'];
+    const STAGE_COLORS = [
+        { text: 'text-green-700 dark:text-green-400', hover: 'hover:text-green-400 dark:hover:text-green-400', bg: 'bg-green-600' },
+        { text: 'text-lime-700 dark:text-lime-400', hover: 'hover:text-lime-400 dark:hover:text-lime-400', bg: 'bg-lime-600' },
+        { text: 'text-blue-700 dark:text-blue-400', hover: 'hover:text-blue-400 dark:hover:text-blue-400', bg: 'bg-blue-600' },
+        { text: 'text-orange-700 dark:text-orange-400', hover: 'hover:text-orange-400 dark:hover:text-orange-400', bg: 'bg-orange-600' },
+        { text: 'text-yellow-600 dark:text-yellow-400', hover: 'hover:text-yellow-400 dark:hover:text-yellow-400', bg: 'bg-yellow-500' }
+    ];
     const plantingDate = mostRecentPlanting ? safeDate(mostRecentPlanting.planting_date) : null;
     const expectedHarvestDate = mostRecentPlanting ? safeDate(mostRecentPlanting.expected_harvest) : null;
     const totalLifecycleDays = plantingDate && expectedHarvestDate
@@ -741,7 +758,7 @@ const Dashboard = () => {
             >
                 {/* Hover Overlay */}
                 <div className={`absolute inset-0 transition-opacity opacity-0 group-hover:opacity-100 ${card.hoverBg}`} />
-                
+
                 <span
                     className="absolute left-0 top-0 w-full h-[3px] rounded-t-2xl md:h-full md:w-[4px] md:rounded-l-2xl md:rounded-t-none z-10"
                     style={{ backgroundColor: card.accent }}
@@ -758,7 +775,7 @@ const Dashboard = () => {
     };
 
     return (
-        <div className="space-y-6 lg:space-y-8 bg-[#f5f5f0] min-h-full text-gray-900">
+        <div className="flex flex-col gap-6 lg:gap-8 bg-[#f5f5f0] min-h-full text-gray-900">
             {/* Header */}
             <div>
                 <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
@@ -807,9 +824,9 @@ const Dashboard = () => {
             </div>
 
 
-            <div className="grid gap-6 lg:grid-cols-3">
+            <div className="contents lg:grid lg:gap-6 lg:grid-cols-3">
                 {/* Left column */}
-                <div className="lg:col-span-2 flex flex-col h-full">
+                <div className="order-1 lg:order-none lg:col-span-2 flex flex-col h-full w-full">
                     {/* Today's Tasks */}
                     <div className="rounded-2xl bg-white border border-gray-100 p-5 pb-3 space-y-4 flex-1 flex flex-col">
                         <div className="flex items-center justify-between border-b border-gray-50 pb-2.5">
@@ -825,8 +842,8 @@ const Dashboard = () => {
                         <div className="space-y-2.5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Field Operations</h3>
                             {topPendingTasks.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-4 text-sm text-gray-400 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
-                                    <Tractor size={24} className="mb-1 text-gray-300 animate-pulse" />
+                                <div className="flex flex-col items-center justify-center py-4 text-sm text-gray-400 dark:text-slate-400 bg-gray-50/50 dark:bg-slate-800/50 rounded-xl border border-dashed border-gray-200 dark:border-slate-700">
+                                    <Tractor size={24} className="mb-1 text-gray-300 dark:text-slate-600 animate-pulse" />
                                     No pending field operations right now.
                                 </div>
                             ) : (
@@ -836,7 +853,7 @@ const Dashboard = () => {
                                         return (
                                             <div
                                                 key={act.id}
-                                                className="flex flex-col justify-between rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/30 px-3.5 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-slate-800/50 cursor-pointer"
+                                                className="flex flex-col justify-between rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/30 px-3.5 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-slate-800/50 cursor-default"
                                             >
                                                 <div className="flex items-center justify-between w-full gap-3 h-full">
                                                     <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -904,7 +921,7 @@ const Dashboard = () => {
                                     {quickTasks.map((task) => (
                                         <div
                                             key={task.id}
-                                            className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl border border-gray-100 bg-gray-50/30 hover:bg-gray-50 transition-colors group"
+                                            className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl border border-gray-100 dark:border-slate-700/50 bg-gray-50/30 dark:bg-slate-800/30 hover:bg-gray-50 dark:hover:bg-slate-800/60 transition-colors group"
                                         >
                                             <div className="flex items-center gap-2.5 min-w-0">
                                                 <button
@@ -915,19 +932,19 @@ const Dashboard = () => {
                                                     {task.completed ? (
                                                         <CheckCircle className="h-5 w-5 text-emerald-600 fill-emerald-50" />
                                                     ) : (
-                                                        <Circle className="h-5 w-5 text-gray-300 hover:text-emerald-500" />
+                                                        <Circle className="h-5 w-5 text-gray-300 dark:text-slate-500 hover:text-emerald-500 dark:hover:text-emerald-400" />
                                                     )}
                                                 </button>
                                                 <span
-                                                    className={`text-sm text-gray-700 truncate ${task.completed ? 'line-through text-gray-400 font-normal' : 'font-medium'}`}
+                                                    className={`text-sm truncate ${task.completed ? 'line-through text-gray-400 dark:text-slate-500 font-normal' : 'font-medium text-gray-700 dark:text-slate-200'}`}
                                                 >
                                                     {task.text}
                                                 </span>
                                             </div>
                                             <button
                                                 type="button"
-                                                onClick={() => handleDeleteQuickTask(task.id)}
-                                                className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"
+                                                onClick={() => setDeletingQuickTaskId(task.id)}
+                                                className="text-gray-300 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"
                                             >
                                                 <Trash2 size={15} />
                                             </button>
@@ -940,10 +957,11 @@ const Dashboard = () => {
                 </div>
 
                 {/* Right column of Grid 1: Crop Lifecycle */}
-                <div className="lg:col-span-1 flex flex-col h-full gap-6">
+                <div className={`order-2 lg:order-none lg:col-span-1 h-full gap-6 w-full ${mostRecentPlanting ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}`}>
 
                     {/* Crop Lifecycle */}
-                    <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
+                    {mostRecentPlanting && (
+                        <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
                         <div className="flex items-start justify-between gap-3">
                             <div>
                                 <h2 className="text-lg font-bold">Active Planting</h2>
@@ -960,25 +978,24 @@ const Dashboard = () => {
 
                         {mostRecentPlanting && (
                             <div className="mt-4">
-                                <div className="flex items-center justify-between text-[10px] lg:text-[9px] xl:text-[10px] font-bold uppercase tracking-wider text-gray-400 px-1">
+                                <div className="flex items-center justify-between text-[10px] lg:text-[9px] xl:text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-600 px-1">
                                     {lifecycleStageLabels.map((label, idx) => {
                                         const fullLabel = FULL_STAGE_NAMES[idx].toUpperCase();
                                         const displayFullLabel = fullLabel === 'REPRODUCTIVE' ? 'REPROD.' : fullLabel;
                                         return (
                                             <span
                                                 key={label}
-                                                className={idx === lifecycleStageIndex ? 'text-emerald-700 dark:text-emerald-400 font-extrabold' : 'text-gray-400 dark:text-gray-600'}
                                                 title={FULL_STAGE_NAMES[idx]}
                                             >
-                                                <span className="lg:hidden">{label}</span>
-                                                <span className="hidden lg:inline">{displayFullLabel}</span>
+                                                <span className={`cursor-default transition-colors lg:hidden ${idx === lifecycleStageIndex ? `${STAGE_COLORS[idx].text} font-extrabold` : STAGE_COLORS[idx].hover}`}>{label}</span>
+                                                <span className={`cursor-default transition-colors hidden lg:inline ${idx === lifecycleStageIndex ? `${STAGE_COLORS[idx].text} font-extrabold` : STAGE_COLORS[idx].hover}`}>{displayFullLabel}</span>
                                             </span>
                                         );
                                     })}
                                 </div>
                                 <div className="mt-2 h-2 w-full rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden">
                                     <div
-                                        className="h-full bg-emerald-600"
+                                        className={`h-full ${STAGE_COLORS[lifecycleStageIndex]?.bg || 'bg-emerald-600'}`}
                                         style={{ width: `${((lifecycleStageIndex + 1) / 5) * 100}%` }}
                                     />
                                 </div>
@@ -995,8 +1012,9 @@ const Dashboard = () => {
                             </div>
                         )}
                     </div>
+                    )}
                     {/* Desktop-only Stat Cards Stack */}
-                    <div className="hidden lg:flex flex-1 flex-col justify-between">
+                    <div className={`hidden lg:flex flex-col ${mostRecentPlanting ? 'flex-1 justify-between' : 'gap-6'}`}>
                         {renderStatCard(statCards[0])} {/* Active Plantings */}
                         {renderStatCard(statCards[2])} {/* Total Activities */}
                         {renderStatCard(statCards[1])} {/* Total Harvests */}
@@ -1005,8 +1023,8 @@ const Dashboard = () => {
             </div>
 
             {/* Grid Row 2: Upcoming Activities and Critical Alerts */}
-            <div className="grid gap-6 lg:grid-cols-3 mt-6">
-                <div className="lg:col-span-2 flex flex-col gap-6">
+            <div className="contents lg:grid lg:gap-6 lg:grid-cols-3">
+                <div className="order-4 lg:order-none lg:col-span-2 flex flex-col gap-6 min-w-0 w-full">
                     {/* Upcoming Activities */}
                     <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 overflow-hidden">
                         <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-700">
@@ -1028,7 +1046,7 @@ const Dashboard = () => {
                                     {recentActivities.slice(0, 5).map((act) => {
                                         const { dot, text, rowHover } = getTableStatus(act);
                                         return (
-                                            <tr key={act.id} className={`${rowHover} transition-colors cursor-pointer`}>
+                                            <tr key={act.id} className={`${rowHover} transition-colors cursor-default`}>
                                                 <td className="px-5 py-3">
                                                     <span className="font-semibold text-gray-900 dark:text-white capitalize">
                                                         {normalize(act?.activity_type).replaceAll('_', ' ')}
@@ -1067,7 +1085,7 @@ const Dashboard = () => {
                                 const iconElement = getIconForType(act.activity_type);
 
                                 return (
-                                    <div key={act.id} className={`p-4 flex items-start gap-3 ${rowHover} transition-colors cursor-pointer`}>
+                                    <div key={act.id} className={`p-4 flex items-start gap-3 ${rowHover} transition-colors cursor-default`}>
                                         <div className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-700 flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300">
                                             {iconElement}
                                         </div>
@@ -1100,12 +1118,11 @@ const Dashboard = () => {
                     </div>
 
                     {/* Plot Overview */}
-                    {plantingsList.length > 0 && (
-                        <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm flex-1 flex flex-col">
+                    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-6 shadow-sm flex-1 flex flex-col">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div>
-                                    <h2 className="text-lg font-bold">Plot Overview</h2>
-                                    <p className="mt-1 text-xs text-gray-400">
+                                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Plot Overview</h2>
+                                    <p className="mt-1 text-xs text-gray-400 dark:text-slate-400">
                                         View active plot activities separately from completed harvest records.
                                     </p>
                                 </div>
@@ -1114,8 +1131,8 @@ const Dashboard = () => {
                                         type="button"
                                         onClick={() => setPlotOverviewTab('active')}
                                         className={`rounded-xl px-3 py-1.5 text-xs font-semibold border transition-colors ${plotOverviewTab === 'active'
-                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-300 dark:border-emerald-700/50'
+                                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700'
                                             }`}
                                     >
                                         Active Plots
@@ -1124,8 +1141,8 @@ const Dashboard = () => {
                                         type="button"
                                         onClick={() => setPlotOverviewTab('completed')}
                                         className={`rounded-xl px-3 py-1.5 text-xs font-semibold border transition-colors ${plotOverviewTab === 'completed'
-                                            ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                                            ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:border-amber-700/50'
+                                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700'
                                             }`}
                                     >
                                         Completed Harvests
@@ -1139,14 +1156,14 @@ const Dashboard = () => {
                                     value={plotSearch}
                                     onChange={(e) => setPlotSearch(e.target.value)}
                                     placeholder="Search by plot or variety..."
-                                    className="w-full sm:w-72 rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200"
+                                    className="w-full sm:w-72 rounded-xl border border-gray-200 dark:border-slate-700 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-900/50 bg-white dark:bg-slate-900/50 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder-slate-400"
                                 />
                                 {plotOverviewTab === 'active' && (
                                     <div className="relative inline-block w-full sm:w-auto">
                                         <select
                                             value={activityStatusFilter}
                                             onChange={(e) => setActivityStatusFilter(e.target.value)}
-                                            className="w-full rounded-xl border border-gray-200 pl-3 pr-8 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200 appearance-none bg-white text-gray-800"
+                                            className="w-full rounded-xl border border-gray-200 dark:border-slate-700 pl-3 pr-8 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-900/50 appearance-none bg-white dark:bg-slate-900/50 text-gray-800 dark:text-slate-200"
                                         >
                                             <option value="all">All statuses</option>
                                             <option value="pending">Pending</option>
@@ -1224,8 +1241,9 @@ const Dashboard = () => {
                                         );
                                     })}
                                     {activePlots.length === 0 && (
-                                        <div className="w-full rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-400">
-                                            No active plots found with pending/ongoing activities.
+                                        <div className="w-full rounded-xl border border-dashed border-gray-200 dark:border-slate-700 p-6 text-center">
+                                            <p className="text-sm font-semibold text-gray-900 dark:text-white">No active plots yet.</p>
+                                            <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">Create a planting to start tracking crop progress.</p>
                                         </div>
                                     )}
                                 </div>
@@ -1276,21 +1294,22 @@ const Dashboard = () => {
                                         );
                                     })}
                                     {completedHarvests.length === 0 && (
-                                        <div className="w-full rounded-xl border border-dashed border-amber-200 p-6 text-center text-sm text-amber-700/70">
-                                            No completed harvest records found.
+                                        <div className="w-full rounded-xl border border-dashed border-amber-200 dark:border-amber-700/50 p-6 text-center text-sm text-amber-700/70 dark:text-amber-500/80">
+                                            No completed harvest records yet.
                                         </div>
                                     )}
                                 </div>
                             )}
                         </div>
-                    )}
                 </div>
 
                 {/* Right column of Grid 2: Critical Alerts & Calendar */}
-                <div className="lg:col-span-1 flex flex-col gap-6">
-                    <MiniCalendarWidget activities={activitiesList} />
+                <div className="contents lg:flex lg:flex-col lg:gap-6 lg:col-span-1 lg:min-w-0">
+                    <div className="order-3 lg:order-none w-full">
+                        <MiniCalendarWidget activities={activitiesList} />
+                    </div>
 
-                    <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm flex-1 flex flex-col">
+                    <div className="order-5 lg:order-none rounded-2xl bg-white border border-gray-100 p-6 shadow-sm flex-1 flex flex-col w-full">
                         <h2 className="text-lg font-bold">Critical Alerts</h2>
 
                         <div className="mt-4 space-y-3">
@@ -1354,7 +1373,11 @@ const Dashboard = () => {
                             </div>
                             <div>
                                 <p className="text-xs font-semibold text-gray-500 uppercase">Status</p>
-                                <p className="mt-1 text-sm capitalize text-gray-900">{selectedPlotDetails.data.status || 'Active'}</p>
+                                <div className="mt-1.5 flex items-center">
+                                    <span className="inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-200 dark:border-green-800 capitalize">
+                                        {selectedPlotDetails.data.status || 'Active'}
+                                    </span>
+                                </div>
                             </div>
                             <div>
                                 <p className="text-xs font-semibold text-gray-500 uppercase">Growth Stage</p>
@@ -1391,7 +1414,13 @@ const Dashboard = () => {
                             </div>
                             <div>
                                 <p className="text-xs font-semibold text-gray-500 uppercase">Quality Grade</p>
-                                <p className="mt-1 text-sm capitalize text-gray-900">{selectedPlotDetails.data.quality_grade || '—'}</p>
+                                <div className="mt-1.5 flex items-center">
+                                    {selectedPlotDetails.data.quality_grade ? (
+                                        <QualityGradeBadge grade={selectedPlotDetails.data.quality_grade} />
+                                    ) : (
+                                        <span className="text-sm text-gray-900 dark:text-white">—</span>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1400,6 +1429,20 @@ const Dashboard = () => {
             <ActivePlantingsModal
                 isOpen={isPlantingsModalOpen}
                 onClose={() => setIsPlantingsModalOpen(false)}
+            />
+            <ConfirmDialog
+                isOpen={!!deletingQuickTaskId}
+                title="Delete Quick Reminder"
+                message="Are you sure you want to delete this reminder? This action cannot be undone."
+                onConfirm={() => {
+                    handleDeleteQuickTask(deletingQuickTaskId);
+                    setDeletingQuickTaskId(null);
+                }}
+                onClose={() => setDeletingQuickTaskId(null)}
+                confirmText="Delete"
+                cancelText="Cancel"
+                isDestructive={true}
+                hideCloseButton={true}
             />
         </div>
     );
