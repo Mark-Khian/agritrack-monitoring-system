@@ -52,7 +52,8 @@ app.use(express.json({ limit: '10kb' }));
 
 
 // ── Force HTTPS in production ─────────────
-if (process.env.NODE_ENV === 'production') {
+const FORCE_HTTPS = process.env.FORCE_HTTPS === 'true';
+if (process.env.NODE_ENV === 'production' && FORCE_HTTPS) {
     app.use((req, res, next) => {
         if (req.header('x-forwarded-proto') !== 'https') {
             return res.redirect(`https://${req.header('host')}${req.url}`);
