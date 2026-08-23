@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth';
 import { loginUser } from '../services/api';
-import { Eye, EyeOff, AlertCircle, Wheat, CheckCircle2, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, Wheat, CheckCircle2, Loader2, ShieldCheck, X } from 'lucide-react';
 import heroRice from '../assets/hero-rice.png';
 import crmLogo from '../assets/CRM-logo.png';
 import FlipOverlay from '../components/FlipOverlay';
@@ -16,6 +16,7 @@ const Landing = () => {
   const [captchaToken, setCaptchaToken] = useState('');
   const [captchaError, setCaptchaError] = useState('');
   const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [showCaptchaModal, setShowCaptchaModal] = useState(false);
   const [authPhase, setAuthPhase] = useState('idle');
   const captchaRef = useRef(null);
   const captchaRendered = useRef(false);
@@ -63,6 +64,7 @@ const Landing = () => {
             callback: (token) => {
               setCaptchaToken(token);
               setCaptchaError('');
+              setShowCaptchaModal(false);
             },
             'expired-callback': () => setCaptchaToken(''),
             'error-callback': () => {
@@ -97,6 +99,7 @@ const Landing = () => {
 
     if (captchaRequired && !captchaToken) {
       setCaptchaError('Please complete the CAPTCHA verification.');
+      setShowCaptchaModal(true);
       return;
     }
 
@@ -121,7 +124,10 @@ const Landing = () => {
     } catch (error) {
       setAuthPhase('idle');
       const data = error?.response?.data;
-      if (data?.captchaRequired) setCaptchaRequired(true);
+      if (data?.captchaRequired) {
+        setCaptchaRequired(true);
+        setShowCaptchaModal(true);
+      }
       const msg = data?.message || error.message || 'Login failed.';
       setErrorMsg(msg);
       if (window.grecaptcha && captchaRendered.current) window.grecaptcha.reset();
@@ -144,23 +150,67 @@ const Landing = () => {
 
       {/* Success Screen Overlay */}
       {authPhase !== 'idle' && (
-        <FlipOverlay 
-          isPending={authPhase === 'loading'} 
-          isSuccess={authPhase === 'success'} 
-          title="Login successful" 
-          subtitle="Redirecting to dashboard..." 
+        <FlipOverlay
+          isPending={authPhase === 'loading'}
+          isSuccess={authPhase === 'success'}
+          title="Login successful"
+          subtitle="Redirecting to dashboard..."
         />
+      )}
+
+      {/* Error Toast */}
+      {errorMsg && (
+        <div 
+          role="alert"
+          className="fixed top-4 left-4 right-4 sm:left-auto sm:right-4 sm:max-w-sm z-40 p-4 rounded-lg bg-red-50 border border-red-200 shadow-lg flex gap-3 animate-in slide-in-from-top-2"
+        >
+          <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700">{errorMsg}</p>
+        </div>
+      )}
+
+      {/* CAPTCHA Modal Overlay */}
+      {captchaRequired && (
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${showCaptchaModal ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+          <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 max-w-sm w-full flex flex-col items-center relative transform transition-all duration-300 scale-100">
+
+            <button
+              type="button"
+              onClick={() => setShowCaptchaModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+              aria-label="Close verification"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-4 text-blue-600">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
+
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Security Verification</h3>
+            <p className="text-sm text-gray-600 text-center mb-6">Complete the verification before continuing.</p>
+
+            <div className="flex justify-center w-full min-h-[78px]">
+              <div ref={captchaRef} />
+            </div>
+
+            {captchaError && (
+              <p className="mt-4 text-sm text-red-600 text-center w-full bg-red-50 p-2 rounded">{captchaError}</p>
+            )}
+
+          </div>
+        </div>
       )}
 
       {/* Admin Login Container */}
       <div className="relative z-10 min-h-[100dvh] w-full flex flex-col overflow-y-auto px-4 sm:px-6 lg:px-8 py-[clamp(24px,4vh,56px)]">
         <div className="my-auto w-full flex flex-col items-center">
 
-        {/* Logo and Title */}
+          {/* Logo and Title */}
           <div className="flex flex-col items-center text-center w-full mb-[clamp(20px,3vh,36px)]">
-            <img 
-              src={crmLogo} 
-              alt="AgriTrack CRM Logo" 
+            <img
+              src={crmLogo}
+              alt="AgriTrack CRM Logo"
               className="w-[72px] h-[72px] sm:w-[84px] sm:h-[84px] lg:w-[96px] lg:h-[96px] object-contain mb-1 drop-shadow-xl"
             />
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white tracking-tight text-center max-w-[260px] sm:max-w-[300px] lg:max-w-[340px] mx-auto leading-tight">
@@ -168,108 +218,90 @@ const Landing = () => {
             </h1>
           </div>
 
-        {/* Login Card */}
-        <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-8 sm:p-10 border border-white/20">
+          {/* Login Card */}
+          <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-8 sm:p-10 border border-white/20">
 
-          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Admin Login</h2>
-          <p className="text-gray-600 text-sm mb-8">Enter your credentials to access the system</p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Admin Login</h2>
+            <p className="text-gray-600 text-sm mb-8">Enter your credentials to access the system</p>
 
-          {/* Error Message */}
-          {errorMsg && (
-            <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 flex gap-3">
-              <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-              <p className="text-sm text-red-700">{errorMsg}</p>
-            </div>
-          )}
+            {/* Login Form */}
+            <form onSubmit={handleSubmit} className="space-y-5">
 
-          {/* Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-5">
-
-            {/* Username Input */}
-            <div>
-              <label htmlFor="username" className="block text-sm font-semibold text-gray-900 mb-2">
-                Username
-              </label>
-              <input
-                id="username"
-                type="text"
-                placeholder="admin"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                disabled={isLoading}
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                required
-              />
-            </div>
-
-            {/* Password Input */}
-            <div>
-              <label htmlFor="password" className="block text-sm font-semibold text-gray-900 mb-2">
-                Password
-              </label>
-              <div className="relative">
+              {/* Username Input */}
+              <div>
+                <label htmlFor="username" className="block text-sm font-semibold text-gray-900 mb-2">
+                  Username
+                </label>
                 <input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  id="username"
+                  type="text"
+                  placeholder="admin"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   disabled={isLoading}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   required
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  disabled={isLoading}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? (
-                    <EyeOff className="w-5 h-5" />
-                  ) : (
-                    <Eye className="w-5 h-5" />
-                  )}
-                </button>
               </div>
+
+              {/* Password Input */}
+              <div>
+                <label htmlFor="password" className="block text-sm font-semibold text-gray-900 mb-2">
+                  Password
+                </label>
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={isLoading}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    disabled={isLoading}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Login Button */}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-3 px-4 rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-semibold transition-all duration-200 flex items-center justify-center gap-2 disabled:cursor-not-allowed"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Logging in...
+                  </>
+                ) : (
+                  'Login'
+                )}
+              </button>
+
+            </form>
+
+            {/* Footer note */}
+            <div className="mt-8 pt-6 border-t border-gray-200">
+              <p className="text-xs text-gray-600 text-center">
+                This is a secure admin-only portal. Unauthorized access attempts are logged.
+              </p>
             </div>
 
-            {/* CAPTCHA */}
-            {captchaRequired && (
-              <div>
-                <div ref={captchaRef} className="flex justify-center" />
-                {captchaError && (
-                  <p className="mt-2 text-sm text-red-600">{captchaError}</p>
-                )}
-              </div>
-            )}
-
-            {/* Login Button */}
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-3 px-4 rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-semibold transition-all duration-200 flex items-center justify-center gap-2 disabled:cursor-not-allowed"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Logging in...
-                </>
-              ) : (
-                'Login'
-              )}
-            </button>
-
-          </form>
-
-          {/* Footer note */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <p className="text-xs text-gray-600 text-center">
-              This is a secure admin-only portal. Unauthorized access attempts are logged.
-            </p>
           </div>
-
-        </div>
 
         </div>{/* End my-auto wrapper */}
       </div>
