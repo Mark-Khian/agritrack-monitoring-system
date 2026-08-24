@@ -118,14 +118,15 @@ async function startServer() {
         // 4. Start HTTP/HTTPS servers
         const PORT = process.env.PORT || 5000;
         const HTTPS_PORT = process.env.HTTPS_PORT || 5443;
+        const BIND_HOST = process.env.BIND_HOST || '0.0.0.0';
         const sslCerts = generateCerts();
 
-        http.createServer(app).listen(PORT, () => {
+        http.createServer(app).listen(PORT, BIND_HOST, () => {
             console.log(`🌐 HTTP  running on http://localhost:${PORT}`);
         });
 
         if (sslCerts) {
-            https.createServer(sslCerts, app).listen(HTTPS_PORT, () => {
+            https.createServer(sslCerts, app).listen(HTTPS_PORT, BIND_HOST, () => {
                 console.log(`🔒 HTTPS running on https://localhost:${HTTPS_PORT}`);
             });
         } else {
