@@ -137,7 +137,7 @@ const Landing = () => {
   };
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden">
+    <div className="relative min-h-[100dvh] w-full overflow-hidden">
       {/* Full-screen background image */}
       <div
         className="absolute inset-0 bg-cover bg-center scale-105 blur-[8px]"
@@ -203,11 +203,11 @@ const Landing = () => {
       )}
 
       {/* Admin Login Container */}
-      <div className="relative z-10 min-h-[100dvh] w-full flex flex-col overflow-y-auto px-4 sm:px-6 lg:px-8 py-[clamp(24px,4vh,56px)]">
+      <div className="relative z-10 min-h-[100dvh] w-full flex flex-col overflow-y-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-[clamp(24px,4vh,56px)]">
         <div className="my-auto w-full flex flex-col items-center">
 
           {/* Logo and Title */}
-          <div className="flex flex-col items-center text-center w-full mb-[clamp(20px,3vh,36px)]">
+          <div className="flex flex-col items-center text-center w-full mb-5 sm:mb-[clamp(20px,3vh,36px)]">
             <img
               src={crmLogo}
               alt="AgriTrack CRM Logo"
@@ -219,13 +219,13 @@ const Landing = () => {
           </div>
 
           {/* Login Card */}
-          <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-8 sm:p-10 border border-white/20">
+          <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-10 border border-white/20">
 
-            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Admin Login</h2>
-            <p className="text-gray-600 text-sm mb-8">Enter your credentials to access the system</p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1 sm:mb-2">Admin Login</h2>
+            <p className="text-gray-600 text-sm mb-5 sm:mb-8">Enter your credentials to access the system</p>
 
             {/* Login Form */}
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
 
               {/* Username Input */}
               <div>
@@ -295,7 +295,7 @@ const Landing = () => {
             </form>
 
             {/* Footer note */}
-            <div className="mt-8 pt-6 border-t border-gray-200">
+            <div className="mt-5 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-200">
               <p className="text-xs text-gray-600 text-center">
                 This is a secure admin-only portal. Unauthorized access attempts are logged.
               </p>
