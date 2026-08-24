@@ -8,6 +8,7 @@ import Activities from './pages/Activities';
 import Harvests from './pages/Harvests';
 import Analytics from './pages/Analytics';
 import Calendar from './pages/Calendar';
+import NotFound from './pages/NotFound';
 
 const ProtectedRoute = ({ children }) => {
   const { token, isInitializing } = useAuth();
@@ -66,7 +67,7 @@ function App() {
       } />
 
       {/* Fallback - redirect unknown routes to home */}
-      <Route path="*" element={<Navigate to="/" />} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }
