@@ -23,6 +23,9 @@ export const logoutUser = () => API.post('/auth/logout');
 export const getSessionsUser = () => API.get('/auth/sessions');
 export const logoutAllUser = () => API.post('/auth/logout-all');
 export const refreshTokenUser = (data) => API.post('/auth/refresh', data);
+export const resolveLocation = (location) => API.post('/auth/resolve-location', { location });
+export const updateFarmLocation = (data) => API.put('/auth/farm-location', data);
+export const deleteFarmLocation = () => API.delete('/auth/farm-location');
 
 // ── Plantings ─────────────────────────────
 // params: { status, limit } — use status='active' for harvest/activity dropdowns
@@ -58,7 +61,7 @@ export const deleteHarvest = (id) => API.delete(`/harvests/${id}`);
 
 // ── Weather Proxy ─────────────────────────
 // Fetches weather via backend proxy (caches 30 min server-side)
-export const getWeather = (location) => API.get('/weather', { params: { location } });
+export const getWeather = () => API.get('/weather');
 
 // ── Notifications ─────────────────────────
 export const getNotifications = () => API.get('/notifications');

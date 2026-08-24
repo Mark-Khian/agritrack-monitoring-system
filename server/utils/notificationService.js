@@ -22,7 +22,6 @@ const https = require('https');
 // ── Internal weather helper (mirrors weatherController but headless) ──────────
 
 const API_KEY = process.env.OPENWEATHER_API_KEY;
-const DEFAULT_LOCATION = (process.env.DEFAULT_WEATHER_LOCATION || 'Cabanatuan').trim();
 const WEATHER_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours (scheduler runs every 12h)
 const _weatherCache = new Map();
 
@@ -39,44 +38,30 @@ const httpsGet = (url) =>
     });
 
 /**
- * Fetch rain status for a location (city name string).
+ * Fetch rain status for latitude and longitude.
  * Returns { rainExpected: bool } or null on error.
  */
-const fetchRainStatus = async (location) => {
+const fetchRainStatus = async (lat, lon) => {
     if (!API_KEY) return null;
 
-    const cacheKey = location.toLowerCase().trim();
+    const cacheKey = `${parseFloat(lat).toFixed(4)},${parseFloat(lon).toFixed(4)}`;
     const cached = _weatherCache.get(cacheKey);
     if (cached && (Date.now() - cached.cachedAt) < WEATHER_CACHE_TTL_MS) {
         return cached.data;
     }
 
     try {
-        const geocode = async (q) => {
-            const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(q)}&limit=1&appid=${API_KEY}`;
-            const geoData = await httpsGet(geoUrl);
-            if (!geoData || geoData.length === 0) return null;
-            return geoData[0];
-        };
-
-        let resolved = await geocode(location);
-        if (!resolved && DEFAULT_LOCATION && DEFAULT_LOCATION.toLowerCase() !== location.toLowerCase()) {
-            resolved = await geocode(DEFAULT_LOCATION);
-        }
-        if (!resolved) return null;
-
-        const { lat, lon } = resolved;
         const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric&cnt=6`;
         const forecastRes = await httpsGet(forecastUrl);
 
         const next6 = (forecastRes.list || []).slice(0, 6);
         const rainExpected = next6.some(f => f.weather[0]?.id >= 500 && f.weather[0]?.id < 600);
 
-        const data = { rainExpected, location };
+        const data = { rainExpected };
         _weatherCache.set(cacheKey, { data, cachedAt: Date.now() });
         return data;
     } catch (err) {
-        console.error(`[NotifService] Weather fetch error for "${location}":`, err.message);
+        console.error(`[NotifService] Weather fetch error for coords ${lat}, ${lon}:`, err.message);
         return null;
     }
 };
@@ -89,17 +74,24 @@ const getAdminId = async () => {
     if (ADMIN_ID) return ADMIN_ID;
     try {
         const [rows] = await db.query(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`);
-        ADMIN_ID = rows.length > 0 ? rows[0].id : 1;
-    } catch {
-        ADMIN_ID = 1;
+        if (rows.length > 0) {
+            ADMIN_ID = rows[0].id;
+            return ADMIN_ID;
+        }
+    } catch (err) {
+        console.error('[NotifService] Failed to query admin ID:', err.message);
     }
-    return ADMIN_ID;
+    return null;
 };
 
 // ── Safe insert ───────────────────────────────────────────────────────────────
 
 const insertNotification = async (type, title, message, relatedId = null) => {
     const adminId = await getAdminId();
+    if (!adminId) {
+        console.log(`[NotifService] Generation skipped — no valid admin account found for notification type: ${type}`);
+        return;
+    }
     try {
         await db.query(
             `INSERT IGNORE INTO notifications (user_id, type, title, message, related_id, notif_date)
@@ -291,31 +283,31 @@ const generateWeatherNotifications = async () => {
     }
 
     try {
-        // Get distinct plot locations per user (embedded in plantings)
-        const [fields] = await db.query(
-            `SELECT DISTINCT
-                pl.user_id   AS user_id,
-                COALESCE(pl.field_location, pl.field_name) AS location,
-                pl.field_name AS field_name
-             FROM plantings pl
-             WHERE pl.deleted_at IS NULL
-               AND COALESCE(pl.field_location, pl.field_name) IS NOT NULL
-               AND COALESCE(pl.field_location, pl.field_name) != ''`
-        );
-
-        for (const field of fields) {
-            const weather = await fetchRainStatus(field.location);
-            if (!weather || !weather.rainExpected) continue;
-
-            await insertNotification(
-                'weather_alert',
-                `Rain Expected at ${field.field_name || field.location}`,
-                `Rain is forecast in the next 18 hours near ${field.location}. Consider postponing pesticide applications, and check drainage in low-lying fields.`,
-                null  // weather alerts have no single related_id; null groups them per day
-            );
+        const [users] = await db.query(`SELECT farm_latitude, farm_longitude, farm_location_name FROM users WHERE role = 'admin' LIMIT 1`);
+        if (users.length === 0 || users[0].farm_latitude == null || users[0].farm_longitude == null) {
+            console.log('[NotifService] Weather alerts skipped — farm location not configured.');
+            return;
         }
 
-        console.log(`[NotifService] weather_alert: checked ${fields.length} field location(s)`);
+        const { farm_latitude: lat, farm_longitude: lon, farm_location_name: locationName } = users[0];
+
+        const [activePlantings] = await db.query(`SELECT COUNT(*) as count FROM plantings WHERE status = 'active' AND deleted_at IS NULL`);
+        if (activePlantings[0].count === 0) {
+            console.log('[NotifService] Weather alerts skipped — no active plantings found.');
+            return;
+        }
+
+        const weather = await fetchRainStatus(lat, lon);
+        if (!weather || !weather.rainExpected) return;
+
+        await insertNotification(
+            'weather_alert',
+            `Rain Expected at ${locationName || 'Farm'}`,
+            `Rain is forecast in the next 18 hours near ${locationName || 'your farm'}. Consider postponing pesticide applications, and check drainage in low-lying fields.`,
+            null  // weather alerts have no single related_id; null groups them per day
+        );
+
+        console.log(`[NotifService] weather_alert: generated for farm location`);
     } catch (err) {
         console.error('[NotifService] generateWeatherNotifications error:', err.message);
     }

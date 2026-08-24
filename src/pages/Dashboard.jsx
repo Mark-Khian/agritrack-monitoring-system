@@ -228,7 +228,6 @@ const Dashboard = () => {
 
     // Weather / rain alert state
     const [rainExpected, setRainExpected] = useState(false);
-    const [weatherLocation, setWeatherLocation] = useState('Cabanatuan');
 
     useEffect(() => {
         if (!token) return;
@@ -276,16 +275,10 @@ const Dashboard = () => {
                 setHarvestYield(harvestByMonth(harvests));
                 setCropDistribution(groupByField(plantings, 'variety'));
 
-                // Prefer a real place name for weather lookups.
-                // field_location contains the city name. If not set, default to 'Cabanatuan'.
-                const fieldLocation = (plantings.length > 0 && plantings[0].field_location)
-                    ? plantings[0].field_location
-                    : 'Cabanatuan';
-                setWeatherLocation(fieldLocation);
                 // Fetch rain alert from backend weather proxy
                 let rainExp = false;
                 try {
-                    const wRes = await getWeather(fieldLocation);
+                    const wRes = await getWeather();
                     rainExp = wRes.data.rainExpected || false;
                     setRainExpected(rainExp);
                 } catch { /* weather is non-critical */ }
@@ -304,7 +297,6 @@ const Dashboard = () => {
                     activitiesPerMonth: groupByMonth(activities, 'activity_date'),
                     _harvestYield: harvestByMonth(harvests),
                     _cropDistribution: groupByField(plantings, 'variety'),
-                    weatherLocation: fieldLocation,
                     rainExpected: rainExp
                 };
             } catch (err) {
@@ -787,7 +779,6 @@ const Dashboard = () => {
             {/* Weather Widget (Horizontal on Desktop, Vertical on Mobile) */}
             <div className="w-full">
                 <WeatherWidget
-                    location={weatherLocation}
                     variant="dashboard"
                     rainExpected={rainExpected}
                 />

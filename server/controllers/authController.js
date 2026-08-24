@@ -1,6 +1,21 @@
 const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
+
+let psgcData = [];
+try {
+    const dataPath = path.join(__dirname, '../data/psgc.json');
+    if (fs.existsSync(dataPath)) {
+        const parsed = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+        psgcData = parsed.data || [];
+        console.log(`Loaded ${psgcData.length} PSGC records.`);
+    }
+} catch (e) {
+    console.error('Failed to load PSGC data:', e);
+}
 const { privateKey, publicKey } = require('../config/keys');
 const logActivity = require('../middleware/logger');
 const {
@@ -295,4 +310,199 @@ const refreshToken = async (req, res) => {
     }
 };
 
-module.exports = { login, logout, getSessions, logoutAllDevices, refreshToken };
+// ── Helper: HTTPS GET ─────────────────────
+const httpsGet = (url) =>
+    new Promise((resolve, reject) => {
+        https.get(url, (res) => {
+            let raw = '';
+            res.on('data', (chunk) => { raw += chunk; });
+            res.on('end', () => {
+                try { resolve(JSON.parse(raw)); }
+                catch (e) { reject(new Error('Invalid JSON')); }
+            });
+        }).on('error', reject);
+    });
+
+// ── RESOLVE LOCATION (PREVIEW) ────────────
+const resolveLocation = async (req, res) => {
+    const { location } = req.body;
+    if (!location || location.trim().length === 0) {
+        return res.status(400).json({ message: 'Location is required.' });
+    }
+
+    try {
+        const rawQuery = location.trim().replace(/[\s,\/-]+/g, ' ').toLowerCase();
+
+        const queryTokens = rawQuery.split(' ').filter(Boolean);
+
+        const matchTokens = (str, tokens) => {
+            if (!str) return false;
+            const words = str.toLowerCase().replace(/[\s,\/-]+/g, ' ').split(' ').filter(Boolean);
+            return tokens.every(token => words.some(w => w.startsWith(token)));
+        };
+
+        const matches = psgcData
+            .filter(item => {
+                return matchTokens(item.resolvedName, queryTokens);
+            })
+            .sort((a, b) => {
+                const aPrimary = (a.barangay || a.municipalityCity || a.province || '').toLowerCase();
+                const bPrimary = (b.barangay || b.municipalityCity || b.province || '').toLowerCase();
+
+                const aExact = aPrimary === rawQuery;
+                const bExact = bPrimary === rawQuery;
+
+                if (aExact && !bExact) return -1;
+                if (bExact && !aExact) return 1;
+
+                if (aExact && bExact) {
+                    const typeScore = (t) => {
+                        if (t === 'Province') return 4;
+                        if (t === 'City') return 3;
+                        if (t === 'Municipality') return 2;
+                        if (t === 'Barangay') return 1;
+                        return 0;
+                    };
+                    const aScore = typeScore(a.type);
+                    const bScore = typeScore(b.type);
+                    if (aScore !== bScore) return bScore - aScore;
+                }
+
+                const aHasExactComp = (a.barangay && a.barangay.toLowerCase() === rawQuery) ||
+                                      (a.municipalityCity && a.municipalityCity.toLowerCase() === rawQuery) ||
+                                      (a.province && a.province.toLowerCase() === rawQuery);
+                const bHasExactComp = (b.barangay && b.barangay.toLowerCase() === rawQuery) ||
+                                      (b.municipalityCity && b.municipalityCity.toLowerCase() === rawQuery) ||
+                                      (b.province && b.province.toLowerCase() === rawQuery);
+
+                if (aHasExactComp && !bHasExactComp) return -1;
+                if (bHasExactComp && !aHasExactComp) return 1;
+
+                const aPrimaryPrefix = aPrimary.startsWith(rawQuery);
+                const bPrimaryPrefix = bPrimary.startsWith(rawQuery);
+                if (aPrimaryPrefix && !bPrimaryPrefix) return -1;
+                if (bPrimaryPrefix && !aPrimaryPrefix) return 1;
+
+                const aHasPrefixComp = (a.barangay && a.barangay.toLowerCase().startsWith(rawQuery)) ||
+                                       (a.municipalityCity && a.municipalityCity.toLowerCase().startsWith(rawQuery)) ||
+                                       (a.province && a.province.toLowerCase().startsWith(rawQuery));
+                const bHasPrefixComp = (b.barangay && b.barangay.toLowerCase().startsWith(rawQuery)) ||
+                                       (b.municipalityCity && b.municipalityCity.toLowerCase().startsWith(rawQuery)) ||
+                                       (b.province && b.province.toLowerCase().startsWith(rawQuery));
+                if (aHasPrefixComp && !bHasPrefixComp) return -1;
+                if (bHasPrefixComp && !aHasPrefixComp) return 1;
+
+                return a.resolvedName.length - b.resolvedName.length;
+            })
+            .slice(0, 5);
+
+        if (matches.length === 0) {
+            return res.status(404).json({ message: 'Location could not be found. Please enter a more specific farm location.' });
+        }
+
+        res.status(200).json({ suggestions: matches });
+    } catch (err) {
+        console.error('Resolve location error:', err.message);
+        res.status(500).json({ message: 'Failed to resolve location.' });
+    }
+};
+
+const updateFarmLocation = async (req, res) => {
+    const { psgcCode } = req.body;
+
+    if (!psgcCode) {
+        return res.status(400).json({ message: 'Valid PSGC code is required.' });
+    }
+
+    const API_KEY = process.env.OPENWEATHER_API_KEY;
+    if (!API_KEY) {
+        return res.status(503).json({ message: 'Server missing OpenWeather API Key.' });
+    }
+
+    try {
+        const record = psgcData.find(p => p.psgcCode === psgcCode);
+        if (!record) {
+            return res.status(400).json({ message: 'Unable to verify the selected Philippine farm location.' });
+        }
+
+        const queryStr = record.resolvedName.split('/').map(p => p.trim()).filter(p => p !== 'PH').join(', ');
+        const scopedQuery = `${queryStr},PH`;
+
+        const directUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(scopedQuery)}&limit=5&appid=${API_KEY}`;
+        const directData = await httpsGet(directUrl);
+
+        const phResults = directData ? directData.filter(r => r.country === 'PH') : [];
+        if (phResults.length === 0) {
+            return res.status(400).json({ message: 'Unable to verify coordinates for the selected Philippine farm location.' });
+        }
+
+        const bestMatch = phResults[0];
+
+        const finalLat = bestMatch.lat;
+        const finalLon = bestMatch.lon;
+        const finalResolvedName = record.resolvedName;
+
+        // req.user.id is the admin since route is protected
+        await db.query(
+            `UPDATE users
+             SET farm_latitude = ?, farm_longitude = ?, farm_location_name = ?
+             WHERE id = ?`,
+            [finalLat, finalLon, finalResolvedName, req.user.id]
+        );
+
+        // Also log the settings change
+        await logActivity({
+            user_id: req.user.id,
+            action: 'UPDATE_FARM_LOCATION',
+            entity: 'users',
+            entity_id: req.user.id,
+            ip_address: req.ip
+        });
+
+        res.status(200).json({ message: 'Farm location saved successfully.' });
+    } catch (err) {
+        console.error('Update farm location error:', err.message);
+        res.status(500).json({ message: 'Failed to update farm location.' });
+    }
+};
+
+const removeFarmLocation = async (req, res) => {
+    let connection;
+    try {
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+
+        await connection.query(
+            `UPDATE users
+             SET farm_latitude = NULL, farm_longitude = NULL, farm_location_name = NULL
+             WHERE id = ?`,
+            [req.user.id]
+        );
+
+        await connection.query(
+            `DELETE FROM notifications
+             WHERE type = 'weather_alert' AND user_id = ?`,
+            [req.user.id]
+        );
+
+        await connection.commit();
+
+        await logActivity({
+            user_id: req.user.id,
+            action: 'REMOVE_FARM_LOCATION',
+            entity: 'users',
+            entity_id: req.user.id,
+            ip_address: req.ip
+        });
+
+        res.status(200).json({ message: 'Farm location removed successfully.' });
+    } catch (err) {
+        if (connection) await connection.rollback();
+        console.error('Remove farm location error:', err.message);
+        res.status(500).json({ message: 'Failed to remove farm location.' });
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
+module.exports = { login, logout, getSessions, logoutAllDevices, refreshToken, resolveLocation, updateFarmLocation, removeFarmLocation };

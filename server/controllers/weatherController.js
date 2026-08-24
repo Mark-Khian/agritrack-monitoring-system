@@ -5,10 +5,10 @@
  */
 
 const https = require('https');
+const db = require('../config/db'); // Import DB connection
 
 const API_KEY = process.env.OPENWEATHER_API_KEY;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const DEFAULT_LOCATION = (process.env.DEFAULT_WEATHER_LOCATION || 'Cabanatuan').trim();
 
 // In-memory cache: { [locationKey]: { data, cachedAt } }
 const weatherCache = new Map();
@@ -39,46 +39,33 @@ const getWeather = async (req, res) => {
         });
     }
 
-    const requestedLocation = (req.query.location || '').trim();
-    const location = requestedLocation;
-    if (!location) {
-        return res.status(400).json({ message: 'location query param is required.' });
-    }
-
-    const cacheKey = location.toLowerCase();
-    const cached   = weatherCache.get(cacheKey);
-
-    if (cached && (Date.now() - cached.cachedAt) < CACHE_TTL_MS) {
-        return res.status(200).json({ ...cached.data, fromCache: true });
-    }
-
     try {
-        // Step 1 — Geocode city name to lat/lon
-        const geocode = async (q) => {
-            const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(q)}&limit=1&appid=${API_KEY}`;
-            const geoData = await httpsGet(geoUrl);
-            if (!geoData || geoData.length === 0) return null;
-            const { lat, lon, name, country } = geoData[0];
-            return { lat, lon, name, country };
-        };
-
-        let resolved = await geocode(location);
-        let usedFallback = false;
-        if (!resolved) {
-            if (DEFAULT_LOCATION && DEFAULT_LOCATION.toLowerCase() !== location.toLowerCase()) {
-                resolved = await geocode(DEFAULT_LOCATION);
-                usedFallback = !!resolved;
-            }
+        // Fetch farm location from users table (single admin)
+        const [users] = await db.query(`SELECT farm_latitude, farm_longitude, farm_location_name FROM users WHERE role = 'admin' LIMIT 1`);
+        if (users.length === 0) {
+            return res.status(500).json({ message: 'Admin user not found.' });
         }
-        if (!resolved) {
-            return res.status(404).json({
-                message: `Location "${requestedLocation}" not found.`,
-                requestedLocation,
-                fallbackTried: DEFAULT_LOCATION || null,
+
+        const admin = users[0];
+        if (admin.farm_latitude == null || admin.farm_longitude == null) {
+            return res.status(400).json({
+                message: 'Farm weather location has not been configured.',
+                farmNotConfigured: true
             });
         }
 
-        const { lat, lon, name, country } = resolved;
+        const lat = parseFloat(admin.farm_latitude);
+        const lon = parseFloat(admin.farm_longitude);
+        const name = admin.farm_location_name || 'Farm Location';
+        const country = '';
+
+        // Deterministic cache key based on coordinates
+        const cacheKey = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+        const cached = weatherCache.get(cacheKey);
+
+        if (cached && (Date.now() - cached.cachedAt) < CACHE_TTL_MS) {
+            return res.status(200).json({ ...cached.data, fromCache: true });
+        }
 
         // Step 2 — Parallel: current weather + 5-day forecast + UV index
         const currentUrl  = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`;
@@ -96,8 +83,8 @@ const getWeather = async (req, res) => {
         const rainExpected = next6.some(f => f.weather[0]?.id >= 500 && f.weather[0]?.id < 600);
 
         const payload = {
-            requestedLocation,
-            usedFallback,
+            requestedLocation: name,
+            usedFallback: false,
             location: { name, country, lat, lon },
             current,
             forecast: forecastRes.list || [],

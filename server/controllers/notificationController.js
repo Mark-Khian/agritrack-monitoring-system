@@ -12,23 +12,25 @@ const getNotifications = async (req, res) => {
         const [rows] = await db.query(
             `(SELECT id, type, title, message, related_id, is_read, created_at
               FROM notifications
-              WHERE type = 'weather_alert'
+              WHERE type = 'weather_alert' AND user_id = ?
               ORDER BY created_at DESC
               LIMIT 40)
              UNION ALL
              (SELECT id, type, title, message, related_id, is_read, created_at
               FROM notifications
-              WHERE type != 'weather_alert'
+              WHERE type != 'weather_alert' AND user_id = ?
               ORDER BY created_at DESC
               LIMIT 40)
-             ORDER BY created_at DESC`
+             ORDER BY created_at DESC`,
+             [req.user.id, req.user.id]
         );
 
         const [[{ unread_weather, unread_activity }]] = await db.query(
             `SELECT 
                 SUM(CASE WHEN type = 'weather_alert' THEN 1 ELSE 0 END) AS unread_weather,
                 SUM(CASE WHEN type != 'weather_alert' THEN 1 ELSE 0 END) AS unread_activity
-             FROM notifications WHERE is_read = 0`
+             FROM notifications WHERE is_read = 0 AND user_id = ?`,
+             [req.user.id]
         );
 
         res.status(200).json({ 
@@ -46,8 +48,8 @@ const getNotifications = async (req, res) => {
 const markAsRead = async (req, res) => {
     try {
         const [result] = await db.query(
-            `UPDATE notifications SET is_read = 1 WHERE id = ?`,
-            [req.params.id]
+            `UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?`,
+            [req.params.id, req.user.id]
         );
 
         if (result.affectedRows === 0)
@@ -64,8 +66,8 @@ const markAsRead = async (req, res) => {
 const markAllRead = async (req, res) => {
     try {
         const { group } = req.query;
-        let sql = `UPDATE notifications SET is_read = 1 WHERE is_read = 0`;
-        const params = [];
+        let sql = `UPDATE notifications SET is_read = 1 WHERE is_read = 0 AND user_id = ?`;
+        const params = [req.user.id];
         
         if (group === 'weather') {
             sql += ` AND type = 'weather_alert'`;
@@ -85,8 +87,8 @@ const markAllRead = async (req, res) => {
 const deleteNotification = async (req, res) => {
     try {
         const [result] = await db.query(
-            `DELETE FROM notifications WHERE id = ?`,
-            [req.params.id]
+            `DELETE FROM notifications WHERE id = ? AND user_id = ?`,
+            [req.params.id, req.user.id]
         );
 
         if (result.affectedRows === 0)

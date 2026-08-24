@@ -1,11 +1,13 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
     Wind, Droplets, Thermometer, CloudRain, MapPin, Sunset, Sun,
     Clock, CalendarDays, CloudSun, CloudLightning, CloudDrizzle,
-    CloudSnow, CloudFog, Moon, Sunrise, RefreshCw
+    CloudSnow, CloudFog, Moon, Sunrise, RefreshCw, X, Search, Loader2, Check, ChevronRight
 } from 'lucide-react';
 
-import { getWeather } from '../services/api';
+import { getWeather, resolveLocation, updateFarmLocation } from '../services/api';
+import { deleteFarmLocation } from '../services/api';
+import ConfirmDialog from './ConfirmDialog';
 
 
 let weatherCache = {
@@ -13,6 +15,7 @@ let weatherCache = {
     forecast: null,
     dailyForecast: null,
     uvIndex: null,
+    locationName: null,
     lastFetched: null,
 };
 
@@ -162,18 +165,36 @@ const hoverStyle = {
     boxShadow: '0 6px 18px rgba(0,0,0,0.2)',
 };
 
+const formatLocationDisplay = (name) => {
+    if (!name) return '';
+    return name.replace(/\s\/\s/g, ', ').replace(/,\sPH$/, ', Philippines');
+};
+
 /**
  * WeatherWidget
  * @param {string|null} location  - Farm location string (e.g. "Nueva Ecija").
  *   If provided, fetches weather via backend proxy (cached 30 min).
  *   If null/undefined, falls back to direct OpenWeatherMap call with default lat/lon.
  */
-const WeatherWidget = ({ location = null, variant = 'default', rainExpected = null }) => {
+const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
     const [weather, setWeather] = useState(weatherCache.weather);
     const [forecast, setForecast] = useState(weatherCache.forecast || []);
     const [dailyForecast, setDailyForecast] = useState(weatherCache.dailyForecast || []);
     const [uvIndex, setUvIndex] = useState(weatherCache.uvIndex);
+    const [locationName, setLocationName] = useState(weatherCache.locationName || 'Farm Location');
     const [loading, setLoading] = useState(!weatherCache.weather);
+
+    const [isConfigured, setIsConfigured] = useState(true);
+
+    const [showConfigModal, setShowConfigModal] = useState(false);
+    const [searchLocation, setSearchLocation] = useState('');
+    const [resolvedLocation, setResolvedLocation] = useState(null);
+    const [configLoading, setConfigLoading] = useState(false);
+    const [configError, setConfigError] = useState('');
+    const [suggestions, setSuggestions] = useState([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+    const dropdownRef = useRef(null);
     const [error, setError] = useState(null);
     const [lastUpdated, setLastUpdated] = useState(
         weatherCache.lastFetched
@@ -216,26 +237,21 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
         setLoading(true);
         setError(null);
         try {
-            let current, forecastList, uviValue, daily;
-
-            if (location) {
-                // ── Backend proxy route (farm location) ──────────────────────
-                const res = await getWeather(location);
-                const data = res.data;
-                current = data.current;
-                forecastList = data.forecast || [];
-                uviValue = data.uvIndex ?? null;
-                daily = groupForecastByDay(forecastList);
-                forecastList = forecastList.slice(0, 6);
-            } else {
-                throw new Error('No location provided for weather widget.');
-            }
+            const res = await getWeather();
+            const data = res.data;
+            const current = data.current;
+            let forecastList = data.forecast || [];
+            const uviValue = data.uvIndex ?? null;
+            const daily = groupForecastByDay(forecastList);
+            forecastList = forecastList.slice(0, 6);
+            const locName = data.location?.name || 'Farm Location';
 
             weatherCache = {
                 weather: current,
                 forecast: forecastList,
                 dailyForecast: daily,
                 uvIndex: uviValue,
+                locationName: locName,
                 lastFetched: Date.now(),
             };
 
@@ -243,13 +259,19 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
             setForecast(forecastList);
             setDailyForecast(daily);
             setUvIndex(uviValue);
+            setLocationName(locName);
+            setIsConfigured(true);
             setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        } catch {
-            setError('Unable to load weather data.');
+        } catch (err) {
+            if (err.response?.data?.farmNotConfigured) {
+                setIsConfigured(false);
+            } else {
+                setError('Unable to load weather data.');
+            }
         } finally {
             setLoading(false);
         }
-    }, [location]);
+    }, []);
 
     useEffect(() => {
         fetchWeather();
@@ -262,7 +284,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
             clearInterval(interval);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [fetchWeather]); // re-fetch if farm location changes
+    }, [fetchWeather]);
 
     const formattedTime = now.toLocaleTimeString('en-PH', {
         hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
@@ -296,6 +318,299 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
         transform: 'translateY(-3px)',
         boxShadow: isDarkMode ? '0 6px 18px rgba(0,0,0,0.2)' : '0 6px 18px rgba(0,0,0,0.08)',
     };
+
+
+    const handleSearch = async () => {
+        if (!searchLocation.trim() || searchLocation.trim().length < 3) return;
+        setConfigLoading(true);
+        setConfigError('');
+
+        try {
+            const res = await resolveLocation(searchLocation);
+            setSuggestions(res.data.suggestions || []);
+            setShowSuggestions(true);
+        } catch (err) {
+            setConfigError(err.response?.data?.message || 'Failed to resolve location.');
+            setSuggestions([]);
+            setShowSuggestions(false);
+        } finally {
+            setConfigLoading(false);
+        }
+    };
+
+    const handleInputChange = (e) => {
+        const val = e.target.value;
+        setSearchLocation(val);
+        if (resolvedLocation && val !== resolvedLocation.resolvedName) {
+            setResolvedLocation(null);
+        }
+    };
+
+    useEffect(() => {
+        let isCancelled = false;
+
+        if (searchLocation.trim().length < 3) {
+            setSuggestions([]);
+            setShowSuggestions(false);
+            return;
+        }
+
+        if (resolvedLocation && resolvedLocation.resolvedName === searchLocation) {
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            setConfigLoading(true);
+            setConfigError('');
+            try {
+                const res = await resolveLocation(searchLocation);
+                if (!isCancelled) {
+                    setSuggestions(res.data.suggestions || []);
+                    setShowSuggestions(true);
+                    setConfigLoading(false);
+                }
+            } catch (err) {
+                if (!isCancelled) {
+                    setSuggestions([]);
+                    setShowSuggestions(false);
+                    setConfigLoading(false);
+                }
+            }
+        }, 400);
+
+        return () => {
+            isCancelled = true;
+            clearTimeout(timer);
+        };
+    }, [searchLocation, resolvedLocation]);
+
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+                setShowSuggestions(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const handleCloseModal = () => {
+        setShowConfigModal(false);
+        setSearchLocation('');
+        setResolvedLocation(null);
+        setSuggestions([]);
+        setConfigError('');
+        setShowSuggestions(false);
+    };
+
+    const handleSave = async () => {
+        if (!resolvedLocation) return;
+        setConfigLoading(true);
+        setConfigError('');
+
+        try {
+            await updateFarmLocation({ psgcCode: resolvedLocation.psgcCode });
+            setSearchLocation('');
+            setShowConfigModal(false);
+            setResolvedLocation(null);
+            setSuggestions([]);
+            setShowSuggestions(false);
+
+            weatherCache.lastFetched = null;
+            await fetchWeather(true);
+        } catch (err) {
+            setConfigError(err.response?.data?.message || 'Failed to save location.');
+        } finally {
+            setConfigLoading(false);
+        }
+    };
+
+    const handleRemoveLocation = () => {
+        setShowRemoveConfirm(true);
+    };
+
+    const confirmRemoveLocation = async () => {
+        try {
+            await deleteFarmLocation();
+            weatherCache = {
+                weather: null,
+                forecast: null,
+                dailyForecast: null,
+                uvIndex: null,
+                locationName: null,
+                lastFetched: null,
+            };
+            setLocationName('Farm Location');
+            setIsConfigured(false);
+            setWeather(null);
+            setForecast([]);
+            setDailyForecast([]);
+            setSearchLocation('');
+            setShowRemoveConfirm(false);
+            setShowConfigModal(false);
+        } catch (err) {
+            setConfigError(err.response?.data?.message || 'Failed to remove location.');
+            setShowRemoveConfirm(false);
+        }
+    };
+
+    const renderModal = () => {
+        if (!showConfigModal) return null;
+
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                <div
+                    className={`w-full max-w-md rounded-2xl p-6 shadow-xl ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}`}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-xl font-bold">Farm Weather Location</h2>
+                        <button onClick={handleCloseModal} className={`p-1 rounded-lg ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
+                            <X size={20} />
+                        </button>
+                    </div>
+
+                    <p className={`text-sm mb-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        Set the location of your farm to receive accurate weather forecasts and alerts.
+                    </p>
+
+                    <div className="flex flex-col gap-2 mb-4 relative" ref={dropdownRef}>
+                        <div className="flex gap-2 w-full">
+                            <input
+                                type="text"
+                                value={searchLocation}
+                                onChange={handleInputChange}
+                                placeholder="Search a city, municipality, or barangay"
+                                className={`flex-1 px-4 py-2 rounded-xl border outline-none focus:ring-2 focus:ring-emerald-500/50 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSearch();
+                                    if (e.key === 'Escape') setShowSuggestions(false);
+                                }}
+                            />
+                            <button
+                                onClick={handleSearch}
+                                disabled={configLoading}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center justify-center transition-colors disabled:opacity-50 shrink-0"
+                                type="button"
+                            >
+                                {configLoading && suggestions.length === 0 ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
+                            </button>
+                        </div>
+
+                        {showSuggestions && (
+                            <div className={`absolute top-full left-0 right-0 mt-2 z-50 rounded-xl border shadow-xl overflow-hidden max-h-60 overflow-y-auto ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                                {suggestions.length > 0 ? (
+                                    suggestions.map((sug, i) => (
+                                        <div
+                                            key={i}
+                                            onClick={() => {
+                                                setResolvedLocation(sug);
+                                                setSearchLocation(sug.resolvedName);
+                                                setShowSuggestions(false);
+                                            }}
+                                            className={`p-3 flex items-start gap-3 cursor-pointer transition-colors ${isDarkMode ? 'hover:bg-slate-700 border-b border-slate-700 last:border-0' : 'hover:bg-slate-50 border-b border-slate-100 last:border-0'}`}
+                                        >
+                                            <MapPin className="text-emerald-500 mt-0.5 shrink-0" size={16} />
+                                            <div>
+                                                <p className="font-medium text-sm leading-tight">{formatLocationDisplay(sug.resolvedName)}</p>
+                                                {(sug.province || sug.municipalityCity) && (
+                                                    <p className={`text-[11px] mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                        {[sug.barangay, sug.municipalityCity, sug.province].filter(Boolean).join(', ')}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="p-4 text-center text-sm text-slate-500">
+                                        {configLoading ? 'Searching...' : 'No locations found in the Philippines'}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {configError && (
+                        <p className="text-sm text-red-500 mb-4">{configError}</p>
+                    )}
+
+                    {resolvedLocation && (
+                        <div className={`p-4 rounded-xl mb-4 border ${isDarkMode ? 'bg-slate-900/50 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'}`}>
+                            <div className="flex items-start gap-3">
+                                <MapPin className="text-emerald-500 mt-1 shrink-0" size={18} />
+                                <div>
+                                    <p className="font-semibold text-sm">{formatLocationDisplay(resolvedLocation.resolvedName)}</p>
+                                    <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                        PSGC: {resolvedLocation.psgcCode}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="flex justify-end gap-3 mt-6">
+                        <button
+                            onClick={handleCloseModal}
+                            className={`px-4 py-2 rounded-xl font-medium ${isDarkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}
+                            type="button"
+                        >
+                            Cancel
+                        </button>
+                        {isConfigured && (
+                            <button
+                                onClick={handleRemoveLocation}
+                                className="px-4 py-2 rounded-xl font-medium transition-colors bg-red-600 hover:bg-red-700 text-white"
+                                type="button"
+                            >
+                                Remove
+                            </button>
+                        )}
+                        <button
+                            onClick={handleSave}
+                            disabled={!resolvedLocation || configLoading}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium flex items-center gap-2 disabled:opacity-50 transition-colors"
+                            type="button"
+                        >
+                            {configLoading && resolvedLocation && <Loader2 size={16} className="animate-spin" />}
+                            Save
+                        </button>
+                    </div>
+                </div>
+
+                <ConfirmDialog
+                    isOpen={showRemoveConfirm}
+                    onClose={() => setShowRemoveConfirm(false)}
+                    onConfirm={confirmRemoveLocation}
+                    title="Remove farm weather location?"
+                    message="Weather forecasts and location-based alerts will be unavailable until a new location is configured."
+                    confirmText="Remove Location"
+                />
+            </div>
+        );
+    };
+
+    if (!isConfigured) {
+        return (
+            <>
+                <div
+                    onClick={() => setShowConfigModal(true)}
+                    className="hover:scale-[1.01] transition-transform cursor-pointer"
+                    style={{
+                        borderRadius: '20px', padding: '1.5rem',
+                        background: isDarkMode
+                            ? 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)'
+                            : 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+                        minHeight: '160px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center'
+                    }}
+                >
+                    <MapPin size={28} className={isDarkMode ? 'text-emerald-400 mb-3' : 'text-emerald-600 mb-3'} />
+                    <h3 className={`font-semibold mb-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Farm Location Not Set</h3>
+                    <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Click to configure your farm location for accurate weather tracking.</p>
+                </div>
+                {renderModal()}
+            </>
+        );
+    }
 
     if (loading) return (
         <div style={{
@@ -338,7 +653,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
         const humidity = weather?.main?.humidity ?? '--';
         const windKmh = weather?.wind?.speed != null ? Math.round(weather.wind.speed * 3.6) : null;
         const rainProb = rainChance ?? 0;
-        const locationLabel = location || weather?.name || 'Farm Location';
+        const locationLabel = locationName;
 
         // ── Smart recommendation — highest-priority condition wins ────────────
         const rainIsHigh = typeof rainExpected === 'boolean' ? rainExpected : rainProb > 60;
@@ -372,12 +687,13 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
         const textSecondary = isDarkMode ? 'text-white/80' : 'text-slate-700';
         const textMuted = isDarkMode ? 'text-white/50' : 'text-slate-500';
         const textGhost = isDarkMode ? 'text-white/40' : 'text-slate-400';
-        const cardBg = isDarkMode 
-            ? 'bg-white/8 border-white/10 hover:bg-white/12 hover:border-white/20' 
+        const cardBg = isDarkMode
+            ? 'bg-white/8 border-white/10 hover:bg-white/12 hover:border-white/20'
             : 'bg-white/40 border-white/60 hover:bg-white/60 hover:border-white/80';
         const cardShadow = isDarkMode ? 'hover:shadow-lg' : 'hover:shadow-md';
 
         return (
+            <>
             <div
                 className={`rounded-2xl overflow-hidden shadow-md flex flex-col lg:flex-row lg:items-stretch p-5 lg:p-6 gap-4 lg:gap-6 relative transition-all duration-500 ${textPrimary}`}
                 style={{
@@ -403,9 +719,14 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                         </div>
                         {/* Condition + location */}
                         <p className={`mt-2 text-sm lg:text-base capitalize font-medium ${textSecondary}`}>{description}</p>
-                        <div className={`mt-1 flex items-center gap-1 text-xs lg:text-sm ${textGhost}`}>
-                            <MapPin size={10} className="lg:size-[12px]" />
-                            <span className="truncate">{locationLabel}</span>
+                        <div
+                            onClick={() => setShowConfigModal(true)}
+                            className={`mt-1 -ml-1.5 inline-flex items-center gap-1.5 text-xs lg:text-sm cursor-pointer rounded-md px-1.5 py-1 transition-colors ${textGhost} ${isDarkMode ? 'hover:bg-white/10 hover:text-white/70' : 'hover:bg-slate-900/5 hover:text-slate-600'}`}
+                            title={formatLocationDisplay(locationLabel)}
+                        >
+                            <MapPin size={10} className="lg:size-[12px] shrink-0" />
+                            <span className="truncate">{formatLocationDisplay(locationLabel)}</span>
+                            <ChevronRight size={12} className="shrink-0 opacity-50" />
                         </div>
                     </div>
 
@@ -467,6 +788,8 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                     </div>
                 </div>
             </div>
+            {renderModal()}
+            </>
         );
     }
 
@@ -490,6 +813,7 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
     ];
 
     return (
+        <>
         <div style={{
             borderRadius: '20px', padding: '1.5rem 1.75rem',
             backgroundImage: bgGradient,
@@ -511,9 +835,15 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                         <div style={{ fontSize: '14px', opacity: 0.85, marginTop: '4px', textTransform: 'capitalize' }}>
                             {weather.weather[0].description}
                         </div>
-                        <div style={{ fontSize: '12px', opacity: 0.6, marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <MapPin size={10} />
-                            {location || weather?.name || 'Nueva Ecija'}
+                        <div
+                            onClick={() => setShowConfigModal(true)}
+                            className={`mt-1 -ml-1.5 inline-flex items-center gap-1.5 cursor-pointer rounded-md px-1.5 py-1 transition-colors ${isDarkMode ? 'text-white/60 hover:bg-white/10 hover:text-white/80' : 'text-slate-900/60 hover:bg-slate-900/5 hover:text-slate-900/80'}`}
+                            style={{ fontSize: '12px' }}
+                            title={formatLocationDisplay(locationName || weather?.name || 'Nueva Ecija')}
+                        >
+                            <MapPin size={10} className="shrink-0" />
+                            <span className="truncate max-w-[200px]">{formatLocationDisplay(locationName || weather?.name || 'Nueva Ecija')}</span>
+                            <ChevronRight size={12} className="shrink-0 opacity-50" />
                         </div>
                     </div>
                 </div>
@@ -672,6 +1002,8 @@ const WeatherWidget = ({ location = null, variant = 'default', rainExpected = nu
                 </button>
             </div>
         </div>
+        {renderModal()}
+        </>
     );
 };
 
