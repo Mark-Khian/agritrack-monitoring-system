@@ -487,14 +487,6 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                                     if (e.key === 'Escape') setShowSuggestions(false);
                                 }}
                             />
-                            <button
-                                onClick={handleSearch}
-                                disabled={configLoading}
-                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center justify-center transition-colors disabled:opacity-50 shrink-0"
-                                type="button"
-                            >
-                                {configLoading && suggestions.length === 0 ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
-                            </button>
                         </div>
 
                         {showSuggestions && (
