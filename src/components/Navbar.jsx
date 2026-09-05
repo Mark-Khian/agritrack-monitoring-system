@@ -35,6 +35,8 @@ const Navbar = ({ onOpenSidebar }) => {
                 <div className="flex items-center gap-3">
                     <NotificationBell mode="weather" />
                     <NotificationBell mode="activity" />
+                    
+                    <div className="w-[1px] h-5 bg-gray-200 dark:bg-gray-700 mx-1"></div>
 
                     <button
                         id="theme-toggle-btn"
