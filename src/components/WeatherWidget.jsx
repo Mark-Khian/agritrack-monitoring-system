@@ -330,9 +330,14 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
             setSuggestions(res.data.suggestions || []);
             setShowSuggestions(true);
         } catch (err) {
-            setConfigError(err.response?.data?.message || 'Failed to resolve location.');
-            setSuggestions([]);
-            setShowSuggestions(false);
+            if (err.response?.status === 404) {
+                setSuggestions([]);
+                setShowSuggestions(true);
+            } else {
+                setConfigError(err.response?.data?.message || 'Unable to search locations. Please try again.');
+                setSuggestions([]);
+                setShowSuggestions(false);
+            }
         } finally {
             setConfigLoading(false);
         }
@@ -341,7 +346,7 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
     const handleInputChange = (e) => {
         const val = e.target.value;
         setSearchLocation(val);
-        if (resolvedLocation && val !== resolvedLocation.resolvedName) {
+        if (resolvedLocation && val !== formatLocationDisplay(resolvedLocation.resolvedName)) {
             setResolvedLocation(null);
         }
     };
@@ -355,7 +360,7 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
             return;
         }
 
-        if (resolvedLocation && resolvedLocation.resolvedName === searchLocation) {
+        if (resolvedLocation && formatLocationDisplay(resolvedLocation.resolvedName) === searchLocation) {
             return;
         }
 
@@ -371,8 +376,14 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                 }
             } catch (err) {
                 if (!isCancelled) {
-                    setSuggestions([]);
-                    setShowSuggestions(false);
+                    if (err.response?.status === 404) {
+                        setSuggestions([]);
+                        setShowSuggestions(true);
+                    } else {
+                        setConfigError('Unable to search locations. Please try again.');
+                        setSuggestions([]);
+                        setShowSuggestions(false);
+                    }
                     setConfigLoading(false);
                 }
             }
@@ -497,7 +508,7 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                                             key={i}
                                             onClick={() => {
                                                 setResolvedLocation(sug);
-                                                setSearchLocation(sug.resolvedName);
+                                                setSearchLocation(formatLocationDisplay(sug.resolvedName));
                                                 setShowSuggestions(false);
                                             }}
                                             className={`p-3 flex items-start gap-3 cursor-pointer transition-colors ${isDarkMode ? 'hover:bg-slate-700 border-b border-slate-700 last:border-0' : 'hover:bg-slate-50 border-b border-slate-100 last:border-0'}`}
@@ -515,7 +526,12 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                                     ))
                                 ) : (
                                     <div className="p-4 text-center text-sm text-slate-500">
-                                        {configLoading ? 'Searching...' : 'No locations found in the Philippines'}
+                                        {configLoading ? 'Searching...' : (
+                                            <>
+                                                <p className="font-medium text-slate-900 dark:text-slate-100 mb-1">No Philippine location found.</p>
+                                                <p className="text-xs">Try searching for a valid city, municipality, or barangay.</p>
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -526,19 +542,45 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                         <p className="text-sm text-red-500 mb-4">{configError}</p>
                     )}
 
-                    {resolvedLocation && (
-                        <div className={`p-4 rounded-xl mb-4 border ${isDarkMode ? 'bg-slate-900/50 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'}`}>
-                            <div className="flex items-start gap-3">
-                                <MapPin className="text-emerald-500 mt-1 shrink-0" size={18} />
-                                <div>
-                                    <p className="font-semibold text-sm">{formatLocationDisplay(resolvedLocation.resolvedName)}</p>
-                                    <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                        PSGC: {resolvedLocation.psgcCode}
-                                    </p>
+                    {isConfigured && (
+                        <div className="mb-4">
+                            <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                Active Farm Location
+                            </p>
+                            <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-slate-900/50 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'}`}>
+                                <div className="flex items-start gap-3">
+                                    <MapPin className="text-emerald-500 mt-1 shrink-0" size={18} />
+                                    <div>
+                                        <p className="font-semibold text-sm">{formatLocationDisplay(locationName)}</p>
+                                        <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            Currently used for weather forecasts and alerts.
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     )}
+
+                    {resolvedLocation && (
+                        <div className="mb-4">
+                            <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                Selected Location Preview
+                            </p>
+                            <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-slate-900/50 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'}`}>
+                                <div className="flex items-start gap-3">
+                                    <MapPin className="text-emerald-500 mt-1 shrink-0" size={18} />
+                                    <div>
+                                        <p className="font-semibold text-sm">{formatLocationDisplay(resolvedLocation.resolvedName)}</p>
+                                        <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            PSGC: {resolvedLocation.psgcCode}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+
 
                     <div className="flex justify-end gap-3 mt-6">
                         <button
@@ -713,7 +755,7 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                         <p className={`mt-2 text-sm lg:text-base capitalize font-medium ${textSecondary}`}>{description}</p>
                         <div
                             onClick={() => setShowConfigModal(true)}
-                            className={`mt-1 -ml-1.5 inline-flex items-center gap-1.5 text-xs lg:text-sm cursor-pointer rounded-md px-1.5 py-1 transition-colors ${textGhost} ${isDarkMode ? 'hover:bg-white/10 hover:text-white/70' : 'hover:bg-slate-900/5 hover:text-slate-600'}`}
+                            className={`mt-1 -ml-1.5 max-w-full inline-flex items-center gap-1.5 text-xs lg:text-sm cursor-pointer rounded-md px-1.5 py-1 transition-colors ${textGhost} ${isDarkMode ? 'hover:bg-white/10 hover:text-white/70' : 'hover:bg-slate-900/5 hover:text-slate-600'}`}
                             title={formatLocationDisplay(locationLabel)}
                         >
                             <MapPin size={10} className="lg:size-[12px] shrink-0" />

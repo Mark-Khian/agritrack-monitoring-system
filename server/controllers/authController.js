@@ -425,18 +425,63 @@ const updateFarmLocation = async (req, res) => {
             return res.status(400).json({ message: 'Unable to verify the selected Philippine farm location.' });
         }
 
-        const queryStr = record.resolvedName.split('/').map(p => p.trim()).filter(p => p !== 'PH').join(', ');
-        const scopedQuery = `${queryStr},PH`;
+        const barangay = record.barangay;
+        const muniCity = record.municipalityCity;
+        const province = record.province;
+        
+        const normalizeMuni = (m) => m ? m.replace(/^City of /i, '').trim() : '';
+        const normMuniCity = normalizeMuni(muniCity);
 
-        const directUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(scopedQuery)}&limit=5&appid=${API_KEY}`;
-        const directData = await httpsGet(directUrl);
+        let queries = [];
 
-        const phResults = directData ? directData.filter(r => r.country === 'PH') : [];
-        if (phResults.length === 0) {
-            return res.status(400).json({ message: 'Unable to verify coordinates for the selected Philippine farm location.' });
+        if (barangay && muniCity) {
+            if (province) {
+                queries.push(`${barangay}, ${muniCity}, ${province}, PH`);
+                if (normMuniCity !== muniCity) {
+                    queries.push(`${barangay}, ${normMuniCity}, ${province}, PH`);
+                }
+                queries.push(`${muniCity}, ${province}, PH`);
+                if (normMuniCity !== muniCity) {
+                    queries.push(`${normMuniCity}, ${province}, PH`);
+                }
+            }
+            queries.push(`${muniCity}, PH`);
+            if (normMuniCity !== muniCity) {
+                queries.push(`${normMuniCity}, PH`);
+            }
+        } else if (muniCity) {
+            if (province) {
+                queries.push(`${muniCity}, ${province}, PH`);
+                if (normMuniCity !== muniCity) {
+                    queries.push(`${normMuniCity}, ${province}, PH`);
+                }
+            }
+            queries.push(`${muniCity}, PH`);
+            if (normMuniCity !== muniCity) {
+                queries.push(`${normMuniCity}, PH`);
+            }
         }
 
-        const bestMatch = phResults[0];
+        const candidateQueries = [...new Set(queries)];
+
+        let bestMatch = null;
+        for (const query of candidateQueries) {
+            const directUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(query)}&limit=5&appid=${API_KEY}`;
+            try {
+                const directData = await httpsGet(directUrl);
+                const phResults = directData ? directData.filter(r => r.country === 'PH') : [];
+                if (phResults.length > 0) {
+                    bestMatch = phResults[0];
+                    break;
+                }
+            } catch (err) {
+                console.error(`Error geocoding ${query}:`, err.message);
+            }
+        }
+
+        if (!bestMatch) {
+            return res.status(400).json({ message: 'The Philippine location is valid, but weather coordinates could not be resolved.' });
+        }
 
         const finalLat = bestMatch.lat;
         const finalLon = bestMatch.lon;
