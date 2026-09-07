@@ -49,7 +49,7 @@ const runBackup = () => {
     const filepath = path.join(BACKUP_DIR, filename);
 
     // Build mysqldump command using protected options file only
-    const command = `mysqldump --defaults-extra-file="${backupCnf}" ${DB_NAME} > "${filepath}"`;
+    const command = `mysqldump --defaults-extra-file="${backupCnf}" --single-transaction --no-tablespaces ${DB_NAME} > "${filepath}"`;
 
     console.log(`🗄️  Running database backup...`);
 
