@@ -6,15 +6,16 @@ require('dotenv').config();
 
 const BACKUP_DIR = path.join(__dirname, '..', 'backups');
 const MAX_BACKUPS = 7; // keep last 7 days only
-const DB_HOST = process.env.DB_HOST || 'localhost';
-const DB_USER = process.env.DB_USER || 'root';
-const DB_PASS = process.env.DB_PASS || '';
 const DB_NAME = process.env.DB_NAME || 'crop_management';
-const DB_PORT = process.env.DB_PORT || 3306;
+const DEFAULT_BACKUP_CNF = path.join(process.env.HOME || '/home/superadmin', '.agritrack-db-backup.cnf');
 
-// ── Ensure backup folder exists ───────────
+// ── Ensure backup folder exists with restricted permissions ───
 if (!fs.existsSync(BACKUP_DIR)) {
-    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    fs.mkdirSync(BACKUP_DIR, { recursive: true, mode: 0o700 });
+} else {
+    try {
+        fs.chmodSync(BACKUP_DIR, 0o700);
+    } catch (_) {}
 }
 
 // ── Generate backup filename ──────────────
@@ -29,24 +30,55 @@ const getBackupFilename = () => {
 
 // ── Run the actual backup ─────────────────
 const runBackup = () => {
+    const backupCnf = process.env.MYSQL_BACKUP_CNF || DEFAULT_BACKUP_CNF;
+
+    // Fail-closed check: Protected options file MUST exist and be readable
+    if (!fs.existsSync(backupCnf)) {
+        console.error('❌ Backup aborted: Protected MySQL options file not found or inaccessible.');
+        return;
+    }
+
+    try {
+        fs.accessSync(backupCnf, fs.constants.R_OK);
+    } catch (e) {
+        console.error('❌ Backup aborted: Protected MySQL options file not found or inaccessible.');
+        return;
+    }
+
     const filename = getBackupFilename();
     const filepath = path.join(BACKUP_DIR, filename);
 
-    // Build mysqldump command
-    const passFlag = DB_PASS ? `-p${DB_PASS}` : '';
-    const command = `mysqldump -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} ${passFlag} ${DB_NAME} > "${filepath}"`;
+    // Build mysqldump command using protected options file only
+    const command = `mysqldump --defaults-extra-file="${backupCnf}" ${DB_NAME} > "${filepath}"`;
 
     console.log(`🗄️  Running database backup...`);
 
     exec(command, (err, stdout, stderr) => {
         if (err) {
             console.error('❌ Backup failed:', err.message);
+            // Clean up potentially empty or broken dump file
+            if (fs.existsSync(filepath)) {
+                try { fs.unlinkSync(filepath); } catch (_) {}
+            }
             return;
         }
 
         // Check if file was created and has content
         if (fs.existsSync(filepath)) {
+            // Apply strict 0600 mode immediately to newly generated backup file
+            try {
+                fs.chmodSync(filepath, 0o600);
+            } catch (chmodErr) {
+                console.error('⚠️  Failed to set 0600 permissions on backup file:', chmodErr.message);
+            }
+
             const stats = fs.statSync(filepath);
+            if (stats.size === 0) {
+                console.error('❌ Backup failed: Generated file is empty.');
+                try { fs.unlinkSync(filepath); } catch (_) {}
+                return;
+            }
+
             const sizeKB = (stats.size / 1024).toFixed(2);
             console.log(`✅ Backup saved: ${filename} (${sizeKB} KB)`);
 
