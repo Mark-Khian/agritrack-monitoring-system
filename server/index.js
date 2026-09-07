@@ -14,6 +14,7 @@ const { runActivityCycle, runWeatherCycle } = require('./utils/notificationServi
 
 
 const app = express();
+app.set('trust proxy', 'loopback');
 
 // ── Security Middlewares ──────────────────
 app.use(helmet({
@@ -42,9 +43,9 @@ app.use(cors({
         if (origin === allowedOrigin) {
             return callback(null, true);
         }
-        return callback(new Error('Not allowed by CORS'));
+        return callback(null, false);
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true
 }));
 

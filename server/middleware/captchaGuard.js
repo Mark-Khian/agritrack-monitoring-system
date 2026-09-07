@@ -6,17 +6,28 @@ const RAPID_REQUEST_LIMIT = 10; // max FAILED requests per window
 
 const captchaGuard = async (req, res, next) => {
     const ip = req.ip;
-    const loginIdentifier = req.body.username;
 
     try {
+        // Find most recent successful login from this IP
+        const [latestSuccess] = await db.query(
+            `SELECT MAX(attempted_at) as last_success FROM login_attempts WHERE ip_address = ? AND success = 1`, [ip]
+        );
+        const lastSuccessTime = latestSuccess[0].last_success;
+
+        // Prepare condition to ignore failures before the last success
+        const sinceSuccessCondition = lastSuccessTime ? `AND attempted_at > ?` : '';
+        const paramsBase = lastSuccessTime ? [ip, lastSuccessTime] : [ip];
+
         // ── Check 1: Rapid FAILED requests from same IP ──
+        const rapidParams = [...paramsBase, RAPID_REQUEST_WINDOW];
         const [rapidFailed] = await db.query(
             `SELECT COUNT(*) as count
              FROM login_attempts
              WHERE ip_address  = ?
+             ${sinceSuccessCondition}
              AND   success     = 0
              AND   attempted_at > DATE_SUB(NOW(), INTERVAL ? SECOND)`,
-            [ip, RAPID_REQUEST_WINDOW]
+            rapidParams
         );
 
         if (rapidFailed[0].count >= RAPID_REQUEST_LIMIT) {
@@ -27,34 +38,16 @@ const captchaGuard = async (req, res, next) => {
             });
         }
 
-        // ── Check 2: Failed attempts for this specific login identifier ──
-        if (loginIdentifier) {
-            const [user] = await db.query(
-                `SELECT failed_attempts, captcha_required
-                 FROM users WHERE email = ?`,
-                [loginIdentifier]
-            );
-
-            if (user.length > 0) {
-                const failedAttempts = user[0].failed_attempts || 0;
-                const captchaRequired = user[0].captcha_required;
-
-                // Only require CAPTCHA if failed attempts >= threshold
-                // OR already flagged in database
-                if (captchaRequired || failedAttempts >= CAPTCHA_THRESHOLD) {
-                    req.captchaRequired = true;
-                }
-            }
-        }
-
         // ── Check 3: Multiple FAILED attempts from same IP ──
+        // (Note: Check 2 was removed to prevent account enumeration)
         const [failedFromIp] = await db.query(
             `SELECT COUNT(*) as count
              FROM login_attempts
              WHERE ip_address  = ?
+             ${sinceSuccessCondition}
              AND   success     = 0
              AND   attempted_at > DATE_SUB(NOW(), INTERVAL 5 MINUTE)`,
-            [ip]
+            paramsBase
         );
 
         if (failedFromIp[0].count >= CAPTCHA_THRESHOLD) {

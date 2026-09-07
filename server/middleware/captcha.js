@@ -43,8 +43,11 @@ const verifyCaptcha = async (req, res, next) => {
 
         next();
     } catch (err) {
-        console.error('CAPTCHA error:', err.message);
-        next();
+        console.error('CAPTCHA verification error:', err.message);
+        return res.status(503).json({
+            message: 'CAPTCHA verification service unavailable. Please try again later.',
+            captchaRequired: true
+        });
     }
 };
 

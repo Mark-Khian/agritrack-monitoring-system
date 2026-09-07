@@ -84,8 +84,8 @@ const login = async (req, res) => {
             `SELECT * FROM users WHERE email = ? AND role = 'admin'`, [username]
         );
 
-        // Timing attack fix — always run bcrypt
-        const dummyHash = '$2b$12$dummyhashusedtopreventimaginarytimingattack0000';
+        // Timing attack fix — use a structurally valid dummy hash
+        const dummyHash = '$2b$12$lZZgs9Y/TfAIYjZnd643zuE.24O.t.ztKHjW2mHoDBo4F8PfEYrbq';
         const isMatch = await bcrypt.compare(
             password,
             users.length > 0 ? users[0].password : dummyHash
@@ -95,49 +95,13 @@ const login = async (req, res) => {
             if (users.length > 0) {
                 const user = users[0];
                 const newAttempts = (user.failed_attempts || 0) + 1;
-                const captchaRequired = newAttempts >= CAPTCHA_THRESHOLD;
 
-                if (newAttempts >= MAX_ATTEMPTS) {
-                    const lockedUntil = new Date(Date.now() + LOCKOUT_TIME * 60 * 1000);
-
-                    await db.query(
-                        `UPDATE users
-                         SET failed_attempts  = ?,
-                             locked_until     = ?,
-                             captcha_required = 1
-                         WHERE id = ?`,
-                        [newAttempts, lockedUntil, user.id]
-                    );
-
-                    await db.query(
-                        `INSERT INTO login_attempts (ip_address, email, success) VALUES (?, ?, 0)`,
-                        [ip, username]
-                    );
-
-                    await logActivity({
-                        user_id: user.id,
-                        action: 'ACCOUNT_LOCKED',
-                        ip_address: ip,
-                        status: 'failed'
-                    });
-
-                    return res.status(423).json({
-                        message: `Too many failed attempts. Account locked for ${LOCKOUT_TIME} minutes.`,
-                        captchaRequired: true
-                    });
-                }
-
+                // Update legacy database columns silently
                 await db.query(
                     `UPDATE users
-                     SET failed_attempts  = ?,
-                         captcha_required = ?
+                     SET failed_attempts = ?
                      WHERE id = ?`,
-                    [newAttempts, captchaRequired ? 1 : 0, user.id]
-                );
-
-                await db.query(
-                    `INSERT INTO login_attempts (ip_address, email, success) VALUES (?, ?, 0)`,
-                    [ip, username]
+                    [newAttempts, user.id]
                 );
 
                 await logActivity({
@@ -146,20 +110,19 @@ const login = async (req, res) => {
                     ip_address: ip,
                     status: 'failed'
                 });
-
-                const remaining = MAX_ATTEMPTS - newAttempts;
-                return res.status(401).json({
-                    message: `Invalid credentials. ${remaining} attempt(s) remaining.`,
-                    captchaRequired
-                });
             }
 
+            // Always record the failure in login_attempts
             await db.query(
                 `INSERT INTO login_attempts (ip_address, email, success) VALUES (?, ?, 0)`,
                 [ip, username || null]
             );
 
-            return res.status(401).json({ message: 'Invalid credentials.' });
+            // Generic failure without exposing existence or locked status
+            return res.status(401).json({
+                message: 'Invalid credentials.',
+                captchaRequired: req.captchaRequired || false
+            });
         }
 
         const user = users[0];
@@ -167,16 +130,7 @@ const login = async (req, res) => {
         if (!user.is_active)
             return res.status(403).json({ message: 'This account has been disabled.' });
 
-        if (user.locked_until && new Date() < new Date(user.locked_until)) {
-            const minutesLeft = Math.ceil(
-                (new Date(user.locked_until) - new Date()) / 60000
-            );
-            return res.status(423).json({
-                message: `Account locked. Try again in ${minutesLeft} minute(s).`,
-                captchaRequired: true
-            });
-        }
-
+        // Reset legacy columns upon successful login
         await db.query(
             `UPDATE users
              SET failed_attempts  = 0,
