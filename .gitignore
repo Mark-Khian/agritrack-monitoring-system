@@ -23,11 +23,15 @@ dist-ssr
 *.sln
 *.sw?
 
-# Environment variables — never commit secrets
+# Environment variables - never commit secrets
 .env
 .env.local
 .env.production
 
-# SSL Certificates — NEVER commit private keys to git
+# SSL Certificates - NEVER commit private keys to git
 server/ssl/
 server/backups/*.sql
+
+# JWT RSA Key Pair - NEVER commit cryptographic keys
+server/private.key
+server/public.key
