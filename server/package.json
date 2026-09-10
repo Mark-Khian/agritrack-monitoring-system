@@ -11,6 +11,7 @@
     "test:phase6": "node --test tests/phase6-accounts.test.js",
     "test:phase7": "node --test tests/phase7-login-abuse.test.js",
     "test:phase8": "node --test tests/phase8-audit.test.js",
+    "test:phase9": "node --test tests/phase9-e2e.test.js",
     "test:setup-db": "node tests/setup-test-db.js"
   },
   "keywords": [],

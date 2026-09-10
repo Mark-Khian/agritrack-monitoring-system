@@ -13,6 +13,8 @@
     "test:phase6:browser": "node tests/phase6-browser.cjs",
     "test:phase7:browser": "node tests/phase7-browser.cjs",
     "test:phase8:browser": "node tests/phase8-browser.cjs",
+    "test:phase9:browser": "node tests/phase9-browser.cjs",
+    "test:phase9": "node tests/run-phase9.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
