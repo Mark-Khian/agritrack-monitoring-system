@@ -24,6 +24,7 @@ export const CAPABILITIES = Object.freeze({
   NOTE_MANAGE: 'note.manage',
   ANALYTICS_READ: 'analytics.read',
   FARM_LOCATION_MANAGE: 'farm_location.manage',
+  ACCOUNT_MANAGE: 'account.manage',
 });
 
 const COMMON = Object.freeze([
@@ -51,6 +52,7 @@ const ROLE_CAPABILITIES = Object.freeze({
     CAPABILITIES.NOTE_MANAGE,
     CAPABILITIES.ANALYTICS_READ,
     CAPABILITIES.FARM_LOCATION_MANAGE,
+    CAPABILITIES.ACCOUNT_MANAGE,
   ]),
   [ROLES.SECRETARY]: Object.freeze([
     ...COMMON,

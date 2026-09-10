@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import FlipOverlay from './FlipOverlay';
 import crmLogo from '../assets/CRM-logo.png';
-import { createPortal } from 'react-dom';
 import { NavLink, useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth';
 import { logoutUser } from '../services/api';
@@ -13,9 +12,9 @@ import {
     ClipboardList,
     Wheat,
     BarChart2,
-    CheckCircle2,
     User,
-    Calendar
+    Calendar,
+    Users
 } from 'lucide-react';
 
 const Sidebar = ({ onNavClick }) => {
@@ -24,7 +23,6 @@ const Sidebar = ({ onNavClick }) => {
     const [showConfirm, setShowConfirm] = useState(false);
     const [isLoggingOut, setIsLoggingOut] = useState(false);
     const [logoutPhase, setLogoutPhase] = useState('idle');
-    const [loggedOutName, setLoggedOutName] = useState('');
 
     const handleLogoutClick = () => setShowConfirm(true);
 
@@ -67,6 +65,7 @@ const Sidebar = ({ onNavClick }) => {
         { name: 'Harvests', path: '/harvests', icon: Wheat, capability: CAPABILITIES.HARVEST_READ },
         { name: 'Calendar', path: '/calendar', icon: Calendar, capability: CAPABILITIES.CALENDAR_READ },
         { name: 'Analytics', path: '/analytics', icon: BarChart2, capability: CAPABILITIES.ANALYTICS_READ },
+        { name: 'Accounts', path: '/accounts', icon: Users, capability: CAPABILITIES.ACCOUNT_MANAGE },
     ].filter((link) => can(link.capability));
 
     return (

@@ -28,6 +28,7 @@ const CAPABILITIES = Object.freeze({
     NOTIFICATION_MANAGE_OWN: 'notification.manage_own',
     SESSION_READ_OWN: 'session.read_own',
     SESSION_REVOKE_OWN: 'session.revoke_own',
+    ACCOUNT_MANAGE: 'account.manage',
     FARM_LOCATION_MANAGE: 'farm_location.manage',
     BACKUPS_MANAGE: 'backups.manage',
 });
@@ -61,6 +62,7 @@ const ROLE_CAPABILITIES = Object.freeze({
         CAPABILITIES.HARVEST_DELETE,
         CAPABILITIES.HARVEST_EXPORT,
         CAPABILITIES.NOTE_MANAGE,
+        CAPABILITIES.ACCOUNT_MANAGE,
         CAPABILITIES.FARM_LOCATION_MANAGE,
         CAPABILITIES.BACKUPS_MANAGE,
     ]),

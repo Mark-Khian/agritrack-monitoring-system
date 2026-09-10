@@ -38,9 +38,19 @@ const clickButton = async (page, label) => {
 
 const login = async (page) => {
     await page.waitForSelector('#username');
-    await page.type('#username', 'superadmin');
-    await page.type('#password', 'admin1234');
-    await clickButton(page, 'Login');
+    await page.evaluate(() => {
+        const setValue = Object.getOwnPropertyDescriptor(
+            HTMLInputElement.prototype,
+            'value'
+        ).set;
+        const username = document.querySelector('#username');
+        const password = document.querySelector('#password');
+        setValue.call(username, 'superadmin');
+        username.dispatchEvent(new Event('input', { bubbles: true }));
+        setValue.call(password, 'admin1234');
+        password.dispatchEvent(new Event('input', { bubbles: true }));
+        window.setTimeout(() => username.closest('form').requestSubmit(), 0);
+    });
     await page.waitForFunction(() => window.location.pathname === '/dashboard', {
         timeout: 15_000,
     });

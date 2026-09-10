@@ -8,14 +8,24 @@ import Activities from './pages/Activities';
 import Harvests from './pages/Harvests';
 import Analytics from './pages/Analytics';
 import Calendar from './pages/Calendar';
+import Accounts from './pages/Accounts';
+import ChangePassword from './pages/ChangePassword';
 import NotFound from './pages/NotFound';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { CAPABILITIES } from './security/permissions';
 
 const ProtectedRoute = ({ capability, children }) => {
-  const { status, can } = useAuth();
+  const { status, can, mustChangePassword } = useAuth();
   if (status !== 'authenticated') return <Navigate to="/" replace />;
+  if (mustChangePassword) return <Navigate to="/change-password" replace />;
   return can(capability) ? children : <Navigate to="/dashboard" replace />;
+};
+
+const ChangePasswordRoute = () => {
+  const { status, mustChangePassword } = useAuth();
+  if (status !== 'authenticated') return <Navigate to="/" replace />;
+  if (!mustChangePassword) return <Navigate to="/dashboard" replace />;
+  return <ChangePassword />;
 };
 
 const SessionUnavailable = ({ onRetry }) => (
@@ -43,7 +53,7 @@ const SessionUnavailable = ({ onRetry }) => (
 );
 
 function App() {
-  const { status, retrySessionCheck } = useAuth();
+  const { status, mustChangePassword, retrySessionCheck } = useAuth();
 
   if (status === 'checking') return null;
   if (status === 'unavailable') {
@@ -55,8 +65,13 @@ function App() {
       {/* Admin Login Landing Page */}
       <Route
         path="/"
-        element={status === 'authenticated' ? <Navigate to="/dashboard" replace /> : <Landing />}
+        element={
+          status === 'authenticated'
+            ? <Navigate to={mustChangePassword ? '/change-password' : '/dashboard'} replace />
+            : <Landing />
+        }
       />
+      <Route path="/change-password" element={<ChangePasswordRoute />} />
 
       {/* Protected Routes */}
       <Route path="/dashboard" element={
@@ -101,9 +116,23 @@ function App() {
           </Layout>
         </ProtectedRoute>
       } />
+      <Route path="/accounts" element={
+        <ProtectedRoute capability={CAPABILITIES.ACCOUNT_MANAGE}>
+          <Layout>
+            <Accounts />
+          </Layout>
+        </ProtectedRoute>
+      } />
 
       {/* Fallback - redirect unknown routes to home */}
-      <Route path="*" element={<NotFound />} />
+      <Route
+        path="*"
+        element={
+          status === 'authenticated' && mustChangePassword
+            ? <Navigate to="/change-password" replace />
+            : <NotFound />
+        }
+      />
     </Routes>
   );
 }

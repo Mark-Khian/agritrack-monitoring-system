@@ -20,7 +20,7 @@ const extractBearerToken = (req) => {
     return token || null;
 };
 
-const protect = async (req, res, next) => {
+const authenticate = ({ allowPasswordChangeRequired = false } = {}) => async (req, res, next) => {
     const bearerPresented = hasBearerScheme(req);
     const bearerToken = extractBearerToken(req);
     const cookieToken = req.cookies?.[SESSION_COOKIE_NAME];
@@ -87,7 +87,10 @@ const protect = async (req, res, next) => {
         // Load the current database role with the authoritative active-account flag.
         // Authorization must never use role data from the token or request.
         const [users] = await db.query(
-            'SELECT id, is_active, role FROM users WHERE id = ?', [userId]
+            `SELECT id, is_active, role, must_change_password
+             FROM users
+             WHERE id = ?`,
+            [userId]
         );
         if (users.length === 0) {
             return res.status(401).json({ message: 'Account no longer exists.' });
@@ -98,9 +101,17 @@ const protect = async (req, res, next) => {
 
         req.user = decodedToken || { id: userId };
         req.user.role = users[0].role;
+        req.user.must_change_password = Boolean(users[0].must_change_password);
         req.token = tokenToVerify; // Store token to allow logout to invalidate it
         req.authMethod = authMethod;
-        
+
+        if (req.user.must_change_password && !allowPasswordChangeRequired) {
+            return res.status(403).json({
+                code: 'PASSWORD_CHANGE_REQUIRED',
+                message: 'Password change required before accessing this resource.'
+            });
+        }
+
         return csrfGuard(req, res, next);
 
     } catch (err) {
@@ -112,4 +123,12 @@ const protect = async (req, res, next) => {
     }
 };
 
-module.exports = { protect, extractBearerToken, SESSION_COOKIE_NAME };
+const protect = authenticate();
+const protectPasswordChange = authenticate({ allowPasswordChangeRequired: true });
+
+module.exports = {
+    protect,
+    protectPasswordChange,
+    extractBearerToken,
+    SESSION_COOKIE_NAME
+};

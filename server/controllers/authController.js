@@ -1,5 +1,4 @@
 const db = require('../config/db');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const https = require('https');
 const fs = require('fs');
@@ -25,8 +24,10 @@ const {
     invalidateSession,
     getActiveSessions,
     invalidateAllSessions,
+    invalidateAllSessionsExceptToken,
     cleanupSessions
 } = require('../utils/sessionHelper');
+const { comparePassword, hashPassword } = require('../utils/passwordHelper');
 
 const MAX_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS) || 5;
 const LOCKOUT_TIME = parseInt(process.env.LOCKOUT_TIME_MINUTES) || 15;
@@ -97,18 +98,22 @@ const login = async (req, res) => {
         // Authentication is account-based; authorization is enforced separately
         // from the current database role on every protected route.
         const [users] = await db.query(
-            'SELECT * FROM users WHERE email = ?', [username]
+            `SELECT *
+             FROM users
+             WHERE username = ? OR email = ?
+             LIMIT 2`,
+            [username, username]
         );
 
         // Timing attack fix — use a structurally valid dummy hash
         const dummyHash = '$2b$12$lZZgs9Y/TfAIYjZnd643zuE.24O.t.ztKHjW2mHoDBo4F8PfEYrbq';
-        const isMatch = await bcrypt.compare(
+        const isMatch = await comparePassword(
             password,
-            users.length > 0 ? users[0].password : dummyHash
+            users.length === 1 ? users[0].password : dummyHash
         );
 
-        if (users.length === 0 || !isMatch) {
-            if (users.length > 0) {
+        if (users.length !== 1 || !isMatch) {
+            if (users.length === 1) {
                 const user = users[0];
                 const newAttempts = (user.failed_attempts || 0) + 1;
 
@@ -207,7 +212,9 @@ const login = async (req, res) => {
 const getMe = async (req, res) => {
     try {
         const [users] = await db.query(
-            'SELECT id, name, username, email, role FROM users WHERE id = ?', 
+            `SELECT id, name, username, email, role, must_change_password
+             FROM users
+             WHERE id = ?`,
             [req.user.id]
         );
         if (users.length === 0) return res.status(404).json({ message: 'User not found.' });
@@ -217,7 +224,8 @@ const getMe = async (req, res) => {
             id: user.id,
             name: user.name,
             username: user.username || user.email,
-            role: user.role
+            role: user.role,
+            must_change_password: Boolean(user.must_change_password)
         });
     } catch (err) {
         console.error('getMe error:', err.message);
@@ -303,6 +311,76 @@ const logoutAllDevices = async (req, res) => {
     }
 };
 
+// ── CHANGE PASSWORD ───────────────────────
+const changePassword = async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    let connection;
+
+    try {
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+
+        const [users] = await connection.query(
+            `SELECT id, password
+             FROM users
+             WHERE id = ? AND is_active = 1
+             FOR UPDATE`,
+            [req.user.id]
+        );
+        if (users.length !== 1) {
+            await connection.rollback();
+            return res.status(403).json({ message: 'Account is unavailable.' });
+        }
+
+        const currentMatches = await comparePassword(currentPassword, users[0].password);
+        if (!currentMatches) {
+            await connection.rollback();
+            return res.status(400).json({
+                message: 'Validation failed.',
+                errors: [{ field: 'currentPassword', message: 'Current password is incorrect.' }]
+            });
+        }
+
+        const newMatchesCurrent = await comparePassword(newPassword, users[0].password);
+        if (newMatchesCurrent) {
+            await connection.rollback();
+            return res.status(400).json({
+                message: 'Validation failed.',
+                errors: [{ field: 'newPassword', message: 'New password must differ from the current password.' }]
+            });
+        }
+
+        const passwordHash = await hashPassword(newPassword);
+        await connection.query(
+            `UPDATE users
+             SET password = ?,
+                 password_hash = ?,
+                 must_change_password = 0,
+                 password_changed_at = NOW()
+             WHERE id = ?`,
+            [passwordHash, passwordHash, req.user.id]
+        );
+        await invalidateAllSessionsExceptToken(req.user.id, req.token, connection);
+        await connection.commit();
+
+        await logActivity({
+            user_id: req.user.id,
+            action: 'CHANGE_PASSWORD',
+            entity: 'users',
+            entity_id: req.user.id,
+            ip_address: req.ip
+        });
+
+        return res.status(200).json({ message: 'Password changed successfully.' });
+    } catch (err) {
+        if (connection) await connection.rollback();
+        console.error('Change password error:', err.message);
+        return res.status(500).json({ message: 'Server error.' });
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
 // ── REFRESH TOKEN ─────────────────────────
 const refreshToken = async (req, res) => {
     const { refreshToken } = req.body;
@@ -314,11 +392,21 @@ const refreshToken = async (req, res) => {
         const decoded = jwt.verify(refreshToken, publicKey, { algorithms: ['RS256'] });
 
         const [users] = await db.query(
-            'SELECT id, is_active FROM users WHERE id = ?', [decoded.id]
+            `SELECT id, is_active, must_change_password
+             FROM users
+             WHERE id = ?`,
+            [decoded.id]
         );
 
         if (users.length === 0 || !users[0].is_active)
             return res.status(401).json({ message: 'Invalid refresh token.' });
+
+        if (users[0].must_change_password) {
+            return res.status(403).json({
+                code: 'PASSWORD_CHANGE_REQUIRED',
+                message: 'Password change required before refreshing this session.'
+            });
+        }
 
         const newAccessToken = jwt.sign(
             { id: users[0].id, jti: crypto.randomBytes(16).toString('hex') },
@@ -583,4 +671,15 @@ const removeFarmLocation = async (req, res) => {
     }
 };
 
-module.exports = { login, logout, getMe, getSessions, logoutAllDevices, refreshToken, resolveLocation, updateFarmLocation, removeFarmLocation };
+module.exports = {
+    login,
+    logout,
+    getMe,
+    getSessions,
+    logoutAllDevices,
+    changePassword,
+    refreshToken,
+    resolveLocation,
+    updateFarmLocation,
+    removeFarmLocation
+};

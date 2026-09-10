@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { login, logout, getMe, refreshToken, getSessions, logoutAllDevices, resolveLocation, updateFarmLocation, removeFarmLocation } = require('../controllers/authController');
-const { validateLogin } = require('../middleware/validate');
+const { login, logout, getMe, refreshToken, getSessions, logoutAllDevices, changePassword, resolveLocation, updateFarmLocation, removeFarmLocation } = require('../controllers/authController');
+const { validateLogin, validateChangePassword } = require('../middleware/validate');
 const { loginLimiter } = require('../middleware/rateLimiter');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, protectPasswordChange } = require('../middleware/authMiddleware');
 const { authorize, CAPABILITIES } = require('../security/rbac');
 const verifyCaptcha = require('../middleware/captcha');
 const captchaGuard = require('../middleware/captchaGuard');
@@ -21,7 +21,8 @@ router.post('/logout-all', protect, authorize(CAPABILITIES.SESSION_REVOKE_OWN), 
 router.post('/refresh', refreshToken);
 
 // Protected endpoints
-router.get('/me', protect, authorize(CAPABILITIES.SESSION_READ_OWN), getMe);
+router.get('/me', protectPasswordChange, authorize(CAPABILITIES.SESSION_READ_OWN), getMe);
+router.post('/change-password', protectPasswordChange, validateChangePassword, changePassword);
 router.get('/sessions', protect, authorize(CAPABILITIES.SESSION_READ_OWN), getSessions);
 router.post('/resolve-location', protect, authorize(CAPABILITIES.FARM_LOCATION_MANAGE), resolveLocation);
 router.put('/farm-location', protect, authorize(CAPABILITIES.FARM_LOCATION_MANAGE), updateFarmLocation);

@@ -123,7 +123,15 @@ const Landing = () => {
 
       // Show success screen then redirect
       setAuthPhase('success');
-      setTimeout(() => navigate('/dashboard'), 2000);
+      const requiresPasswordChange =
+        meResponse.data?.must_change_password === true
+        || meResponse.data?.must_change_password === 1
+        || meResponse.data?.must_change_password === '1'
+        || meResponse.data?.mustChangePassword === true;
+      setTimeout(
+        () => navigate(requiresPasswordChange ? '/change-password' : '/dashboard'),
+        2000
+      );
 
     } catch (error) {
       setAuthPhase('idle');
@@ -225,7 +233,7 @@ const Landing = () => {
           {/* Login Card */}
           <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-10 border border-white/20">
 
-            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1 sm:mb-2">Admin Login</h2>
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1 sm:mb-2">Account Login</h2>
             <p className="text-gray-600 text-sm mb-5 sm:mb-8">Enter your credentials to access the system</p>
 
             {/* Login Form */}
@@ -301,7 +309,7 @@ const Landing = () => {
             {/* Footer note */}
             <div className="mt-5 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-200">
               <p className="text-xs text-gray-600 text-center">
-                This is a secure admin-only portal. Unauthorized access attempts are logged.
+                This is a secure portal. Unauthorized access attempts are logged.
               </p>
             </div>
 

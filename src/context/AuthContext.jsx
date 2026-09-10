@@ -36,6 +36,11 @@ const normalizeUser = (data) => {
         name: data.name,
         username: data.username,
         role,
+        mustChangePassword:
+            data.must_change_password === true
+            || data.must_change_password === 1
+            || data.must_change_password === '1'
+            || data.mustChangePassword === true,
     };
 };
 
@@ -108,6 +113,7 @@ export const AuthProvider = ({ children }) => {
         status: authState.status,
         isAuthenticated: authState.status === 'authenticated',
         isInitializing: authState.status === 'checking',
+        mustChangePassword: Boolean(authState.user?.mustChangePassword),
         login,
         logout,
         can,

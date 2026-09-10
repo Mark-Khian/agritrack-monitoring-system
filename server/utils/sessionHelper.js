@@ -18,11 +18,11 @@ const getDeviceType = (userAgent) => {
 };
 
 // Create a new session
-const createSession = async ({ userId, token, ip, userAgent, expiresAt }) => {
+const createSession = async ({ userId, token, ip, userAgent, expiresAt }, executor = db) => {
     const tokenHash = hashToken(token);
     const deviceType = getDeviceType(userAgent);
 
-    await db.query(
+    await executor.query(
         `INSERT INTO sessions
      (user_id, token_hash, ip_address, user_agent, device_type, expires_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -31,10 +31,12 @@ const createSession = async ({ userId, token, ip, userAgent, expiresAt }) => {
 };
 
 // Invalidate a session (logout)
-const invalidateSession = async (token) => {
+const invalidateSession = async (token, executor = db) => {
     const tokenHash = hashToken(token);
-    await db.query(
-        'UPDATE sessions SET is_active = 0 WHERE token_hash = ?',
+    await executor.query(
+        `UPDATE sessions
+         SET is_active = 0, revoked_at = COALESCE(revoked_at, NOW())
+         WHERE token_hash = ?`,
         [tokenHash]
     );
 };
@@ -52,10 +54,22 @@ const getActiveSessions = async (userId) => {
 };
 
 // Invalidate all sessions for a user (force logout everywhere)
-const invalidateAllSessions = async (userId) => {
-    await db.query(
-        'UPDATE sessions SET is_active = 0 WHERE user_id = ?',
+const invalidateAllSessions = async (userId, executor = db) => {
+    await executor.query(
+        `UPDATE sessions
+         SET is_active = 0, revoked_at = COALESCE(revoked_at, NOW())
+         WHERE user_id = ?`,
         [userId]
+    );
+};
+
+const invalidateAllSessionsExceptToken = async (userId, token, executor = db) => {
+    const tokenHash = hashToken(token);
+    await executor.query(
+        `UPDATE sessions
+         SET is_active = 0, revoked_at = COALESCE(revoked_at, NOW())
+         WHERE user_id = ? AND token_hash <> ?`,
+        [userId, tokenHash]
     );
 };
 
@@ -78,5 +92,6 @@ module.exports = {
     invalidateSession,
     getActiveSessions,
     invalidateAllSessions,
+    invalidateAllSessionsExceptToken,
     cleanupSessions
 };

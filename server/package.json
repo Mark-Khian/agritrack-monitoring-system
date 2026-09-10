@@ -8,6 +8,7 @@
     "test": "node --test tests/phase3-auth.test.js",
     "test:phase3": "node --test tests/phase3-auth.test.js",
     "test:phase5": "node --test tests/phase5-rbac.test.js",
+    "test:phase6": "node --test tests/phase6-accounts.test.js",
     "test:setup-db": "node tests/setup-test-db.js"
   },
   "keywords": [],

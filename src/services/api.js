@@ -44,11 +44,20 @@ export const getLifecycleMonitoring = () => API.get('/dashboard/lifecycle-monito
 export const loginUser = (data) => API.post('/auth/login', data);
 export const logoutUser = () => API.post('/auth/logout', undefined, { timeout: 10_000 });
 export const getCurrentUser = () => API.get('/auth/me', { timeout: 10_000 });
+export const changePassword = (data) => API.post('/auth/change-password', data);
 export const getSessionsUser = () => API.get('/auth/sessions');
 export const logoutAllUser = () => API.post('/auth/logout-all');
 export const resolveLocation = (location) => API.post('/auth/resolve-location', { location });
 export const updateFarmLocation = (data) => API.put('/auth/farm-location', data);
 export const deleteFarmLocation = () => API.delete('/auth/farm-location');
+
+// ── Accounts ──────────────────────────────
+export const getUsers = () => API.get('/users');
+export const createUser = (data) => API.post('/users', data);
+export const resetUserPassword = (id) => API.post(`/users/${id}/reset-password`);
+export const disableUser = (id) => API.patch(`/users/${id}/disable`);
+export const reactivateUser = (id) => API.patch(`/users/${id}/reactivate`);
+export const revokeUserSessions = (id) => API.post(`/users/${id}/revoke-sessions`);
 
 // ── Plantings ─────────────────────────────
 // params: { status, limit } — use status='active' for harvest/activity dropdowns
