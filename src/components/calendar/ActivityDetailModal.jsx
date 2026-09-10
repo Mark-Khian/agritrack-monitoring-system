@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   updateActivity,
+  updateActivityProgress,
   deleteActivity
 } from '../../services/api';
 import {
@@ -17,7 +18,9 @@ import Select from '../Select';
 const ActivityDetailModal = ({
   activity,
   onClose,
-  onActivityUpdated
+  onActivityUpdated,
+  canManage = false,
+  canComplete = false
 }) => {
   if (!activity) return null;
 
@@ -53,7 +56,10 @@ const ActivityDetailModal = ({
     setError(null);
     try {
       const actId = activity.id || activity.activity_id;
-      const res = await updateActivity(actId, { status: 'completed' });
+      const res = await updateActivityProgress(actId, {
+        status: 'COMPLETED',
+        actual_date: new Date().toISOString().slice(0, 10)
+      });
       onActivityUpdated(res.data?.data || { ...activity, status: 'completed' });
       onClose();
     } catch (err) {
@@ -300,30 +306,34 @@ const ActivityDetailModal = ({
             </>
           ) : (
             <>
-              {!isTerminal && (
+              {!isTerminal && (canComplete || canManage) && (
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleComplete}
-                    disabled={loading}
-                    className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                    <span>Complete</span>
-                  </button>
+                  {canComplete && (
+                    <button
+                      onClick={handleComplete}
+                      disabled={loading}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                      <span>Complete</span>
+                    </button>
+                  )}
   
-                  <button
-                    onClick={handleCancelActivity}
-                    disabled={loading}
-                    className="group flex items-center gap-1.5 px-3 py-2 bg-gray-100 hover:bg-red-50 text-gray-700 hover:text-red-600 dark:bg-slate-800 dark:hover:bg-red-900/30 dark:text-slate-300 dark:hover:text-red-400 text-xs font-semibold rounded-xl border border-gray-300 hover:border-red-200 dark:border-slate-700 dark:hover:border-red-800/50 transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    <XCircle size={14} className="text-gray-500 group-hover:text-red-500 dark:text-slate-400 dark:group-hover:text-red-400 transition-colors" />
-                    <span>Cancel Activity</span>
-                  </button>
+                  {canManage && (
+                    <button
+                      onClick={handleCancelActivity}
+                      disabled={loading}
+                      className="group flex items-center gap-1.5 px-3 py-2 bg-gray-100 hover:bg-red-50 text-gray-700 hover:text-red-600 dark:bg-slate-800 dark:hover:bg-red-900/30 dark:text-slate-300 dark:hover:text-red-400 text-xs font-semibold rounded-xl border border-gray-300 hover:border-red-200 dark:border-slate-700 dark:hover:border-red-800/50 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <XCircle size={14} className="text-gray-500 group-hover:text-red-500 dark:text-slate-400 dark:group-hover:text-red-400 transition-colors" />
+                      <span>Cancel Activity</span>
+                    </button>
+                  )}
                 </div>
               )}
   
               <div className="flex items-center gap-2">
-                {!isTerminal && (
+                {!isTerminal && canManage && (
                   <button
                     onClick={() => setIsEditing(true)}
                     className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"

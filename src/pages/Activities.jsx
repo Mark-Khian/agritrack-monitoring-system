@@ -11,12 +11,14 @@ import Modal from '../components/Modal';
 import Select from '../components/Select';
 import Badge from '../components/Badge';
 import { formatActivityName } from '../utils/calendarUtils';
-import { getActivities, createActivity, updateActivity, getPlantings } from '../services/api';
+import { getActivities, createActivity, updateActivity, updateActivityProgress, getPlantings } from '../services/api';
 import { formatDisplayDate } from '../utils/dateFormatter';
 import { SkeletonTable } from '../components/Skeleton';
 import ConfirmDialog from '../components/ConfirmDialog';
 import MonthPicker from '../components/MonthPicker';
 import { useToast } from '../context/ToastContext';
+import useAuth from '../context/useAuth';
+import { CAPABILITIES } from '../security/permissions';
 
 // ── Activity Type Icon + Color Map ────────
 const ACTIVITY_ICONS = {
@@ -60,6 +62,7 @@ const getActivityIcon = (type) => {
 
 const Activities = () => {
     const navigate = useNavigate();
+    const { can } = useAuth();
     const [activities, setActivities] = useState([]);
     const [plantings, setPlantings] = useState([]);  // active plantings for dropdown
     const [loading, setLoading] = useState(true);
@@ -202,12 +205,8 @@ const Activities = () => {
         const nextStatus = 'COMPLETED';
         try {
             setStatusUpdatingId(activityToComplete.id);
-            await updateActivity(activityToComplete.id, {
-                planting_id: activityToComplete.planting_id,
-                activity_type: toApiActivityType(activityToComplete.activity_type),
-                planned_date: activityToComplete.planned_date?.slice(0, 10) || null,
+            await updateActivityProgress(activityToComplete.id, {
                 actual_date: new Date().toISOString().slice(0, 10),
-                notes: activityToComplete.notes,
                 status: nextStatus
             });
             await fetchData();
@@ -215,7 +214,7 @@ const Activities = () => {
             window.dispatchEvent(new CustomEvent('refresh-notifications'));
         } catch (err) {
             console.error('Update activity status error:', err);
-            setError(err.response?.data?.message || err.response?.data || 'Failed to update activity status. Please try again.');
+            setActivitiesError(err.response?.data?.message || err.response?.data || 'Failed to update activity status. Please try again.');
         } finally {
             setStatusUpdatingId(null);
             setActivityToComplete(null);
@@ -232,17 +231,19 @@ const Activities = () => {
                     <h1 className="text-2xl font-bold text-gray-800">Farm Activities</h1>
                     <p className="text-sm text-gray-500">System-scheduled and manual field operations</p>
                 </div>
-                <button
-                    onClick={() => handleOpenModal()}
-                    disabled={plantings.length === 0 || plantingsError}
-                    className="flex items-center gap-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                >
-                    <Plus size={16} /> Log Activity
-                </button>
+                {can(CAPABILITIES.ACTIVITY_CREATE) && (
+                    <button
+                        onClick={() => handleOpenModal()}
+                        disabled={plantings.length === 0 || plantingsError}
+                        className="flex items-center gap-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    >
+                        <Plus size={16} /> Log Activity
+                    </button>
+                )}
             </div>
 
             {/* Dependency guard */}
-            {!loading && plantingsError && (
+            {can(CAPABILITIES.ACTIVITY_CREATE) && !loading && plantingsError && (
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl text-sm">
                     <div className="flex items-start gap-3">
                         <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5" />
@@ -255,7 +256,7 @@ const Activities = () => {
                     </div>
                 </div>
             )}
-            {!loading && !plantingsError && plantings.length === 0 && (
+            {can(CAPABILITIES.ACTIVITY_CREATE) && !loading && !plantingsError && plantings.length === 0 && (
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl text-sm">
                     <div className="flex items-start gap-3">
                         <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
@@ -477,7 +478,7 @@ const Activities = () => {
                 )}
             </Modal>
 
-            <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingItem ? 'Edit Activity' : 'Log Activity'}>
+            <Modal isOpen={can(CAPABILITIES.ACTIVITY_CREATE) && isModalOpen} onClose={() => setIsModalOpen(false)} title={editingItem ? 'Edit Activity' : 'Log Activity'}>
                 <form onSubmit={handleSave} className="space-y-4">
                     {formError && (
                         <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">{formError}</div>

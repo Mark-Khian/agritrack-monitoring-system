@@ -94,9 +94,10 @@ const login = async (req, res) => {
     const userAgent = req.headers['user-agent'] || 'Unknown';
 
     try {
-        // Only allow the single admin account
+        // Authentication is account-based; authorization is enforced separately
+        // from the current database role on every protected route.
         const [users] = await db.query(
-            `SELECT * FROM users WHERE email = ? AND role = 'admin'`, [username]
+            'SELECT * FROM users WHERE email = ?', [username]
         );
 
         // Timing attack fix — use a structurally valid dummy hash
@@ -313,7 +314,7 @@ const refreshToken = async (req, res) => {
         const decoded = jwt.verify(refreshToken, publicKey, { algorithms: ['RS256'] });
 
         const [users] = await db.query(
-            `SELECT id, is_active FROM users WHERE id = ? AND role = 'admin'`, [decoded.id]
+            'SELECT id, is_active FROM users WHERE id = ?', [decoded.id]
         );
 
         if (users.length === 0 || !users[0].is_active)

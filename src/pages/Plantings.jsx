@@ -14,6 +14,8 @@ import {
 } from '../services/api';
 import { SkeletonTable } from '../components/Skeleton';
 import { formatDisplayDate } from '../utils/dateFormatter';
+import useAuth from '../context/useAuth';
+import { CAPABILITIES } from '../security/permissions';
 
 const RICE_VARIETY_OPTIONS = {
     'Irrigated / Lowland Varieties': [
@@ -97,6 +99,7 @@ const getTabClass = (tabId, isActive) => {
 };
 
 const Plantings = () => {
+    const { can } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
     const navigate = useNavigate();
     const [cameFromDashboard, setCameFromDashboard] = useState(() => {
@@ -586,7 +589,7 @@ const Plantings = () => {
                             { id: 'all', label: 'All' },
                             { id: 'active', label: 'Active' },
                             { id: 'completed', label: 'Completed' }
-                        ].map(tab => (
+                        ].filter((tab) => can(CAPABILITIES.PLANTING_UPDATE) || tab.id === 'active').map(tab => (
                             <button
                                 key={tab.id}
                                 type="button"
@@ -598,28 +601,32 @@ const Plantings = () => {
                         ))}
                     </div>
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-                        <button
-                            type="button"
-                            onClick={() => handleOpenModal()}
-                            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-green-700 hover:bg-green-600 text-white outline-none focus:outline-none"
-                        >
-                            <Plus size={16} /> Add Planting
-                        </button>
+                        {can(CAPABILITIES.PLANTING_CREATE) && (
+                            <button
+                                type="button"
+                                onClick={() => handleOpenModal()}
+                                className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-green-700 hover:bg-green-600 text-white outline-none focus:outline-none"
+                            >
+                                <Plus size={16} /> Add Planting
+                            </button>
+                        )}
 
-                        <button
-                            type="button"
-                            onClick={() => {
-                                if (!hasCompleted) {
-                                    globalToast.info('No completed plantings available to export yet.');
-                                    return;
-                                }
-                                setIsExportDrawerOpen(true);
-                            }}
-                            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 text-white shadow-sm outline-none focus:outline-none"
-                            title={hasCompleted ? 'Export bulk CSV/PDF report' : 'No completed plantings available for export'}
-                        >
-                            <FileDown size={16} /> Export Report
-                        </button>
+                        {can(CAPABILITIES.PLANTING_EXPORT) && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!hasCompleted) {
+                                        globalToast.info('No completed plantings available to export yet.');
+                                        return;
+                                    }
+                                    setIsExportDrawerOpen(true);
+                                }}
+                                className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 text-white shadow-sm outline-none focus:outline-none"
+                                title={hasCompleted ? 'Export bulk CSV/PDF report' : 'No completed plantings available for export'}
+                            >
+                                <FileDown size={16} /> Export Report
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -685,17 +692,19 @@ const Plantings = () => {
                                     <div className="flex items-center gap-1 shrink-0">
                                         {isCompletedPlanting(p) && (
                                             <>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setSelectedPlantingIds([p.id]);
-                                                        setIsExportDrawerOpen(true);
-                                                    }}
-                                                    className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600"
-                                                    title="Export planting report"
-                                                >
-                                                    <Printer size={16} />
-                                                </button>
+                                                {can(CAPABILITIES.PLANTING_EXPORT) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedPlantingIds([p.id]);
+                                                            setIsExportDrawerOpen(true);
+                                                        }}
+                                                        className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600"
+                                                        title="Export planting report"
+                                                    >
+                                                        <Printer size={16} />
+                                                    </button>
+                                                )}
                                                 <button
                                                     type="button"
                                                     onClick={() => handleOpenModal(p)}
@@ -708,22 +717,26 @@ const Plantings = () => {
                                         )}
                                         {!isCompletedPlanting(p) && (
                                             <>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleOpenModal(p)}
-                                                    className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600"
-                                                    title="Edit planting"
-                                                >
-                                                    <Edit2 size={16} />
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleDeleteClick(p.id)}
-                                                    className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"
-                                                    title="Delete planting"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
+                                                {can(CAPABILITIES.PLANTING_UPDATE) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleOpenModal(p)}
+                                                        className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600"
+                                                        title="Edit planting"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                )}
+                                                {can(CAPABILITIES.PLANTING_DELETE) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteClick(p.id)}
+                                                        className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"
+                                                        title="Delete planting"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                )}
                                             </>
                                         )}
                                     </div>
@@ -826,16 +839,18 @@ const Plantings = () => {
                                             <td className="px-6 py-4 text-right space-x-2">
                                                 {isCompletedPlanting(p) && (
                                                     <>
-                                                        <button
-                                                            onClick={() => {
-                                                                setSelectedPlantingIds([p.id]);
-                                                                setIsExportDrawerOpen(true);
-                                                            }}
-                                                            className="p-2 rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600 transition-colors inline-flex items-center justify-center"
-                                                            title="Export planting report"
-                                                        >
-                                                            <Printer size={16} />
-                                                        </button>
+                                                        {can(CAPABILITIES.PLANTING_EXPORT) && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    setSelectedPlantingIds([p.id]);
+                                                                    setIsExportDrawerOpen(true);
+                                                                }}
+                                                                className="p-2 rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600 transition-colors inline-flex items-center justify-center"
+                                                                title="Export planting report"
+                                                            >
+                                                                <Printer size={16} />
+                                                            </button>
+                                                        )}
                                                         <button onClick={() => handleOpenModal(p)} className="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors" title="View planting details">
                                                             <Eye size={16} />
                                                         </button>
@@ -843,12 +858,16 @@ const Plantings = () => {
                                                 )}
                                                 {!isCompletedPlanting(p) && (
                                                     <>
-                                                        <button onClick={() => handleOpenModal(p)} className="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors">
-                                                            <Edit2 size={16} />
-                                                        </button>
-                                                        <button onClick={() => handleDeleteClick(p.id)} className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors">
-                                                            <Trash2 size={16} />
-                                                        </button>
+                                                        {can(CAPABILITIES.PLANTING_UPDATE) && (
+                                                            <button onClick={() => handleOpenModal(p)} className="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors">
+                                                                <Edit2 size={16} />
+                                                            </button>
+                                                        )}
+                                                        {can(CAPABILITIES.PLANTING_DELETE) && (
+                                                            <button onClick={() => handleDeleteClick(p.id)} className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors">
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        )}
                                                     </>
                                                 )}
                                             </td>
@@ -1274,7 +1293,8 @@ const Plantings = () => {
                         <button type="button" onClick={handleCloseModal} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm transition-colors">
                             {editingItem && isCompletedPlanting(editingItem) ? 'Close' : 'Cancel'}
                         </button>
-                        {(!editingItem || !isCompletedPlanting(editingItem)) && (
+                        {(!editingItem ? can(CAPABILITIES.PLANTING_CREATE) : can(CAPABILITIES.PLANTING_UPDATE))
+                            && !isCompletedPlanting(editingItem) && (
                             <button type="submit" disabled={saving} className="bg-green-700 hover:bg-green-600 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                                 {saving ? 'Saving...' : editingItem ? 'Save Changes' : 'Create Planting'}
                             </button>
@@ -1284,7 +1304,7 @@ const Plantings = () => {
             </Modal>
 
             <ConfirmDialog
-                isOpen={isConfirmOpen}
+                isOpen={can(CAPABILITIES.PLANTING_DELETE) && isConfirmOpen}
                 onClose={() => setIsConfirmOpen(false)}
                 onConfirm={confirmDelete}
                 title="Delete Planting Record"
@@ -1295,7 +1315,7 @@ const Plantings = () => {
 
             {/* Sliding Bulk Export Drawer */}
             <AnimatePresence>
-                {isExportDrawerOpen && (
+                {can(CAPABILITIES.PLANTING_EXPORT) && isExportDrawerOpen && (
                     <>
                         {/* Backdrop */}
                         <motion.div

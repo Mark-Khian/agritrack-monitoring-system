@@ -7,6 +7,7 @@ const {
     TEMPLATE_COUNT,
 } = require('../utils/activityScheduler');
 const { calendarDaysBetween, expectedHarvestFromPlan } = require('../utils/plantingDates');
+const { ROLES } = require('../security/rbac');
 
 const {
     loadPresentationContext,
@@ -98,6 +99,30 @@ const PLANTING_JOINS = `
     LEFT JOIN varieties v ON plantings.variety_id = v.id
 `;
 
+const toWorkerPlanting = (planting) => ({
+    id: planting.id,
+    field_name: planting.field_name,
+    field_location: planting.field_location,
+    field_size: planting.field_size,
+    field_category: planting.field_category,
+    variety: planting.variety,
+    variety_class: planting.variety_class,
+    variety_id: planting.variety_id,
+    planting_date: planting.planting_date,
+    expected_harvest: planting.expected_harvest,
+    season: planting.season,
+    cropping_season: planting.cropping_season,
+    establishment_method: planting.establishment_method,
+    field_condition: planting.field_condition,
+    expected_stage: planting.expected_stage,
+    observed_stage: planting.observed_stage,
+    observed_stage_date: planting.observed_stage_date,
+    growth_stage: planting.growth_stage,
+    lifecycle_state: planting.lifecycle_state,
+    expected_growth_days: planting.expected_growth_days,
+    status: planting.status,
+});
+
 /**
  * Growth plan: expected_harvest = planting_date + expected_growth_days + adjustment_days.
  */
@@ -142,7 +167,9 @@ const getAllPlantings = async (req, res) => {
         const limit = Math.min(100, parseInt(req.query.limit) || 10);
         const offset = (page - 1) * limit;
 
-        const statusFilter = req.query.status ? 'AND plantings.status = ?' : '';
+        const workerRead = req.user.role === ROLES.FARM_WORKER;
+        const effectiveStatus = workerRead ? 'active' : req.query.status;
+        const statusFilter = effectiveStatus ? 'AND plantings.status = ?' : '';
         const varietyIdFilter = req.query.variety_id ? 'AND plantings.variety_id = ?' : '';
         const varietyClassFilter = req.query.variety_class
             ? 'AND plantings.variety_class = ?'
@@ -152,7 +179,7 @@ const getAllPlantings = async (req, res) => {
             : '';
 
         const listParams = [];
-        if (req.query.status) listParams.push(req.query.status);
+        if (effectiveStatus) listParams.push(effectiveStatus);
         if (req.query.variety_id) listParams.push(Number(req.query.variety_id));
         if (req.query.variety_class) listParams.push(String(req.query.variety_class).trim());
         listParams.push(limit, offset);
@@ -172,7 +199,7 @@ const getAllPlantings = async (req, res) => {
         );
 
         const countParams = [];
-        if (req.query.status) countParams.push(req.query.status);
+        if (effectiveStatus) countParams.push(effectiveStatus);
         if (req.query.variety_id) countParams.push(Number(req.query.variety_id));
         if (req.query.variety_class) countParams.push(String(req.query.variety_class).trim());
 
@@ -187,7 +214,8 @@ const getAllPlantings = async (req, res) => {
 
         const ids = plantings.map((p) => p.id);
         const ctx = await loadPresentationContext(db, ids);
-        const data = plantings.map((p) => enrichPlantingRow(p, ctx));
+        const enriched = plantings.map((p) => enrichPlantingRow(p, ctx));
+        const data = workerRead ? enriched.map(toWorkerPlanting) : enriched;
 
         res.status(200).json({
             data,
@@ -201,6 +229,7 @@ const getAllPlantings = async (req, res) => {
 
 const getPlantingById = async (req, res) => {
     try {
+        const workerRead = req.user.role === ROLES.FARM_WORKER;
         const [plantings] = await db.query(
             `SELECT
                 ${PLANTING_SELECT}
@@ -209,11 +238,15 @@ const getPlantingById = async (req, res) => {
                AND plantings.deleted_at IS NULL`,
             [req.params.id]
         );
-        if (plantings.length === 0)
+        if (
+            plantings.length === 0
+            || (workerRead && String(plantings[0].status).toLowerCase() !== 'active')
+        )
             return res.status(404).json({ message: 'Planting not found.' });
 
         const ctx = await loadPresentationContext(db, [plantings[0].id]);
-        const row = enrichPlantingRow(plantings[0], ctx);
+        const enriched = enrichPlantingRow(plantings[0], ctx);
+        const row = workerRead ? toWorkerPlanting(enriched) : enriched;
 
         res.status(200).json(row);
     } catch (err) {

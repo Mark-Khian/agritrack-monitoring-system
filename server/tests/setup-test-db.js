@@ -1,6 +1,6 @@
 /**
  * Initializes crop_management_rearch_test from the accepted baseline schema.sql plus
- * the auth-era migrations, applied in order: 008, then 009.
+ * the durable migrations needed by the current server contract.
  * Run manually: node tests/setup-test-db.js
  * Not invoked by Phase 3 test suite (tests must not alter schema).
  */
@@ -45,7 +45,22 @@ const TEST_DB = 'crop_management_rearch_test';
         console.log('users table exists; skipping schema.sql load.');
     }
 
-    // Applied in order from the repo's real migration files — no inline/dynamic DDL.
+    const [farmLocationColumn] = await conn.query(
+        `SELECT COUNT(*) AS cnt
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND COLUMN_NAME = 'farm_latitude'`,
+        [TEST_DB]
+    );
+    if (farmLocationColumn[0].cnt === 0) {
+        console.log('Applying migration 007_add_farm_location.sql...');
+        const sql = fs.readFileSync(
+            path.join(__dirname, '..', 'migrations', '007_add_farm_location.sql'),
+            'utf8'
+        );
+        await conn.query(sql);
+    }
+
+    // Auth-era migrations are rerun-safe and applied from the repository files.
     const MIGRATIONS = [
         '008_add_v2_auth_foundation.sql',
         '009_relax_legacy_activity_date.sql'

@@ -74,20 +74,22 @@ const MonthView = ({
                 </span>
 
                 <div className="flex items-center gap-1">
-                  <button
-                    disabled={backendUnavailable}
-                    onClick={(e) => {
-                      if(e) e.stopPropagation();
-                      if (onNewNote && !backendUnavailable) onNewNote(cell.dateKey);
-                    }}
-                    title={backendUnavailable ? "Server unavailable" : "Add Note"}
-                    className={`p-1 rounded-md transition-colors ${backendUnavailable 
-                        ? "text-gray-300 dark:text-slate-600 cursor-not-allowed opacity-50"
-                        : "text-emerald-600/70 hover:text-emerald-700 hover:bg-emerald-50 dark:text-emerald-500/70 dark:hover:text-emerald-400 dark:hover:bg-emerald-900/30"
-                      }`}
-                  >
-                    <Plus size={14} />
-                  </button>
+                  {onNewNote && (
+                    <button
+                      disabled={backendUnavailable}
+                      onClick={(e) => {
+                        if(e) e.stopPropagation();
+                        if (!backendUnavailable) onNewNote(cell.dateKey);
+                      }}
+                      title={backendUnavailable ? "Server unavailable" : "Add Note"}
+                      className={`p-1 rounded-md transition-colors ${backendUnavailable
+                          ? "text-gray-300 dark:text-slate-600 cursor-not-allowed opacity-50"
+                          : "text-emerald-600/70 hover:text-emerald-700 hover:bg-emerald-50 dark:text-emerald-500/70 dark:hover:text-emerald-400 dark:hover:bg-emerald-900/30"
+                        }`}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
 
                   {dayActivities.length > 0 && (
                     <span className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-gray-100 text-gray-600 border border-gray-200 dark:bg-slate-800/80 dark:text-slate-400 dark:border-slate-700/60">

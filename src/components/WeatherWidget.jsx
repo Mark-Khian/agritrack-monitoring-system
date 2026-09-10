@@ -8,6 +8,8 @@ import {
 import { getWeather, resolveLocation, updateFarmLocation } from '../services/api';
 import { deleteFarmLocation } from '../services/api';
 import ConfirmDialog from './ConfirmDialog';
+import useAuth from '../context/useAuth';
+import { CAPABILITIES } from '../security/permissions';
 
 
 let weatherCache = {
@@ -177,6 +179,8 @@ const formatLocationDisplay = (name) => {
  *   If null/undefined, falls back to direct OpenWeatherMap call with default lat/lon.
  */
 const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
+    const { can } = useAuth();
+    const canManageLocation = can(CAPABILITIES.FARM_LOCATION_MANAGE);
     const [weather, setWeather] = useState(weatherCache.weather);
     const [forecast, setForecast] = useState(weatherCache.forecast || []);
     const [dailyForecast, setDailyForecast] = useState(weatherCache.dailyForecast || []);
@@ -466,7 +470,7 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
     };
 
     const renderModal = () => {
-        if (!showConfigModal) return null;
+        if (!canManageLocation || !showConfigModal) return null;
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -627,8 +631,8 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
         return (
             <>
                 <div
-                    onClick={() => setShowConfigModal(true)}
-                    className="hover:scale-[1.01] transition-transform cursor-pointer"
+                    onClick={canManageLocation ? () => setShowConfigModal(true) : undefined}
+                    className={canManageLocation ? 'hover:scale-[1.01] transition-transform cursor-pointer' : ''}
                     style={{
                         borderRadius: '20px', padding: '1.5rem',
                         background: isDarkMode
@@ -639,7 +643,11 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                 >
                     <MapPin size={28} className={isDarkMode ? 'text-emerald-400 mb-3' : 'text-emerald-600 mb-3'} />
                     <h3 className={`font-semibold mb-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Farm Location Not Set</h3>
-                    <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Click to configure your farm location for accurate weather tracking.</p>
+                    <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {canManageLocation
+                            ? 'Click to configure your farm location for accurate weather tracking.'
+                            : 'Farm location is not configured.'}
+                    </p>
                 </div>
                 {renderModal()}
             </>
@@ -754,13 +762,13 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                         {/* Condition + location */}
                         <p className={`mt-2 text-sm lg:text-base capitalize font-medium ${textSecondary}`}>{description}</p>
                         <div
-                            onClick={() => setShowConfigModal(true)}
-                            className={`mt-1 -ml-1.5 max-w-full inline-flex items-center gap-1.5 text-xs lg:text-sm cursor-pointer rounded-md px-1.5 py-1 transition-colors ${textGhost} ${isDarkMode ? 'hover:bg-white/10 hover:text-white/70' : 'hover:bg-slate-900/5 hover:text-slate-600'}`}
+                            onClick={canManageLocation ? () => setShowConfigModal(true) : undefined}
+                            className={`mt-1 -ml-1.5 max-w-full inline-flex items-center gap-1.5 text-xs lg:text-sm rounded-md px-1.5 py-1 transition-colors ${textGhost} ${canManageLocation ? `cursor-pointer ${isDarkMode ? 'hover:bg-white/10 hover:text-white/70' : 'hover:bg-slate-900/5 hover:text-slate-600'}` : ''}`}
                             title={formatLocationDisplay(locationLabel)}
                         >
                             <MapPin size={10} className="lg:size-[12px] shrink-0" />
                             <span className="truncate">{formatLocationDisplay(locationLabel)}</span>
-                            <ChevronRight size={12} className="shrink-0 opacity-50" />
+                            {canManageLocation && <ChevronRight size={12} className="shrink-0 opacity-50" />}
                         </div>
                     </div>
 
@@ -870,14 +878,14 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                             {weather.weather[0].description}
                         </div>
                         <div
-                            onClick={() => setShowConfigModal(true)}
-                            className={`mt-1 -ml-1.5 inline-flex items-center gap-1.5 cursor-pointer rounded-md px-1.5 py-1 transition-colors ${isDarkMode ? 'text-white/60 hover:bg-white/10 hover:text-white/80' : 'text-slate-900/60 hover:bg-slate-900/5 hover:text-slate-900/80'}`}
+                            onClick={canManageLocation ? () => setShowConfigModal(true) : undefined}
+                            className={`mt-1 -ml-1.5 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors ${isDarkMode ? 'text-white/60' : 'text-slate-900/60'} ${canManageLocation ? `cursor-pointer ${isDarkMode ? 'hover:bg-white/10 hover:text-white/80' : 'hover:bg-slate-900/5 hover:text-slate-900/80'}` : ''}`}
                             style={{ fontSize: '12px' }}
                             title={formatLocationDisplay(locationName || weather?.name || 'Nueva Ecija')}
                         >
                             <MapPin size={10} className="shrink-0" />
                             <span className="truncate max-w-[200px]">{formatLocationDisplay(locationName || weather?.name || 'Nueva Ecija')}</span>
-                            <ChevronRight size={12} className="shrink-0 opacity-50" />
+                            {canManageLocation && <ChevronRight size={12} className="shrink-0 opacity-50" />}
                         </div>
                     </div>
                 </div>

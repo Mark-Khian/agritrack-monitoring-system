@@ -84,9 +84,10 @@ const protect = async (req, res, next) => {
             return res.status(401).json({ message: 'Session invalidated.' });
         }
 
-        // Check user still exists and is active (using transitional rules: is_active)
+        // Load the current database role with the authoritative active-account flag.
+        // Authorization must never use role data from the token or request.
         const [users] = await db.query(
-            'SELECT id, is_active FROM users WHERE id = ?', [userId]
+            'SELECT id, is_active, role FROM users WHERE id = ?', [userId]
         );
         if (users.length === 0) {
             return res.status(401).json({ message: 'Account no longer exists.' });
@@ -96,6 +97,7 @@ const protect = async (req, res, next) => {
         }
 
         req.user = decodedToken || { id: userId };
+        req.user.role = users[0].role;
         req.token = tokenToVerify; // Store token to allow logout to invalidate it
         req.authMethod = authMethod;
         
@@ -110,27 +112,4 @@ const protect = async (req, res, next) => {
     }
 };
 
-const checkRole = (allowedRoles) => {
-    return async (req, res, next) => {
-        try {
-            if (!req.user || !req.user.id) {
-                return res.status(401).json({ message: 'Access denied. User not authenticated.' });
-            }
-            const [users] = await db.query('SELECT role FROM users WHERE id = ?', [req.user.id]);
-            if (users.length === 0) {
-                return res.status(401).json({ message: 'User not found.' });
-            }
-            const userRole = users[0].role;
-            if (!allowedRoles.includes(userRole)) {
-                return res.status(403).json({ message: 'Access denied. Unauthorized role.' });
-            }
-            req.user.role = userRole;
-            next();
-        } catch (err) {
-            console.error('Role check middleware error:', err);
-            res.status(500).json({ message: 'Server error during authorization.' });
-        }
-    };
-};
-
-module.exports = { protect, checkRole, extractBearerToken, SESSION_COOKIE_NAME };
+module.exports = { protect, extractBearerToken, SESSION_COOKIE_NAME };

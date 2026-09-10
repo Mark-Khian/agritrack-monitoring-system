@@ -12,8 +12,11 @@ import ActivityDetailModal from '../components/calendar/ActivityDetailModal';
 import NoteModal from '../components/calendar/NoteModal';
 import { useToast } from '../context/ToastContext';
 import { Calendar as CalendarIcon, Loader2, AlertCircle } from 'lucide-react';
+import useAuth from '../context/useAuth';
+import { CAPABILITIES } from '../security/permissions';
 
 const Calendar = () => {
+  const { can } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -279,7 +282,7 @@ const Calendar = () => {
         onToday={handleToday}
         onRefresh={() => fetchCalendarData(true)}
         isRefreshing={isRefreshing}
-        onNewActivity={() => navigate('/activities')}
+        onNewActivity={can(CAPABILITIES.ACTIVITY_CREATE) ? () => navigate('/activities') : null}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         statusFilter={statusFilter}
@@ -302,10 +305,10 @@ const Calendar = () => {
               activitiesByDate={activitiesByDate}
               onSelectDate={handleSelectDate}
               onSelectActivity={setSelectedActivity}
-              onNewNote={(dateKey) => {
+              onNewNote={can(CAPABILITIES.NOTE_MANAGE) ? (dateKey) => {
                 handleSelectDate(dateKey);
                 setIsNoteModalOpen(true);
-              }}
+              } : null}
               backendUnavailable={calendarFetchError}
             />
           )}
@@ -315,10 +318,10 @@ const Calendar = () => {
               activitiesByDate={activitiesByDate}
               onSelectDate={handleSelectDate}
               onSelectActivity={setSelectedActivity}
-              onNewNote={(dateKey) => {
+              onNewNote={can(CAPABILITIES.NOTE_MANAGE) ? (dateKey) => {
                 handleSelectDate(dateKey);
                 setIsNoteModalOpen(true);
-              }}
+              } : null}
               backendUnavailable={calendarFetchError}
             />
           )}
@@ -327,10 +330,10 @@ const Calendar = () => {
               currentDate={currentDate}
               activitiesByDate={activitiesByDate}
               onSelectActivity={setSelectedActivity}
-              onNewNote={(dateKey) => {
+              onNewNote={can(CAPABILITIES.NOTE_MANAGE) ? (dateKey) => {
                 handleSelectDate(dateKey);
                 setIsNoteModalOpen(true);
-              }}
+              } : null}
               backendUnavailable={calendarFetchError}
             />
           )}
@@ -352,11 +355,13 @@ const Calendar = () => {
           activity={selectedActivity}
           onClose={() => setSelectedActivity(null)}
           onActivityUpdated={handleActivityUpdated}
+          canManage={can(CAPABILITIES.ACTIVITY_UPDATE)}
+          canComplete={can(CAPABILITIES.ACTIVITY_UPDATE_LIMITED)}
         />
       )}
 
       {/* Note Modal (Create & Edit) */}
-      {(isNoteModalOpen || (selectedActivity && selectedActivity.is_note)) && (
+      {((can(CAPABILITIES.NOTE_MANAGE) && isNoteModalOpen) || (selectedActivity && selectedActivity.is_note)) && (
         <NoteModal
           note={selectedActivity?.is_note ? selectedActivity : null}
           selectedDate={selectedDateKey}
@@ -368,6 +373,7 @@ const Calendar = () => {
           onNoteDeleted={handleNoteDeleted}
           onSuccess={toast.success}
           onError={toast.error}
+          readOnly={!can(CAPABILITIES.NOTE_MANAGE)}
         />
       )}
 

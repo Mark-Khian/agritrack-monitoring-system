@@ -72,7 +72,8 @@ const NoteModal = ({
   onNoteSaved,
   onNoteDeleted,
   onSuccess,
-  onError
+  onError,
+  readOnly = false
 }) => {
   const [loading, setLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -168,7 +169,7 @@ const NoteModal = ({
                 Note
               </span>
               <h3 className="text-xl font-bold tracking-tight mt-1 text-gray-900 dark:text-white">
-                {isEditMode ? 'Edit Note' : 'Add Note'}
+                {readOnly ? 'Note Details' : isEditMode ? 'Edit Note' : 'Add Note'}
               </h3>
             </div>
           </div>
@@ -188,6 +189,7 @@ const NoteModal = ({
               <label className="block font-semibold text-gray-700 dark:text-slate-400 mb-1">Title <span className="text-rose-500">*</span></label>
               <input
                 type="text"
+                disabled={readOnly}
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 placeholder="Note title (e.g. Field Inspection)"
@@ -205,6 +207,7 @@ const NoteModal = ({
                   <button
                     key={c.value}
                     type="button"
+                    disabled={readOnly}
                     title={c.label}
                     onClick={() => setFormData({ ...formData, color: c.value })}
                     className={`w-8 h-8 rounded-full ${c.bgClass} flex items-center justify-center transition-transform ${formData.color === c.value ? 'ring-2 ring-offset-2 ring-gray-400 dark:ring-slate-400 dark:ring-offset-slate-900 scale-110' : 'hover:scale-110'}`}
@@ -218,6 +221,7 @@ const NoteModal = ({
               <label className="block font-semibold text-gray-700 dark:text-slate-400 mb-1">Description</label>
               <textarea
                 rows={4}
+                disabled={readOnly}
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Add more details..."
@@ -229,7 +233,7 @@ const NoteModal = ({
 
         {/* Footer Action Buttons */}
         <div className="p-6 border-t border-gray-200 bg-gray-50/90 dark:border-slate-800 dark:bg-slate-900/90 flex items-center justify-between gap-3">
-          {isEditMode ? (
+          {!readOnly && isEditMode ? (
             <button
               type="button"
               onClick={handleDelete}
@@ -249,17 +253,19 @@ const NoteModal = ({
               disabled={loading || isDeleting}
               className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
             >
-              Cancel
+              {readOnly ? 'Close' : 'Cancel'}
             </button>
-            <button
-              type="submit"
-              form="note-form"
-              disabled={loading || isDeleting}
-              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl shadow-md transition-all cursor-pointer ${theme.btnBg}`}
-            >
-              {loading ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              <span>{isEditMode ? 'Save Changes' : 'Create Note'}</span>
-            </button>
+            {!readOnly && (
+              <button
+                type="submit"
+                form="note-form"
+                disabled={loading || isDeleting}
+                className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl shadow-md transition-all cursor-pointer ${theme.btnBg}`}
+              >
+                {loading ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                <span>{isEditMode ? 'Save Changes' : 'Create Note'}</span>
+              </button>
+            )}
           </div>
         </div>
 

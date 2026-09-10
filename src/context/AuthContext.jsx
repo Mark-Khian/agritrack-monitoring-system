@@ -1,5 +1,6 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentUser, setUnauthorizedHandler } from '../services/api';
+import { hasCapability, normalizeRole } from '../security/permissions';
 
 const AuthContext = createContext();
 export default AuthContext;
@@ -25,11 +26,16 @@ const normalizeUser = (data) => {
         throw new Error('Invalid /auth/me response.');
     }
 
+    const role = normalizeRole(data.role);
+    if (!role) {
+        throw new Error('Invalid /auth/me role.');
+    }
+
     return {
         id: data.id,
         name: data.name,
         username: data.username,
-        role: data.role,
+        role,
     };
 };
 
@@ -92,6 +98,11 @@ export const AuthProvider = ({ children }) => {
         setAuthState({ user: null, status: 'unauthenticated' });
     }, []);
 
+    const can = useCallback(
+        (capability) => hasCapability(authState.user?.role, capability),
+        [authState.user?.role]
+    );
+
     const value = useMemo(() => ({
         user: authState.user,
         status: authState.status,
@@ -99,8 +110,9 @@ export const AuthProvider = ({ children }) => {
         isInitializing: authState.status === 'checking',
         login,
         logout,
+        can,
         retrySessionCheck: checkSession,
-    }), [authState, checkSession, login, logout]);
+    }), [authState, can, checkSession, login, logout]);
 
     return (
         <AuthContext.Provider value={value}>

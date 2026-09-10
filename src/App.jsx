@@ -10,10 +10,12 @@ import Analytics from './pages/Analytics';
 import Calendar from './pages/Calendar';
 import NotFound from './pages/NotFound';
 import { AlertCircle, RefreshCw } from 'lucide-react';
+import { CAPABILITIES } from './security/permissions';
 
-const ProtectedRoute = ({ children }) => {
-  const { status } = useAuth();
-  return status === 'authenticated' ? children : <Navigate to="/" replace />;
+const ProtectedRoute = ({ capability, children }) => {
+  const { status, can } = useAuth();
+  if (status !== 'authenticated') return <Navigate to="/" replace />;
+  return can(capability) ? children : <Navigate to="/dashboard" replace />;
 };
 
 const SessionUnavailable = ({ onRetry }) => (
@@ -58,42 +60,42 @@ function App() {
 
       {/* Protected Routes */}
       <Route path="/dashboard" element={
-        <ProtectedRoute>
+        <ProtectedRoute capability={CAPABILITIES.DASHBOARD_READ}>
           <Layout>
             <Dashboard />
           </Layout>
         </ProtectedRoute>
       } />
       <Route path="/plantings" element={
-        <ProtectedRoute>
+        <ProtectedRoute capability={CAPABILITIES.PLANTING_READ}>
           <Layout>
             <Plantings />
           </Layout>
         </ProtectedRoute>
       } />
       <Route path="/activities" element={
-        <ProtectedRoute>
+        <ProtectedRoute capability={CAPABILITIES.ACTIVITY_READ}>
           <Layout>
             <Activities />
           </Layout>
         </ProtectedRoute>
       } />
       <Route path="/harvests" element={
-        <ProtectedRoute>
+        <ProtectedRoute capability={CAPABILITIES.HARVEST_READ}>
           <Layout>
             <Harvests />
           </Layout>
         </ProtectedRoute>
       } />
       <Route path="/analytics" element={
-        <ProtectedRoute>
+        <ProtectedRoute capability={CAPABILITIES.ANALYTICS_READ}>
           <Layout>
             <Analytics />
           </Layout>
         </ProtectedRoute>
       } />
       <Route path="/calendar" element={
-        <ProtectedRoute>
+        <ProtectedRoute capability={CAPABILITIES.CALENDAR_READ}>
           <Layout>
             <Calendar />
           </Layout>

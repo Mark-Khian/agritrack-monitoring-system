@@ -76,22 +76,24 @@ const DayView = ({
               Today
             </span>
           )}
-          <button
-            disabled={backendUnavailable}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onNewNote && !backendUnavailable) onNewNote(dateKey);
-            }}
-            title={backendUnavailable ? "Server unavailable" : "Add Note"}
-            className={`flex items-center justify-center p-2 sm:px-3 sm:py-1.5 text-xs font-semibold rounded-xl shadow-md transition-all shrink-0 ${
-              backendUnavailable
-                ? "bg-gray-300 text-gray-500 cursor-not-allowed opacity-50 dark:bg-slate-700 dark:text-slate-500"
-                : "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
-            }`}
-          >
-            <Plus size={16} className="sm:mr-1" />
-            <span className="hidden sm:inline">Add Note</span>
-          </button>
+          {onNewNote && (
+            <button
+              disabled={backendUnavailable}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!backendUnavailable) onNewNote(dateKey);
+              }}
+              title={backendUnavailable ? "Server unavailable" : "Add Note"}
+              className={`flex items-center justify-center p-2 sm:px-3 sm:py-1.5 text-xs font-semibold rounded-xl shadow-md transition-all shrink-0 ${
+                backendUnavailable
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed opacity-50 dark:bg-slate-700 dark:text-slate-500"
+                  : "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+              }`}
+            >
+              <Plus size={16} className="sm:mr-1" />
+              <span className="hidden sm:inline">Add Note</span>
+            </button>
+          )}
         </div>
       </div>
 

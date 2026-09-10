@@ -9,6 +9,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test:phase4:browser": "node tests/phase4-browser.cjs",
+    "test:phase5:browser": "node tests/phase5-browser.cjs",
     "preview": "vite preview"
   },
   "dependencies": {

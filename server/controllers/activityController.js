@@ -286,6 +286,59 @@ const updateActivity = async (req, res) => {
     }
 };
 
+const updateActivityProgress = async (req, res) => {
+    const { actual_date } = req.body;
+
+    try {
+        const [current] = await db.query(
+            `SELECT activities.id, activities.status
+             FROM activities
+             JOIN plantings ON plantings.id = activities.planting_id
+             WHERE activities.id = ?
+               AND activities.deleted_at IS NULL
+               AND plantings.deleted_at IS NULL
+               AND plantings.status = 'active'`,
+            [req.params.id]
+        );
+        if (current.length === 0) {
+            return res.status(404).json({ message: 'Activity not found.' });
+        }
+
+        const currentStatus = String(current[0].status || '').toUpperCase();
+        if (currentStatus === 'SKIPPED' || currentStatus === 'CANCELLED') {
+            return res.status(400).json({
+                message: `Cannot change status of a ${currentStatus} activity.`
+            });
+        }
+
+        await db.query(
+            `UPDATE activities
+             SET status = 'COMPLETED', actual_date = ?
+             WHERE id = ? AND deleted_at IS NULL`,
+            [actual_date, req.params.id]
+        );
+
+        await db.query(
+            `DELETE FROM notifications
+             WHERE type IN ('activity_due', 'activity_overdue') AND related_id = ?`,
+            [req.params.id]
+        );
+
+        await logActivity({
+            user_id: req.user.id,
+            action: 'UPDATE_ACTIVITY_PROGRESS',
+            entity: 'activities',
+            entity_id: parseInt(req.params.id),
+            ip_address: req.ip
+        });
+
+        return res.status(200).json({ message: 'Activity marked as completed!' });
+    } catch (err) {
+        console.error('Update activity progress error:', err.message);
+        return res.status(500).json({ message: 'Server error.' });
+    }
+};
+
 const deleteActivity = async (req, res) => {
     try {
         const [result] = await db.query(
@@ -323,5 +376,6 @@ module.exports = {
     getActivityById,
     createActivity,
     updateActivity,
+    updateActivityProgress,
     deleteActivity
 };

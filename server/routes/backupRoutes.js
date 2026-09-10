@@ -3,7 +3,11 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const { protect } = require('../middleware/authMiddleware');
+const { authorize, CAPABILITIES } = require('../security/rbac');
 const { runBackup, listBackups } = require('../utils/backup');
+
+router.use(protect);
+router.use(authorize(CAPABILITIES.BACKUPS_MANAGE));
 
 // ✅ Block all backup routes in development
 if (process.env.NODE_ENV !== 'production') {
@@ -14,7 +18,7 @@ if (process.env.NODE_ENV !== 'production') {
     });
 } else {
     // ── List all backups ─────────────────────
-    router.get('/', protect, (req, res) => {
+    router.get('/', (req, res) => {
         const backups = listBackups();
         res.status(200).json({
             message: `${backups.length} backup(s) found.`,
@@ -23,7 +27,7 @@ if (process.env.NODE_ENV !== 'production') {
     });
 
     // ── Trigger manual backup ────────────────
-    router.post('/run', protect, (req, res) => {
+    router.post('/run', (req, res) => {
         try {
             runBackup();
             res.status(200).json({
@@ -35,7 +39,7 @@ if (process.env.NODE_ENV !== 'production') {
     });
 
     // ── Download a backup file ───────────────
-    router.get('/download/:filename', protect, (req, res) => {
+    router.get('/download/:filename', (req, res) => {
         const filename = req.params.filename;
 
         if (filename.includes('..') || filename.includes('/')) {

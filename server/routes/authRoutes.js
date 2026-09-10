@@ -4,6 +4,7 @@ const { login, logout, getMe, refreshToken, getSessions, logoutAllDevices, resol
 const { validateLogin } = require('../middleware/validate');
 const { loginLimiter } = require('../middleware/rateLimiter');
 const { protect } = require('../middleware/authMiddleware');
+const { authorize, CAPABILITIES } = require('../security/rbac');
 const verifyCaptcha = require('../middleware/captcha');
 const captchaGuard = require('../middleware/captchaGuard');
 
@@ -16,14 +17,14 @@ router.post('/login', ...loginMiddleware);
 // Logout is idempotent and does not require active session
 router.post('/logout', logout);
 
-router.post('/logout-all', protect, logoutAllDevices);
+router.post('/logout-all', protect, authorize(CAPABILITIES.SESSION_REVOKE_OWN), logoutAllDevices);
 router.post('/refresh', refreshToken);
 
 // Protected endpoints
-router.get('/me', protect, getMe);
-router.get('/sessions', protect, getSessions);
-router.post('/resolve-location', protect, resolveLocation);
-router.put('/farm-location', protect, updateFarmLocation);
-router.delete('/farm-location', protect, removeFarmLocation);
+router.get('/me', protect, authorize(CAPABILITIES.SESSION_READ_OWN), getMe);
+router.get('/sessions', protect, authorize(CAPABILITIES.SESSION_READ_OWN), getSessions);
+router.post('/resolve-location', protect, authorize(CAPABILITIES.FARM_LOCATION_MANAGE), resolveLocation);
+router.put('/farm-location', protect, authorize(CAPABILITIES.FARM_LOCATION_MANAGE), updateFarmLocation);
+router.delete('/farm-location', protect, authorize(CAPABILITIES.FARM_LOCATION_MANAGE), removeFarmLocation);
 
 module.exports = router;

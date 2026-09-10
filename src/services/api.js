@@ -67,6 +67,7 @@ export const getActivities = (params = {}) => API.get('/activities', { params: {
 export const getActivityById = (id) => API.get(`/activities/${id}`);
 export const createActivity = (data) => API.post('/activities', data);
 export const updateActivity = (id, data) => API.put(`/activities/${id}`, data);
+export const updateActivityProgress = (id, data) => API.patch(`/activities/${id}/progress`, data);
 export const deleteActivity   = (id)           => API.delete(`/activities/${id}`);
 
 // ── Notes ─────────────────────────────────

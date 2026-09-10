@@ -38,6 +38,8 @@ import {
     getActivities,
     getWeather
 } from '../services/api';
+import useAuth from '../context/useAuth';
+import { CAPABILITIES } from '../security/permissions';
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
 
@@ -146,6 +148,10 @@ let dashboardCache = null;
 const Dashboard = () => {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
+    const { user, can } = useAuth();
+    const canReadHarvests = can(CAPABILITIES.HARVEST_READ);
+    const canCreatePlantings = can(CAPABILITIES.PLANTING_CREATE);
+    const initialCache = dashboardCache?.role === user?.role ? dashboardCache : null;
 
     const [isPlantingsModalOpen, setIsPlantingsModalOpen] = useState(() => {
         const params = new URLSearchParams(window.location.search);
@@ -160,16 +166,16 @@ const Dashboard = () => {
         }
     }, [searchParams, setSearchParams]);
 
-    const [stats, setStats] = useState(dashboardCache?.stats || { plantings: 0, harvests: 0, activities: 0 });
-    const [recentActivities, setRecentActivities] = useState(dashboardCache?.recentActivities || []);
-    const [activitiesList, setActivitiesList] = useState(dashboardCache?.activitiesList || []);
-    const [_plantingStatusData, setPlantingStatusData] = useState(dashboardCache?._plantingStatusData || []);
-    const [plantingsList, setPlantingsList] = useState(dashboardCache?.plantingsList || []);
-    const [harvestsList, setHarvestsList] = useState(dashboardCache?.harvestsList || []);
-    const [activitiesPerMonth, setActivitiesPerMonth] = useState(dashboardCache?.activitiesPerMonth || []);
-    const [_harvestYield, setHarvestYield] = useState(dashboardCache?._harvestYield || []);
-    const [_cropDistribution, setCropDistribution] = useState(dashboardCache?._cropDistribution || []);
-    const [loading, setLoading] = useState(!dashboardCache);
+    const [stats, setStats] = useState(initialCache?.stats || { plantings: 0, harvests: 0, activities: 0 });
+    const [recentActivities, setRecentActivities] = useState(initialCache?.recentActivities || []);
+    const [activitiesList, setActivitiesList] = useState(initialCache?.activitiesList || []);
+    const [_plantingStatusData, setPlantingStatusData] = useState(initialCache?._plantingStatusData || []);
+    const [plantingsList, setPlantingsList] = useState(initialCache?.plantingsList || []);
+    const [harvestsList, setHarvestsList] = useState(initialCache?.harvestsList || []);
+    const [activitiesPerMonth, setActivitiesPerMonth] = useState(initialCache?.activitiesPerMonth || []);
+    const [_harvestYield, setHarvestYield] = useState(initialCache?._harvestYield || []);
+    const [_cropDistribution, setCropDistribution] = useState(initialCache?._cropDistribution || []);
+    const [loading, setLoading] = useState(!initialCache);
 
     // Plot activity explorer state 
     const [expandedPlantingIds, setExpandedPlantingIds] = useState({});
@@ -230,7 +236,9 @@ const Dashboard = () => {
             try {
                 const [plantingsRes, harvestsRes, activitiesRes] = await Promise.all([
                     getPlantings({ limit: 100 }),
-                    getHarvests({ limit: 100 }),
+                    canReadHarvests
+                        ? getHarvests({ limit: 100 })
+                        : Promise.resolve({ data: { data: [], meta: { total: 0 } } }),
                     getActivities({ limit: 100 })
                 ]);
 
@@ -278,6 +286,7 @@ const Dashboard = () => {
                 } catch { /* weather is non-critical */ }
 
                 dashboardCache = {
+                    role: user?.role,
                     stats: {
                         plantings: plantings.filter(p => !isCompletedPlanting(p)).length,
                         harvests: toNonNegativeNumber(harvestsRes.data.meta?.total),
@@ -300,7 +309,7 @@ const Dashboard = () => {
             }
         };
         fetchAll();
-    }, []);
+    }, [canReadHarvests, user?.role]);
 
     if (loading) {
         return (
@@ -791,21 +800,25 @@ const Dashboard = () => {
                                 Season is a reporting label for your planting record, not a system availability requirement.
                             </p>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                            <button
-                                onClick={() => navigate('/plantings')}
-                                className="inline-flex items-center justify-center rounded-xl bg-[#166534] px-4 py-2 text-sm font-semibold text-white hover:bg-[#12532c] transition-colors"
-                            >
-                                + Create Planting
-                            </button>
-                        </div>
+                        {canCreatePlantings && (
+                            <div className="flex flex-wrap gap-2">
+                                <button
+                                    onClick={() => navigate('/plantings')}
+                                    className="inline-flex items-center justify-center rounded-xl bg-[#166534] px-4 py-2 text-sm font-semibold text-white hover:bg-[#12532c] transition-colors"
+                                >
+                                    + Create Planting
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
 
             {/* Summary Cards (Mobile/Tablet Only) */}
             <div className="grid grid-cols-3 gap-2 md:grid-cols-2 lg:hidden md:gap-4 lg:gap-6">
-                {statCards.map(renderStatCard)}
+                {statCards
+                    .filter((card) => canReadHarvests || card.path !== '/harvests')
+                    .map(renderStatCard)}
             </div>
 
 
@@ -1001,8 +1014,8 @@ const Dashboard = () => {
                     {/* Desktop-only Stat Cards Stack */}
                     <div className={`hidden lg:flex flex-col ${mostRecentPlanting ? 'flex-1 justify-between' : 'gap-6'}`}>
                         {renderStatCard(statCards[0])} {/* Active Plantings */}
-                        {renderStatCard(statCards[2])} {/* Total Activities */}
-                        {renderStatCard(statCards[1])} {/* Total Harvests */}
+                        {canReadHarvests && renderStatCard(statCards[2])} {/* Total Harvests */}
+                        {renderStatCard(statCards[1])} {/* Total Activities */}
                     </div>
                 </div>
             </div>
@@ -1122,16 +1135,18 @@ const Dashboard = () => {
                                     >
                                         Active Plots
                                     </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setPlotOverviewTab('completed')}
-                                        className={`rounded-xl px-3 py-1.5 text-xs font-semibold border transition-colors ${plotOverviewTab === 'completed'
-                                            ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:border-amber-700/50'
-                                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700'
-                                            }`}
-                                    >
-                                        Completed Harvests
-                                    </button>
+                                    {canReadHarvests && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setPlotOverviewTab('completed')}
+                                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold border transition-colors ${plotOverviewTab === 'completed'
+                                                ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:border-amber-700/50'
+                                                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700'
+                                                }`}
+                                        >
+                                            Completed Harvests
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 
@@ -1197,9 +1212,11 @@ const Dashboard = () => {
                                                                 <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap">
                                                                     {pendingCount} pending
                                                                 </span>
-                                                                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${yieldClass.className}`}>
-                                                                    {yieldClass.label}
-                                                                </span>
+                                                                {canReadHarvests && (
+                                                                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${yieldClass.className}`}>
+                                                                        {yieldClass.label}
+                                                                    </span>
+                                                                )}
                                                                 {criticalCount > 0 && (
                                                                     <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-100 text-red-700 whitespace-nowrap">
                                                                         {criticalCount} critical
@@ -1234,7 +1251,7 @@ const Dashboard = () => {
                                 </div>
                             )}
 
-                            {plotOverviewTab === 'completed' && (
+                            {canReadHarvests && plotOverviewTab === 'completed' && (
                                 <div className="mt-4 flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-thin">
                                     {completedHarvests.map((harvest) => {
                                         const planting = plantingsList.find((p) => p.id === harvest.planting_id);

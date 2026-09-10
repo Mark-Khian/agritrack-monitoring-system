@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { NavLink, useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth';
 import { logoutUser } from '../services/api';
+import { CAPABILITIES } from '../security/permissions';
 import {
     LogOut,
     LayoutDashboard,
@@ -18,7 +19,7 @@ import {
 } from 'lucide-react';
 
 const Sidebar = ({ onNavClick }) => {
-    const { user, logout } = useAuth();
+    const { user, logout, can } = useAuth();
     const navigate = useNavigate();
     const [showConfirm, setShowConfirm] = useState(false);
     const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -60,13 +61,13 @@ const Sidebar = ({ onNavClick }) => {
     const handleCancelLogout = () => setShowConfirm(false);
 
     const navLinks = [
-        { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-        { name: 'Plantings', path: '/plantings', icon: Sprout },
-        { name: 'Activities', path: '/activities', icon: ClipboardList },
-        { name: 'Harvests', path: '/harvests', icon: Wheat },
-        { name: 'Calendar', path: '/calendar', icon: Calendar },
-        { name: 'Analytics', path: '/analytics', icon: BarChart2 },
-    ];
+        { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, capability: CAPABILITIES.DASHBOARD_READ },
+        { name: 'Plantings', path: '/plantings', icon: Sprout, capability: CAPABILITIES.PLANTING_READ },
+        { name: 'Activities', path: '/activities', icon: ClipboardList, capability: CAPABILITIES.ACTIVITY_READ },
+        { name: 'Harvests', path: '/harvests', icon: Wheat, capability: CAPABILITIES.HARVEST_READ },
+        { name: 'Calendar', path: '/calendar', icon: Calendar, capability: CAPABILITIES.CALENDAR_READ },
+        { name: 'Analytics', path: '/analytics', icon: BarChart2, capability: CAPABILITIES.ANALYTICS_READ },
+    ].filter((link) => can(link.capability));
 
     return (
         <>

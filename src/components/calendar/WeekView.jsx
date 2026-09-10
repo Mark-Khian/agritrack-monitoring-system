@@ -50,20 +50,22 @@ const WeekView = ({
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <button
-                    disabled={backendUnavailable}
-                    onClick={(e) => {
-                      if(e) e.stopPropagation();
-                      if (onNewNote && !backendUnavailable) onNewNote(day.dateKey);
-                    }}
-                    title={backendUnavailable ? "Server unavailable" : "Add Note"}
-                    className={`p-1.5 rounded-md transition-colors ${backendUnavailable 
-                        ? "text-gray-300 dark:text-slate-600 cursor-not-allowed opacity-50"
-                        : "text-emerald-600/70 hover:text-emerald-700 hover:bg-emerald-50 dark:text-emerald-500/70 dark:hover:text-emerald-400 dark:hover:bg-emerald-900/30"
-                      }`}
-                  >
-                    <Plus size={14} />
-                  </button>
+                  {onNewNote && (
+                    <button
+                      disabled={backendUnavailable}
+                      onClick={(e) => {
+                        if(e) e.stopPropagation();
+                        if (!backendUnavailable) onNewNote(day.dateKey);
+                      }}
+                      title={backendUnavailable ? "Server unavailable" : "Add Note"}
+                      className={`p-1.5 rounded-md transition-colors ${backendUnavailable
+                          ? "text-gray-300 dark:text-slate-600 cursor-not-allowed opacity-50"
+                          : "text-emerald-600/70 hover:text-emerald-700 hover:bg-emerald-50 dark:text-emerald-500/70 dark:hover:text-emerald-400 dark:hover:bg-emerald-900/30"
+                        }`}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
                   <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-gray-100 text-gray-700 border border-gray-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
                     {dayActivities.length}
                   </span>

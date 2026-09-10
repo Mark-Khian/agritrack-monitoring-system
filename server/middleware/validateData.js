@@ -288,6 +288,34 @@ const validateActivityUpdate = [
     handleValidation
 ];
 
+const validateActivityProgress = [
+    (req, res, next) => {
+        const allowedFields = new Set(['status', 'actual_date']);
+        const unexpectedFields = Object.keys(req.body || {})
+            .filter((field) => !allowedFields.has(field));
+
+        if (unexpectedFields.length > 0) {
+            return res.status(400).json({
+                message: 'Validation failed.',
+                errors: unexpectedFields.map((field) => ({
+                    field,
+                    message: 'Field is not permitted for an activity progress update.'
+                }))
+            });
+        }
+        return next();
+    },
+    body('status')
+        .exists().withMessage('Status is required.')
+        .custom((value) => value === 'COMPLETED')
+        .withMessage('Progress status must be COMPLETED.'),
+    body('actual_date')
+        .exists().withMessage('Actual date is required when completing an activity.')
+        .notEmpty().withMessage('Actual date is required when completing an activity.')
+        .isDate().withMessage('Actual date must be a valid date.'),
+    handleValidation
+];
+
 // ── Harvest Validation ────────────────────
 const validateHarvest = [
     body('planting_id')
@@ -336,6 +364,7 @@ module.exports = {
     validatePlantingUpdate,
     validateActivity,
     validateActivityUpdate,
+    validateActivityProgress,
     validateHarvest,
     validateId
 };

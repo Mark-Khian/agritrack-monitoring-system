@@ -10,8 +10,11 @@ import { SkeletonTable } from '../components/Skeleton';
 import MonthPicker from '../components/MonthPicker';
 import Select from '../components/Select';
 import { formatDisplayDate } from '../utils/dateFormatter';
+import useAuth from '../context/useAuth';
+import { CAPABILITIES } from '../security/permissions';
 
 const Harvests = () => {
+    const { can } = useAuth();
     const [harvests, setHarvests] = useState([]);
     const [activePlantings, setActivePlantings] = useState([]); // only active for dropdown
     const [loading, setLoading] = useState(true);
@@ -244,20 +247,22 @@ const Harvests = () => {
                     >
                         <Plus size={16} /> Record Harvest
                     </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            if (harvests.length === 0) {
-                                toast.info('No harvest records available to export yet.');
-                                return;
-                            }
-                            setIsExportDrawerOpen(true);
-                        }}
-                        className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 text-white shadow-sm outline-none focus:outline-none"
-                        title={harvests.length > 0 ? 'Export bulk CSV/PDF report' : 'No harvests available for export'}
-                    >
-                        <FileDown size={16} /> Export Report
-                    </button>
+                    {can(CAPABILITIES.HARVEST_EXPORT) && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (harvests.length === 0) {
+                                    toast.info('No harvest records available to export yet.');
+                                    return;
+                                }
+                                setIsExportDrawerOpen(true);
+                            }}
+                            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 text-white shadow-sm outline-none focus:outline-none"
+                            title={harvests.length > 0 ? 'Export bulk CSV/PDF report' : 'No harvests available for export'}
+                        >
+                            <FileDown size={16} /> Export Report
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -323,14 +328,16 @@ const Harvests = () => {
                                         >
                                             <Edit2 size={16} />
                                         </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleDeleteClick(h.id)}
-                                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"
-                                            title="Delete harvest"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
+                                        {can(CAPABILITIES.HARVEST_DELETE) && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDeleteClick(h.id)}
+                                                className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"
+                                                title="Delete harvest"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -414,9 +421,11 @@ const Harvests = () => {
                                                 <button onClick={() => handleOpenModal(h)} className="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors">
                                                     <Edit2 size={16} />
                                                 </button>
-                                                <button onClick={() => handleDeleteClick(h.id)} className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors">
-                                                    <Trash2 size={16} />
-                                                </button>
+                                                {can(CAPABILITIES.HARVEST_DELETE) && (
+                                                    <button onClick={() => handleDeleteClick(h.id)} className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors">
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}
@@ -518,7 +527,7 @@ const Harvests = () => {
             </Modal>
 
             <ConfirmDialog
-                isOpen={isConfirmOpen}
+                isOpen={can(CAPABILITIES.HARVEST_DELETE) && isConfirmOpen}
                 onClose={() => setIsConfirmOpen(false)}
                 onConfirm={confirmDelete}
                 title="Delete Harvest Record"
@@ -527,7 +536,7 @@ const Harvests = () => {
 
             {/* Export Drawer */}
             <AnimatePresence>
-                {isExportDrawerOpen && (
+                {can(CAPABILITIES.HARVEST_EXPORT) && isExportDrawerOpen && (
                     <>
                         <motion.div
                             initial={{ opacity: 0 }}
