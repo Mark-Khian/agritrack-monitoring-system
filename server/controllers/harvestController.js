@@ -1,5 +1,12 @@
 ﻿const db = require('../config/db');
 const logActivity = require('../middleware/logger');
+const {
+    isDuplicateKeyError,
+    isRetryableTransactionError,
+} = require('../utils/transactionConflict');
+
+const HARVEST_EXISTS = { message: 'A harvest record already exists for this planting.' };
+const CREATE_HARVEST_ATTEMPTS = 3;
 
 const getAllHarvests = async (req, res) => {
     try {
@@ -81,6 +88,17 @@ const getHarvestById = async (req, res) => {
     }
 };
 
+const activeHarvestExists = async (executor, plantingId) => {
+    const [rows] = await executor.query(
+        `SELECT id FROM harvests
+         WHERE planting_id = ?
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        [plantingId]
+    );
+    return rows.length > 0;
+};
+
 const createHarvest = async (req, res) => {
     const {
         planting_id, harvest_date,
@@ -94,53 +112,52 @@ const createHarvest = async (req, res) => {
         return res.status(400).json({ message: 'Harvest Date cannot be in the future.' });
     }
 
-    const connection = await db.getConnection();
+    let lastError;
 
-    try {
-        await connection.beginTransaction();
+    for (let attempt = 1; attempt <= CREATE_HARVEST_ATTEMPTS; attempt += 1) {
+        const connection = await db.getConnection();
+        try {
+            await connection.beginTransaction();
 
-﻿        // Check planting exists and is active
-        const [planting] = await connection.query(
-            `SELECT p.id, p.planting_date, DATEDIFF(?, p.planting_date) AS maturity_days
-             FROM plantings p
-             WHERE p.id = ?
-               AND p.status = 'active'
-               AND p.deleted_at IS NULL`,
-            [harvest_date, planting_id]
-        );
-        if (planting.length === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-                message: 'Active planting not found.'
-            });
-        }
-        if (Number(planting[0].maturity_days) < 60) {
-            await connection.rollback();
-            return res.status(400).json({
-                message: 'Harvest cannot be recorded before 60 days from the planting date.'
-            });
-        }
-
-
-        // Check for existing harvest (active or soft-deleted)
-        const [existing] = await connection.query(
-            `SELECT id, deleted_at FROM harvests
-             WHERE planting_id = ?
-             FOR UPDATE`,
-            [planting_id]
-        );
-
-        let harvestRecordId;
-
-        if (existing.length > 0) {
-            if (existing[0].deleted_at === null) {
-                // Active harvest exists
+            const [planting] = await connection.query(
+                `SELECT p.id, p.planting_date, DATEDIFF(?, p.planting_date) AS maturity_days
+                 FROM plantings p
+                 WHERE p.id = ?
+                   AND p.status = 'active'
+                   AND p.deleted_at IS NULL`,
+                [harvest_date, planting_id]
+            );
+            if (planting.length === 0) {
+                const duplicateHarvest = await activeHarvestExists(connection, planting_id);
                 await connection.rollback();
-                return res.status(409).json({
-                    message: 'A harvest record already exists for this planting.'
+                if (duplicateHarvest) {
+                    return res.status(409).json(HARVEST_EXISTS);
+                }
+                return res.status(404).json({
+                    message: 'Active planting not found.'
                 });
-            } else {
-                // Soft-deleted harvest exists -> Reactivate
+            }
+            if (Number(planting[0].maturity_days) < 60) {
+                await connection.rollback();
+                return res.status(400).json({
+                    message: 'Harvest cannot be recorded before 60 days from the planting date.'
+                });
+            }
+
+            const [existing] = await connection.query(
+                `SELECT id, deleted_at FROM harvests
+                 WHERE planting_id = ?
+                 FOR UPDATE`,
+                [planting_id]
+            );
+
+            let harvestRecordId;
+
+            if (existing.length > 0) {
+                if (existing[0].deleted_at === null) {
+                    await connection.rollback();
+                    return res.status(409).json(HARVEST_EXISTS);
+                }
                 await connection.query(
                     `UPDATE harvests
                      SET harvest_date = ?, yield_kg = ?, quality_grade = ?,
@@ -153,84 +170,90 @@ const createHarvest = async (req, res) => {
                     ]
                 );
                 harvestRecordId = existing[0].id;
+            } else {
+                const [result] = await connection.query(
+                    `INSERT INTO harvests
+                     (planting_id, harvest_date, yield_kg, quality_grade, remarks, financial_value)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [planting_id, harvest_date, yield_kg,
+                        quality_grade || null, remarks || null, financial_value != null ? parseFloat(financial_value) : null]
+                );
+                harvestRecordId = result.insertId;
             }
-        } else {
-            // Insert harvest
-            const [result] = await connection.query(
-                `INSERT INTO harvests
-                 (planting_id, harvest_date, yield_kg, quality_grade, remarks, financial_value)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [planting_id, harvest_date, yield_kg,
-                    quality_grade || null, remarks || null, financial_value != null ? parseFloat(financial_value) : null]
+
+            await connection.query(
+                `UPDATE plantings
+                 SET status = 'completed',
+                     lifecycle_state = 'HARVESTED',
+                     lifecycle_state_changed_at = NOW(),
+                     lifecycle_state_reason = 'Harvest recorded'
+                 WHERE id = ?`,
+                [planting_id]
             );
-            harvestRecordId = result.insertId;
+
+            await connection.query(
+                `UPDATE activities
+                 SET status = 'COMPLETED', actual_date = ?
+                 WHERE planting_id = ?
+                   AND activity_type = 'harvesting'
+                   AND status = 'PENDING'
+                   AND deleted_at IS NULL`,
+                [harvest_date, planting_id]
+            );
+
+            await connection.query(
+                `UPDATE activities
+                 SET status = 'CANCELLED'
+                 WHERE planting_id = ?
+                   AND status = 'PENDING'
+                   AND actual_date IS NULL
+                   AND deleted_at IS NULL`,
+                [planting_id]
+            );
+
+            await connection.query(
+                `DELETE FROM notifications
+                 WHERE type IN ('activity_due', 'activity_overdue')
+                   AND related_id IN (
+                       SELECT id FROM activities WHERE planting_id = ?
+                   )`,
+                [planting_id]
+            );
+
+            await connection.commit();
+
+            await logActivity.fromRequest(req, {
+                action: 'CREATE_HARVEST',
+                entity: 'harvests',
+                entity_id: harvestRecordId,
+            });
+
+            return res.status(201).json({
+                message: 'Harvest recorded! Planting marked complete and pending activities archived.',
+                harvestId: harvestRecordId
+            });
+        } catch (err) {
+            try { await connection.rollback(); } catch { /* already aborted */ }
+            lastError = err;
+            const conflictRace = isDuplicateKeyError(err) || isRetryableTransactionError(err);
+            if (conflictRace && await activeHarvestExists(db, planting_id)) {
+                return res.status(409).json(HARVEST_EXISTS);
+            }
+            if (isRetryableTransactionError(err) && attempt < CREATE_HARVEST_ATTEMPTS) {
+                continue;
+            }
+            if (isDuplicateKeyError(err) && await activeHarvestExists(db, planting_id)) {
+                return res.status(409).json(HARVEST_EXISTS);
+            }
+            console.error('Create harvest error:', err.message);
+            return res.status(500).json({ message: 'Server error.' });
+        } finally {
+            connection.release();
         }
-
-        // Terminal lifecycle: harvest is the only automatic closer.
-        // NOTE: The write to lifecycle_state = 'HARVESTED' is for one-way legacy
-        // backward compatibility only. The true authoritative business state is
-        // status = 'completed'. Do not read lifecycle_state as authoritative.
-        await connection.query(
-            `UPDATE plantings
-             SET status = 'completed',
-                 lifecycle_state = 'HARVESTED',
-                 lifecycle_state_changed_at = NOW(),
-                 lifecycle_state_reason = 'Harvest recorded'
-             WHERE id = ?`,
-            [planting_id]
-        );
-
-        // â”€â”€ Reconcile Harvesting Activity â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        await connection.query(
-            `UPDATE activities
-             SET status = 'COMPLETED', actual_date = ?
-             WHERE planting_id = ?
-               AND activity_type = 'harvesting'
-               AND status = 'PENDING'
-               AND deleted_at IS NULL`,
-            [harvest_date, planting_id]
-        );
-
-        // â”€â”€ Cancel remaining operational activities (execution layer) â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        await connection.query(
-            `UPDATE activities
-             SET status = 'CANCELLED'
-             WHERE planting_id = ?
-               AND status = 'PENDING'
-               AND actual_date IS NULL
-               AND deleted_at IS NULL`,
-            [planting_id]
-        );
-
-        // â”€â”€ Clear notifications for cancelled/completed activities â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        await connection.query(
-            `DELETE FROM notifications 
-             WHERE type IN ('activity_due', 'activity_overdue')
-               AND related_id IN (
-                   SELECT id FROM activities WHERE planting_id = ?
-               )`,
-            [planting_id]
-        );
-
-        await connection.commit();
-
-        await logActivity.fromRequest(req, {
-            action: 'CREATE_HARVEST',
-            entity: 'harvests',
-            entity_id: harvestRecordId,
-        });
-
-        res.status(201).json({
-            message: 'Harvest recorded! Planting marked complete and pending activities archived.',
-            harvestId: harvestRecordId
-        });
-    } catch (err) {
-        await connection.rollback();
-        console.error('Create harvest error:', err.message);
-        res.status(500).json({ message: 'Server error.' });
-    } finally {
-        connection.release();
     }
+
+    console.error('Create harvest error:', lastError?.message);
+    return res.status(500).json({ message: 'Server error.' });
 };
 
 const updateHarvest = async (req, res) => {

@@ -6,6 +6,13 @@ const {
     hashPassword
 } = require('../utils/passwordHelper');
 const { invalidateAllSessions } = require('../utils/sessionHelper');
+const {
+    isDuplicateKeyError,
+    isRetryableTransactionError,
+} = require('../utils/transactionConflict');
+
+const USERNAME_IN_USE = { message: 'Username is already in use.' };
+const CREATE_USER_ATTEMPTS = 3;
 
 const setSecretResponseHeaders = (res) => {
     res.set('Cache-Control', 'no-store');
@@ -66,74 +73,94 @@ const listUsers = async (req, res) => {
     }
 };
 
+const usernameExists = async (executor, username) => {
+    const [rows] = await executor.query(
+        `SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1`,
+        [username, username]
+    );
+    return rows.length > 0;
+};
+
 const createUser = async (req, res) => {
     const name = req.body.name.trim();
     const username = req.body.username.trim();
     const role = req.body.role;
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await hashPassword(temporaryPassword);
-    let connection;
+    let lastError;
 
-    try {
-        connection = await db.getConnection();
-        await connection.beginTransaction();
+    for (let attempt = 1; attempt <= CREATE_USER_ATTEMPTS; attempt += 1) {
+        let connection;
+        try {
+            connection = await db.getConnection();
+            await connection.beginTransaction();
 
-        const [conflicts] = await connection.query(
-            `SELECT id
-             FROM users
-             WHERE username = ? OR email = ?
-             LIMIT 1
-             FOR UPDATE`,
-            [username, username]
-        );
-        if (conflicts.length > 0) {
-            await connection.rollback();
-            return res.status(409).json({ message: 'Username is already in use.' });
+            const [conflicts] = await connection.query(
+                `SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1 FOR UPDATE`,
+                [username, username]
+            );
+            if (conflicts.length > 0) {
+                await connection.rollback();
+                return res.status(409).json(USERNAME_IN_USE);
+            }
+
+            const [result] = await connection.query(
+                `INSERT INTO users
+                    (name, full_name, email, username, password, password_hash, role,
+                     is_active, status, must_change_password, password_changed_at,
+                     created_by, failed_attempts, failed_login_attempts)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'ACTIVE', 1, NULL, ?, 0, 0)`,
+                [
+                    name,
+                    name,
+                    username,
+                    username,
+                    passwordHash,
+                    passwordHash,
+                    role,
+                    req.user.id
+                ]
+            );
+            await audit(req, 'CREATE_USER', result.insertId, connection);
+            await connection.commit();
+
+            setSecretResponseHeaders(res);
+            return res.status(201).json({
+                message: 'Account created successfully.',
+                user: {
+                    id: result.insertId,
+                    name,
+                    username,
+                    role,
+                    is_active: true,
+                    must_change_password: true
+                },
+                temporaryPassword
+            });
+        } catch (err) {
+            if (connection) {
+                try { await connection.rollback(); } catch { /* already aborted */ }
+            }
+            lastError = err;
+            const conflictRace = isDuplicateKeyError(err) || isRetryableTransactionError(err);
+            if (conflictRace && await usernameExists(db, username)) {
+                return res.status(409).json(USERNAME_IN_USE);
+            }
+            if (isRetryableTransactionError(err) && attempt < CREATE_USER_ATTEMPTS) {
+                continue;
+            }
+            if (isDuplicateKeyError(err)) {
+                return res.status(409).json(USERNAME_IN_USE);
+            }
+            console.error('Create user error:', err.message);
+            return res.status(500).json({ message: 'Server error.' });
+        } finally {
+            if (connection) connection.release();
         }
-
-        const [result] = await connection.query(
-            `INSERT INTO users
-                (name, full_name, email, username, password, password_hash, role,
-                 is_active, status, must_change_password, password_changed_at,
-                 created_by, failed_attempts, failed_login_attempts)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'ACTIVE', 1, NULL, ?, 0, 0)`,
-            [
-                name,
-                name,
-                username,
-                username,
-                passwordHash,
-                passwordHash,
-                role,
-                req.user.id
-            ]
-        );
-        await audit(req, 'CREATE_USER', result.insertId, connection);
-        await connection.commit();
-
-        setSecretResponseHeaders(res);
-        return res.status(201).json({
-            message: 'Account created successfully.',
-            user: {
-                id: result.insertId,
-                name,
-                username,
-                role,
-                is_active: true,
-                must_change_password: true
-            },
-            temporaryPassword
-        });
-    } catch (err) {
-        if (connection) await connection.rollback();
-        if (err.code === 'ER_DUP_ENTRY') {
-            return res.status(409).json({ message: 'Username is already in use.' });
-        }
-        console.error('Create user error:', err.message);
-        return res.status(500).json({ message: 'Server error.' });
-    } finally {
-        if (connection) connection.release();
     }
+
+    console.error('Create user error:', lastError?.message);
+    return res.status(500).json({ message: 'Server error.' });
 };
 
 const resetPassword = async (req, res) => {
