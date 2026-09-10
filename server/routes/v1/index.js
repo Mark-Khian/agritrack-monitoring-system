@@ -13,5 +13,6 @@ router.use('/backups', require('../backupRoutes'));
 router.use('/notifications', require('../notificationRoutes'));
 router.use('/notes', require('../noteRoutes'));
 router.use('/users', require('../userRoutes'));
+router.use('/audit', require('../auditRoutes'));
 
 module.exports = router;

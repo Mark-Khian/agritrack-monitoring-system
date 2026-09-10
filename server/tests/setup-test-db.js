@@ -64,7 +64,8 @@ const TEST_DB = 'crop_management_rearch_test';
     const MIGRATIONS = [
         '008_add_v2_auth_foundation.sql',
         '009_relax_legacy_activity_date.sql',
-        '010_add_login_challenges.sql'
+        '010_add_login_challenges.sql',
+        '011_add_activity_logs_indexes.sql'
     ];
 
     for (const file of MIGRATIONS) {

@@ -31,6 +31,7 @@ const CAPABILITIES = Object.freeze({
     ACCOUNT_MANAGE: 'account.manage',
     FARM_LOCATION_MANAGE: 'farm_location.manage',
     BACKUPS_MANAGE: 'backups.manage',
+    AUDIT_READ: 'audit.read',
 });
 
 const COMMON_READ = Object.freeze([
@@ -65,6 +66,7 @@ const ROLE_CAPABILITIES = Object.freeze({
         CAPABILITIES.ACCOUNT_MANAGE,
         CAPABILITIES.FARM_LOCATION_MANAGE,
         CAPABILITIES.BACKUPS_MANAGE,
+        CAPABILITIES.AUDIT_READ,
     ]),
     [ROLES.SECRETARY]: Object.freeze([
         ...COMMON_READ,

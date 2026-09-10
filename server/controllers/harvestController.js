@@ -214,12 +214,10 @@ const createHarvest = async (req, res) => {
 
         await connection.commit();
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'CREATE_HARVEST',
             entity: 'harvests',
             entity_id: harvestRecordId,
-            ip_address: req.ip
         });
 
         res.status(201).json({
@@ -298,12 +296,10 @@ const updateHarvest = async (req, res) => {
 
         await connection.commit();
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'UPDATE_HARVEST',
             entity: 'harvests',
             entity_id: parseInt(req.params.id),
-            ip_address: req.ip
         });
 
         res.status(200).json({ message: 'Harvest updated!' });
@@ -373,12 +369,10 @@ const deleteHarvest = async (req, res) => {
 
         await connection.commit();
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'DELETE_HARVEST',
             entity: 'harvests',
             entity_id: parseInt(req.params.id),
-            ip_address: req.ip
         });
 
         res.status(200).json({ message: 'Harvest deleted! Planting and harvesting task reverted to active.' });

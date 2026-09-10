@@ -60,6 +60,7 @@ export const resetUserPassword = (id) => API.post(`/users/${id}/reset-password`)
 export const disableUser = (id) => API.patch(`/users/${id}/disable`);
 export const reactivateUser = (id) => API.patch(`/users/${id}/reactivate`);
 export const revokeUserSessions = (id) => API.post(`/users/${id}/revoke-sessions`);
+export const getAuditLogs = (params = {}) => API.get('/audit', { params });
 
 // ── Plantings ─────────────────────────────
 // params: { status, limit } — use status='active' for harvest/activity dropdowns

@@ -14,7 +14,8 @@ import {
     BarChart2,
     User,
     Calendar,
-    Users
+    Users,
+    ScrollText
 } from 'lucide-react';
 
 const Sidebar = ({ onNavClick }) => {
@@ -66,6 +67,7 @@ const Sidebar = ({ onNavClick }) => {
         { name: 'Calendar', path: '/calendar', icon: Calendar, capability: CAPABILITIES.CALENDAR_READ },
         { name: 'Analytics', path: '/analytics', icon: BarChart2, capability: CAPABILITIES.ANALYTICS_READ },
         { name: 'Accounts', path: '/accounts', icon: Users, capability: CAPABILITIES.ACCOUNT_MANAGE },
+        { name: 'Audit Log', path: '/audit', icon: ScrollText, capability: CAPABILITIES.AUDIT_READ },
     ].filter((link) => can(link.capability));
 
     return (

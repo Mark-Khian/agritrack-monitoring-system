@@ -375,20 +375,16 @@ const createPlanting = async (req, res) => {
         }
 
         try {
-            await logActivity({
-                user_id: req.user.id,
+            await logActivity.fromRequest(req, {
                 action: 'CREATE_PLANTING',
                 entity: 'plantings',
                 entity_id: pid,
-                ip_address: req.ip
             });
             if (manualOverride) {
-                await logActivity({
-                    user_id: req.user.id,
+                await logActivity.fromRequest(req, {
                     action: 'PLANTING_GROWTH_MANUAL_OVERRIDE',
                     entity: 'plantings',
                     entity_id: pid,
-                    ip_address: req.ip
                 });
             }
         } catch (auditErr) {
@@ -640,39 +636,31 @@ const updatePlanting = async (req, res) => {
 
         try {
             if (partialIndices.length > 0) {
-                await logActivity({
-                    user_id: req.user.id,
+                await logActivity.fromRequest(req, {
                     action: 'PLANTING_PARTIAL_ACTIVITIES',
                     entity: 'plantings',
                     entity_id: parseInt(req.params.id, 10),
-                    ip_address: req.ip
                 });
             }
 
-            await logActivity({
-                user_id: req.user.id,
+            await logActivity.fromRequest(req, {
                 action: 'UPDATE_PLANTING',
                 entity: 'plantings',
                 entity_id: parseInt(req.params.id, 10),
-                ip_address: req.ip
             });
 
             if (varietyChanged) {
-                await logActivity({
-                    user_id: req.user.id,
+                await logActivity.fromRequest(req, {
                     action: 'PLANTING_VARIETY_CHANGED',
                     entity: 'plantings',
                     entity_id: parseInt(req.params.id, 10),
-                    ip_address: req.ip
                 });
             }
             if (bodyMo !== undefined && bodyMo !== !!Number(cur.growth_plan_manual_override)) {
-                await logActivity({
-                    user_id: req.user.id,
+                await logActivity.fromRequest(req, {
                     action: bodyMo ? 'PLANTING_GROWTH_MANUAL_OVERRIDE_ON' : 'PLANTING_GROWTH_MANUAL_OVERRIDE_OFF',
                     entity: 'plantings',
                     entity_id: parseInt(req.params.id, 10),
-                    ip_address: req.ip
                 });
             }
         } catch (auditErr) {
@@ -697,12 +685,10 @@ const deletePlanting = async (req, res) => {
         if (result.affectedRows === 0)
             return res.status(404).json({ message: 'Planting not found.' });
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'DELETE_PLANTING',
             entity: 'plantings',
             entity_id: parseInt(req.params.id, 10),
-            ip_address: req.ip
         });
 
         res.status(200).json({ message: 'Planting deleted!' });

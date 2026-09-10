@@ -5,6 +5,7 @@ const fs = require('fs');
 const { protect } = require('../middleware/authMiddleware');
 const { authorize, CAPABILITIES } = require('../security/rbac');
 const { runBackup, listBackups } = require('../utils/backup');
+const logActivity = require('../middleware/logger');
 
 router.use(protect);
 router.use(authorize(CAPABILITIES.BACKUPS_MANAGE));
@@ -27,8 +28,12 @@ if (process.env.NODE_ENV !== 'production') {
     });
 
     // ── Trigger manual backup ────────────────
-    router.post('/run', (req, res) => {
+    router.post('/run', async (req, res) => {
         try {
+            await logActivity.fromRequest(req, {
+                action: 'RUN_BACKUP',
+                entity: 'backups',
+            });
             runBackup();
             res.status(200).json({
                 message: '✅ Backup started! Check server logs for status.'
@@ -39,7 +44,7 @@ if (process.env.NODE_ENV !== 'production') {
     });
 
     // ── Download a backup file ───────────────
-    router.get('/download/:filename', (req, res) => {
+    router.get('/download/:filename', async (req, res) => {
         const filename = req.params.filename;
 
         if (filename.includes('..') || filename.includes('/')) {
@@ -52,6 +57,10 @@ if (process.env.NODE_ENV !== 'production') {
             return res.status(404).json({ message: 'Backup file not found.' });
         }
 
+        await logActivity.fromRequest(req, {
+            action: 'DOWNLOAD_BACKUP',
+            entity: 'backups',
+        });
         res.download(filepath, filename);
     });
 }

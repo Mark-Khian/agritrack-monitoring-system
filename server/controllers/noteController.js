@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const logActivity = require('../middleware/logger');
 
 // @desc    Get all notes for a user
 // @route   GET /api/v1/notes
@@ -37,6 +38,12 @@ const createNote = async (req, res) => {
 
         const [newNote] = await db.query('SELECT * FROM notes WHERE id = ?', [result.insertId]);
 
+        await logActivity.fromRequest(req, {
+            action: 'CREATE_NOTE',
+            entity: 'notes',
+            entity_id: result.insertId,
+        });
+
         res.status(201).json({ success: true, data: newNote[0] });
     } catch (err) {
         console.error('createNote error:', err);
@@ -70,6 +77,12 @@ const updateNote = async (req, res) => {
 
         const [updatedNote] = await db.query('SELECT * FROM notes WHERE id = ?', [noteId]);
 
+        await logActivity.fromRequest(req, {
+            action: 'UPDATE_NOTE',
+            entity: 'notes',
+            entity_id: parseInt(noteId, 10),
+        });
+
         res.status(200).json({ success: true, data: updatedNote[0] });
     } catch (err) {
         console.error('updateNote error:', err);
@@ -92,6 +105,12 @@ const deleteNote = async (req, res) => {
         }
 
         await db.query('DELETE FROM notes WHERE id = ?', [noteId]);
+
+        await logActivity.fromRequest(req, {
+            action: 'DELETE_NOTE',
+            entity: 'notes',
+            entity_id: parseInt(noteId, 10),
+        });
 
         res.status(200).json({ success: true, data: {} });
     } catch (err) {

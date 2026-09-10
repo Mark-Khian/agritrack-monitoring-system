@@ -2,6 +2,7 @@ const db = require('../config/db');
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
+const logActivity = require('../middleware/logger');
 
 // ── Helpers ────────────────────────────────────────────────────────
 const formatDate = (d) => {
@@ -459,6 +460,10 @@ const exportPlantingsCSV = async (req, res) => {
         const rows = await getCompletedCropRecords(req, true);
         const csvData = generateCompletedCropsCSV(rows);
         const dateStr = new Date().toISOString().slice(0, 10);
+        await logActivity.fromRequest(req, {
+            action: 'EXPORT_PLANTINGS_CSV',
+            entity: 'plantings',
+        });
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.csv"`);
         return res.status(200).send(csvData);
@@ -474,6 +479,10 @@ const exportHarvestsCSV = async (req, res) => {
         const rows = await getCompletedCropRecords(req, false);
         const csvData = generateCompletedCropsCSV(rows);
         const dateStr = new Date().toISOString().slice(0, 10);
+        await logActivity.fromRequest(req, {
+            action: 'EXPORT_HARVESTS_CSV',
+            entity: 'harvests',
+        });
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.csv"`);
         return res.status(200).send(csvData);
@@ -489,6 +498,11 @@ const exportPlantingPDF = async (req, res) => {
         const rows = await getCompletedCropRecords(req, true);
         const pdfBuffer = await generateCompletedCropsPDFBuffer(rows);
         const dateStr = new Date().toISOString().slice(0, 10);
+        await logActivity.fromRequest(req, {
+            action: 'EXPORT_PLANTING_PDF',
+            entity: 'plantings',
+            entity_id: parseInt(req.params.id, 10) || null,
+        });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.pdf"`);
         return res.send(pdfBuffer);
@@ -504,6 +518,10 @@ const exportPlantingsPDF = async (req, res) => {
         const rows = await getCompletedCropRecords(req, true);
         const pdfBuffer = await generateCompletedCropsPDFBuffer(rows);
         const dateStr = new Date().toISOString().slice(0, 10);
+        await logActivity.fromRequest(req, {
+            action: 'EXPORT_PLANTINGS_PDF',
+            entity: 'plantings',
+        });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.pdf"`);
         return res.send(pdfBuffer);
@@ -519,6 +537,10 @@ const exportHarvestsPDF = async (req, res) => {
         const rows = await getCompletedCropRecords(req, false);
         const pdfBuffer = await generateCompletedCropsPDFBuffer(rows);
         const dateStr = new Date().toISOString().slice(0, 10);
+        await logActivity.fromRequest(req, {
+            action: 'EXPORT_HARVESTS_PDF',
+            entity: 'harvests',
+        });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="completed-crop-records-${dateStr}.pdf"`);
         return res.send(pdfBuffer);

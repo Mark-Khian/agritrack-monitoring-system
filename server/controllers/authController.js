@@ -18,6 +18,7 @@ try {
 }
 const { privateKey, publicKey } = require('../config/keys');
 const logActivity = require('../middleware/logger');
+const { getClientIp } = require('../utils/clientIp');
 const { extractBearerToken, SESSION_COOKIE_NAME } = require('../middleware/authMiddleware');
 const {
     createSession,
@@ -28,7 +29,6 @@ const {
     cleanupSessions
 } = require('../utils/sessionHelper');
 const { comparePassword, hashPassword } = require('../utils/passwordHelper');
-const { getClientIp } = require('../utils/clientIp');
 const { normalizeLoginIdentity } = require('../utils/loginIdentity');
 const {
     GENERIC_UNAVAILABLE,
@@ -123,8 +123,11 @@ const login = async (req, res) => {
             if (user) {
                 await incrementUserFailures(user.id);
                 await logActivity({
-                    user_id: user.id,
+                    user_id: null,
+                    actor_role: null,
                     action: 'LOGIN_FAILED',
+                    entity: 'users',
+                    entity_id: user.id,
                     ip_address: ip,
                     status: 'failed'
                 });
@@ -168,6 +171,7 @@ const login = async (req, res) => {
 
         await logActivity({
             user_id: user.id,
+            actor_role: logActivity.snapshotRole(user.role),
             action: 'LOGIN_SUCCESS',
             entity: 'users',
             entity_id: user.id,
@@ -220,7 +224,7 @@ const getMe = async (req, res) => {
 const logout = async (req, res) => {
     const bearerToken = extractBearerToken(req);
     const cookieToken = req.cookies?.[SESSION_COOKIE_NAME];
-    const ip = req.ip;
+    const ip = getClientIp(req);
     let userId = null;
 
     try {
@@ -240,6 +244,14 @@ const logout = async (req, res) => {
         }
 
         if (cookieToken) {
+            if (!userId) {
+                const tokenHash = crypto.createHash('sha256').update(cookieToken).digest('hex');
+                const [sessions] = await db.query(
+                    'SELECT user_id FROM sessions WHERE token_hash = ? LIMIT 1',
+                    [tokenHash]
+                );
+                if (sessions.length) userId = sessions[0].user_id;
+            }
             await invalidateSession(cookieToken);
         }
 
@@ -247,9 +259,13 @@ const logout = async (req, res) => {
         res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
 
         if (userId) {
+            const [actors] = await db.query('SELECT role FROM users WHERE id = ?', [userId]);
             await logActivity({
                 user_id: userId,
+                actor_role: logActivity.snapshotRole(actors[0]?.role),
                 action: 'LOGOUT',
+                entity: 'users',
+                entity_id: userId,
                 ip_address: ip
             });
         }
@@ -278,10 +294,10 @@ const logoutAllDevices = async (req, res) => {
     try {
         await invalidateAllSessions(req.user.id);
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'LOGOUT_ALL_DEVICES',
-            ip_address: req.ip
+            entity: 'users',
+            entity_id: req.user.id
         });
         
         // Also clear the current session cookie
@@ -318,6 +334,12 @@ const changePassword = async (req, res) => {
         const currentMatches = await comparePassword(currentPassword, users[0].password);
         if (!currentMatches) {
             await connection.rollback();
+            await logActivity.fromRequest(req, {
+                action: 'CHANGE_PASSWORD',
+                entity: 'users',
+                entity_id: req.user.id,
+                status: 'failed'
+            });
             return res.status(400).json({
                 message: 'Validation failed.',
                 errors: [{ field: 'currentPassword', message: 'Current password is incorrect.' }]
@@ -344,15 +366,13 @@ const changePassword = async (req, res) => {
             [passwordHash, passwordHash, req.user.id]
         );
         await invalidateAllSessionsExceptToken(req.user.id, req.token, connection);
-        await connection.commit();
-
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'CHANGE_PASSWORD',
             entity: 'users',
             entity_id: req.user.id,
-            ip_address: req.ip
+            connection
         });
+        await connection.commit();
 
         return res.status(200).json({ message: 'Password changed successfully.' });
     } catch (err) {
@@ -600,12 +620,10 @@ const updateFarmLocation = async (req, res) => {
         );
 
         // Also log the settings change
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'UPDATE_FARM_LOCATION',
             entity: 'users',
-            entity_id: req.user.id,
-            ip_address: req.ip
+            entity_id: req.user.id
         });
 
         res.status(200).json({ message: 'Farm location saved successfully.' });
@@ -636,12 +654,10 @@ const removeFarmLocation = async (req, res) => {
 
         await connection.commit();
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'REMOVE_FARM_LOCATION',
             entity: 'users',
-            entity_id: req.user.id,
-            ip_address: req.ip
+            entity_id: req.user.id
         });
 
         res.status(200).json({ message: 'Farm location removed successfully.' });

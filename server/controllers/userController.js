@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const logActivity = require('../middleware/logger');
+const { getClientIp } = require('../utils/clientIp');
 const {
     generateTemporaryPassword,
     hashPassword
@@ -22,12 +23,14 @@ const getLockedSubordinate = async (connection, userId) => {
     return users[0] || null;
 };
 
-const audit = (req, action, targetId) => logActivity({
+const audit = (req, action, targetId, connection) => logActivity({
     user_id: req.user.id,
+    actor_role: logActivity.snapshotRole(req.user.role),
     action,
     entity: 'users',
     entity_id: targetId,
-    ip_address: req.ip
+    ip_address: getClientIp(req),
+    connection
 });
 
 const listUsers = async (req, res) => {
@@ -105,9 +108,9 @@ const createUser = async (req, res) => {
                 req.user.id
             ]
         );
+        await audit(req, 'CREATE_USER', result.insertId, connection);
         await connection.commit();
 
-        await audit(req, 'CREATE_USER', result.insertId);
         setSecretResponseHeaders(res);
         return res.status(201).json({
             message: 'Account created successfully.',
@@ -166,9 +169,9 @@ const resetPassword = async (req, res) => {
             [passwordHash, passwordHash, target.id]
         );
         await invalidateAllSessions(target.id, connection);
+        await audit(req, 'RESET_USER_PASSWORD', target.id, connection);
         await connection.commit();
 
-        await audit(req, 'RESET_USER_PASSWORD', target.id);
         setSecretResponseHeaders(res);
         return res.status(200).json({
             message: 'Password reset successfully.',
@@ -209,9 +212,9 @@ const disableUser = async (req, res) => {
             [req.user.id, target.id]
         );
         await invalidateAllSessions(target.id, connection);
+        await audit(req, 'DISABLE_USER', target.id, connection);
         await connection.commit();
 
-        await audit(req, 'DISABLE_USER', target.id);
         return res.status(200).json({ message: 'Account disabled successfully.' });
     } catch (err) {
         if (connection) await connection.rollback();
@@ -259,9 +262,9 @@ const reactivateUser = async (req, res) => {
             [passwordHash, passwordHash, target.id]
         );
         await invalidateAllSessions(target.id, connection);
+        await audit(req, 'REACTIVATE_USER', target.id, connection);
         await connection.commit();
 
-        await audit(req, 'REACTIVATE_USER', target.id);
         setSecretResponseHeaders(res);
         return res.status(200).json({
             message: 'Account reactivated successfully.',
@@ -289,9 +292,9 @@ const revokeSessions = async (req, res) => {
         }
 
         await invalidateAllSessions(target.id, connection);
+        await audit(req, 'REVOKE_USER_SESSIONS', target.id, connection);
         await connection.commit();
 
-        await audit(req, 'REVOKE_USER_SESSIONS', target.id);
         return res.status(200).json({ message: 'Account sessions revoked successfully.' });
     } catch (err) {
         if (connection) await connection.rollback();

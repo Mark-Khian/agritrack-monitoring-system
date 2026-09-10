@@ -188,12 +188,10 @@ const createActivity = async (req, res) => {
             }
         }
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'CREATE_ACTIVITY',
             entity: 'activities',
             entity_id: result.insertId,
-            ip_address: req.ip
         });
 
         res.status(201).json({
@@ -271,12 +269,10 @@ const updateActivity = async (req, res) => {
             );
         }
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'UPDATE_ACTIVITY',
             entity: 'activities',
             entity_id: parseInt(req.params.id),
-            ip_address: req.ip
         });
 
         res.status(200).json({ message: 'Activity updated!' });
@@ -324,12 +320,10 @@ const updateActivityProgress = async (req, res) => {
             [req.params.id]
         );
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'UPDATE_ACTIVITY_PROGRESS',
             entity: 'activities',
             entity_id: parseInt(req.params.id),
-            ip_address: req.ip
         });
 
         return res.status(200).json({ message: 'Activity marked as completed!' });
@@ -356,12 +350,10 @@ const deleteActivity = async (req, res) => {
             [req.params.id]
         );
 
-        await logActivity({
-            user_id: req.user.id,
+        await logActivity.fromRequest(req, {
             action: 'DELETE_ACTIVITY',
             entity: 'activities',
             entity_id: parseInt(req.params.id),
-            ip_address: req.ip
         });
 
         res.status(200).json({ message: 'Activity deleted!' });

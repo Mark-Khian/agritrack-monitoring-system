@@ -9,6 +9,7 @@ import Harvests from './pages/Harvests';
 import Analytics from './pages/Analytics';
 import Calendar from './pages/Calendar';
 import Accounts from './pages/Accounts';
+import AuditLog from './pages/AuditLog';
 import ChangePassword from './pages/ChangePassword';
 import NotFound from './pages/NotFound';
 import { AlertCircle, RefreshCw } from 'lucide-react';
@@ -120,6 +121,13 @@ function App() {
         <ProtectedRoute capability={CAPABILITIES.ACCOUNT_MANAGE}>
           <Layout>
             <Accounts />
+          </Layout>
+        </ProtectedRoute>
+      } />
+      <Route path="/audit" element={
+        <ProtectedRoute capability={CAPABILITIES.AUDIT_READ}>
+          <Layout>
+            <AuditLog />
           </Layout>
         </ProtectedRoute>
       } />
