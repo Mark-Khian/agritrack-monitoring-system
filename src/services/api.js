@@ -2,26 +2,50 @@ import axios from 'axios';
 
 const API = axios.create({
     baseURL: '/api/v1',
+    withCredentials: true,
 });
 
-// Automatically attach token to every request
-API.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+let unauthorizedHandler = null;
+
+export const setUnauthorizedHandler = (handler) => {
+    unauthorizedHandler = typeof handler === 'function' ? handler : null;
+
+    return () => {
+        if (unauthorizedHandler === handler) {
+            unauthorizedHandler = null;
+        }
+    };
+};
+
+const GLOBAL_401_EXCLUSIONS = new Set([
+    '/auth/login',
+    '/auth/me',
+    '/auth/logout',
+]);
+
+API.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        const requestPath = error.config?.url?.split('?')[0];
+        if (
+            error.response?.status === 401
+            && !GLOBAL_401_EXCLUSIONS.has(requestPath)
+        ) {
+            unauthorizedHandler?.();
+        }
+        return Promise.reject(error);
     }
-    return config;
-});
+);
 
 // ── Dashboard ────────────────────────────
 export const getLifecycleMonitoring = () => API.get('/dashboard/lifecycle-monitoring');
 
 // ── Auth ──────────────────────────────────
 export const loginUser = (data) => API.post('/auth/login', data);
-export const logoutUser = () => API.post('/auth/logout');
+export const logoutUser = () => API.post('/auth/logout', undefined, { timeout: 10_000 });
+export const getCurrentUser = () => API.get('/auth/me', { timeout: 10_000 });
 export const getSessionsUser = () => API.get('/auth/sessions');
 export const logoutAllUser = () => API.post('/auth/logout-all');
-export const refreshTokenUser = (data) => API.post('/auth/refresh', data);
 export const resolveLocation = (location) => API.post('/auth/resolve-location', { location });
 export const updateFarmLocation = (data) => API.put('/auth/farm-location', data);
 export const deleteFarmLocation = () => API.delete('/auth/farm-location');

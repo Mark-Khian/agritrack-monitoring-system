@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import useAuth from '../context/useAuth';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -40,8 +39,6 @@ import {
     getWeather
 } from '../services/api';
 
-const API_HOST = window.location.hostname;
-const API = `http://${API_HOST}:5000/api/v1`;
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
 
 const PLANTING_VARIETY_CLASS_FILTERS = [
@@ -147,7 +144,6 @@ const isCompletedPlanting = (p) => {
 let dashboardCache = null;
 
 const Dashboard = () => {
-    const { token } = useAuth();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -230,8 +226,6 @@ const Dashboard = () => {
     const [rainExpected, setRainExpected] = useState(false);
 
     useEffect(() => {
-        if (!token) return;
-
         const fetchAll = async () => {
             try {
                 const [plantingsRes, harvestsRes, activitiesRes] = await Promise.all([
@@ -306,7 +300,7 @@ const Dashboard = () => {
             }
         };
         fetchAll();
-    }, [token]);
+    }, []);
 
     if (loading) {
         return (

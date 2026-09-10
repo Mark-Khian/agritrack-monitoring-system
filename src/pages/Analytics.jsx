@@ -1,6 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
-import useAuth from '../context/useAuth';
 import {
     AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, Legend,
     XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList
@@ -24,9 +22,8 @@ import {
 } from '../components/Skeleton';
 import { QualityGradeBadge } from '../components/QualityGradeBadge';
 import { formatDisplayDate } from '../utils/dateFormatter';
+import { getActivities, getHarvests, getPlantings } from '../services/api';
 
-const API_HOST = window.location.hostname;
-const API = `http://${API_HOST}:5000/api/v1`;
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
 
 const PLANTING_VARIETY_CLASS_FILTERS = [
@@ -267,8 +264,6 @@ const EmptyChart = ({ message }) => (
 );
 
 const Analytics = () => {
-    const { token } = useAuth();
-
     const [dateRange, setDateRange] = useState('7d');
     const [plantingFilters] = useState({
         variety_class: '',
@@ -290,32 +285,32 @@ const Analytics = () => {
         if (isRetry) setIsRetrying(true);
         else setLoading(true);
 
-        const plantingQs = new URLSearchParams({ limit: '100' });
-        if (plantingFilters.variety_class) plantingQs.set('variety_class', plantingFilters.variety_class);
-        if (plantingFilters.variety_id && !plantingFilters.variety_null) plantingQs.set('variety_id', String(Number(plantingFilters.variety_id)));
-        if (plantingFilters.variety_null) plantingQs.set('variety_null', '1');
-
-        const headers = { Authorization: `Bearer ${token}` };
+        const plantingParams = { limit: 100 };
+        if (plantingFilters.variety_class) plantingParams.variety_class = plantingFilters.variety_class;
+        if (plantingFilters.variety_id && !plantingFilters.variety_null) {
+            plantingParams.variety_id = String(Number(plantingFilters.variety_id));
+        }
+        if (plantingFilters.variety_null) plantingParams.variety_null = '1';
         
         try {
             const promises = [];
             if (!isRetry || plantingsError) {
                 promises.push(
-                    axios.get(`${API}/plantings?${plantingQs.toString()}`, { headers })
+                    getPlantings(plantingParams)
                         .then(res => { setPlantings(res.data.data || []); setPlantingsError(false); })
                         .catch(err => { console.error('Plantings fetch error:', err.message); setPlantings([]); setPlantingsError(true); })
                 );
             }
             if (!isRetry || harvestsError) {
                 promises.push(
-                    axios.get(`${API}/harvests?limit=100`, { headers })
+                    getHarvests({ limit: 100 })
                         .then(res => { setHarvests(res.data.data || []); setHarvestsError(false); })
                         .catch(err => { console.error('Harvests fetch error:', err.message); setHarvests([]); setHarvestsError(true); })
                 );
             }
             if (!isRetry || activitiesError) {
                 promises.push(
-                    axios.get(`${API}/activities?limit=100`, { headers })
+                    getActivities({ limit: 100 })
                         .then(res => { setActivities(res.data.data || []); setActivitiesError(false); })
                         .catch(err => { console.error('Activities fetch error:', err.message); setActivities([]); setActivitiesError(true); })
                 );
@@ -326,12 +321,11 @@ const Analytics = () => {
             if (isRetry) setIsRetrying(false);
             else setLoading(false);
         }
-    }, [token, plantingFilters, plantingsError, harvestsError, activitiesError]);
+    }, [plantingFilters, plantingsError, harvestsError, activitiesError]);
 
     useEffect(() => {
-        if (!token) return;
         fetchAllData(false);
-    }, [token, plantingFilters]); // Only depend on token and filters for initial load
+    }, [plantingFilters]); // Only depend on filters for initial load
 
     const handleRetry = () => {
         fetchAllData(true);

@@ -4,7 +4,7 @@ import useAuth from '../context/useAuth';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
 
 const NotFound = () => {
-  const { token } = useAuth();
+  const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -18,7 +18,7 @@ const NotFound = () => {
   }, []);
 
   const handleGoBack = () => {
-    if (token) {
+    if (isAuthenticated) {
       navigate('/dashboard');
     } else {
       navigate('/');
@@ -44,7 +44,7 @@ const NotFound = () => {
           className="flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-medium rounded-lg transition-all duration-200"
         >
           <ArrowLeft className="w-5 h-5" />
-          {token ? 'Back to Dashboard' : 'Back to Login'}
+          {isAuthenticated ? 'Back to Dashboard' : 'Back to Login'}
         </button>
       </div>
     </div>

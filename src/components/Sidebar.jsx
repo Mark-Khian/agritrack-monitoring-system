@@ -48,8 +48,12 @@ const Sidebar = ({ onNavClick }) => {
             console.error('Logout error:', err.message);
             setLogoutPhase('idle');
             setIsLoggingOut(false);
-            logout();
-            navigate('/');
+            // A network/5xx failure does not prove the HttpOnly server session was
+            // revoked. Keep the authenticated UI so the user can retry logout.
+            if (err.response?.status === 401) {
+                logout();
+                navigate('/');
+            }
         }
     };
 

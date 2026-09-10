@@ -1,63 +1,109 @@
-import { createContext, useState } from 'react';
+import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getCurrentUser, setUnauthorizedHandler } from '../services/api';
 
 const AuthContext = createContext();
 export default AuthContext;
 
-export const AuthProvider = ({ children }) => {
-    const [authState, setAuthState] = useState(() => {
-        const isTokenValid = (rawToken) => {
-            try {
-                const payloadBase64 = rawToken.split('.')[1];
-                if (!payloadBase64) return false;
+const LEGACY_AUTH_KEYS = ['token', 'refreshToken', 'user'];
 
-                const normalized = payloadBase64.replace(/-/g, '+').replace(/_/g, '/');
-                const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-                const payload = JSON.parse(atob(padded));
-
-                if (!payload.exp) return true;
-                return payload.exp * 1000 > Date.now();
-            } catch {
-                return false;
-            }
-        };
-
-        const savedToken = localStorage.getItem('token');
-        const savedUser = localStorage.getItem('user');
-
-        if (savedToken && isTokenValid(savedToken)) {
-            let parsedUser = null;
-            if (savedUser) {
-                try {
-                    parsedUser = JSON.parse(savedUser);
-                } catch {
-                    parsedUser = null;
-                }
-            }
-            return { user: parsedUser, token: savedToken };
-        } else {
-            localStorage.removeItem('token');
-            localStorage.removeItem('refreshToken');
-            localStorage.removeItem('user');
-            return { user: null, token: null };
+const removeLegacyAuthStorage = () => {
+    for (const storage of [localStorage, sessionStorage]) {
+        for (const key of LEGACY_AUTH_KEYS) {
+            storage.removeItem(key);
         }
+    }
+};
+
+const normalizeUser = (data) => {
+    if (
+        !data
+        || data.id === undefined
+        || typeof data.name !== 'string'
+        || typeof data.username !== 'string'
+        || typeof data.role !== 'string'
+    ) {
+        throw new Error('Invalid /auth/me response.');
+    }
+
+    return {
+        id: data.id,
+        name: data.name,
+        username: data.username,
+        role: data.role,
+    };
+};
+
+export const AuthProvider = ({ children }) => {
+    const [authState, setAuthState] = useState({
+        user: null,
+        status: 'checking',
     });
+    const sessionCheckId = useRef(0);
 
-    const login = (userData, tokenData, refreshTokenData) => {
-        setAuthState({ user: userData, token: tokenData });
-        localStorage.setItem('token', tokenData);
-        if (refreshTokenData) localStorage.setItem('refreshToken', refreshTokenData);
-        localStorage.setItem('user', JSON.stringify(userData));
-    };
+    const checkSession = useCallback(async () => {
+        const checkId = ++sessionCheckId.current;
+        setAuthState((current) => ({ ...current, status: 'checking' }));
 
-    const logout = () => {
-        setAuthState({ user: null, token: null });
-        localStorage.removeItem('token');
-        localStorage.removeItem('refreshToken');
-        localStorage.removeItem('user');
-    };
+        try {
+            const response = await getCurrentUser();
+            if (checkId !== sessionCheckId.current) return;
+
+            setAuthState({
+                user: normalizeUser(response.data),
+                status: 'authenticated',
+            });
+        } catch (error) {
+            if (checkId !== sessionCheckId.current) return;
+
+            if (error.response?.status === 401) {
+                setAuthState({ user: null, status: 'unauthenticated' });
+            } else {
+                setAuthState((current) => ({
+                    user: current.user,
+                    status: 'unavailable',
+                }));
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        removeLegacyAuthStorage();
+        const timer = window.setTimeout(checkSession, 0);
+        return () => {
+            window.clearTimeout(timer);
+            sessionCheckId.current += 1;
+        };
+    }, [checkSession]);
+
+    useEffect(() => setUnauthorizedHandler(() => {
+        sessionCheckId.current += 1;
+        setAuthState({ user: null, status: 'unauthenticated' });
+    }), []);
+
+    const login = useCallback((userData) => {
+        setAuthState({
+            user: normalizeUser(userData),
+            status: 'authenticated',
+        });
+    }, []);
+
+    const logout = useCallback(() => {
+        sessionCheckId.current += 1;
+        setAuthState({ user: null, status: 'unauthenticated' });
+    }, []);
+
+    const value = useMemo(() => ({
+        user: authState.user,
+        status: authState.status,
+        isAuthenticated: authState.status === 'authenticated',
+        isInitializing: authState.status === 'checking',
+        login,
+        logout,
+        retrySessionCheck: checkSession,
+    }), [authState, checkSession, login, logout]);
 
     return (
-        <AuthContext.Provider value={{ user: authState.user, token: authState.token, login, logout, isInitializing: false }}>
+        <AuthContext.Provider value={value}>
             {children}
         </AuthContext.Provider>
     );

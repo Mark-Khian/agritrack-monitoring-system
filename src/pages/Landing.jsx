@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth';
-import { loginUser } from '../services/api';
+import { getCurrentUser, loginUser } from '../services/api';
 import { Eye, EyeOff, AlertCircle, Wheat, CheckCircle2, Loader2, ShieldCheck, X } from 'lucide-react';
 import heroRice from '../assets/hero-rice.png';
 import crmLogo from '../assets/CRM-logo.png';
@@ -107,15 +107,19 @@ const Landing = () => {
     setIsLoading(true);
     try {
       const delay = new Promise(resolve => setTimeout(resolve, 800));
-      const [res] = await Promise.all([
-        loginUser({
+      const authenticate = async () => {
+        await loginUser({
           username,
           password,
           captchaToken: captchaRequired ? captchaToken : undefined
-        }),
+        });
+        return getCurrentUser();
+      };
+      const [meResponse] = await Promise.all([
+        authenticate(),
         delay
       ]);
-      login(res.data.user, res.data.token, res.data.refreshToken);
+      login(meResponse.data);
 
       // Show success screen then redirect
       setAuthPhase('success');

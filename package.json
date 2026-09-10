@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:phase4": "vite --mode phase4",
     "build": "vite build",
     "lint": "eslint .",
+    "test:phase4:browser": "node tests/phase4-browser.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
