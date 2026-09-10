@@ -1,95 +1,15 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const compression = require('compression');
 const https = require('https');
 const http = require('http');
 const cron = require('node-cron');
 const generateCerts = require('./config/https');
 require('dotenv').config();
 
+const app = require('./app');
 const { scheduleBackups } = require('./utils/backup');
 const { runActivityCycle, runWeatherCycle } = require('./utils/notificationService');
 
-
-const app = express();
-app.set('trust proxy', 'loopback');
-
-// ── Security Middlewares ──────────────────
-app.use(helmet({
-    hsts: {
-        maxAge: 31536000,
-        includeSubDomains: true,
-        preload: true
-    }
-}));
-app.use(compression());
-app.use(morgan(
-    process.env.NODE_ENV === 'production' ? 'combined' : 'dev'
-));
-
-// CORS configuration: Allow any origin in development, restrict in production
-const allowedOrigin = process.env.NODE_ENV === 'production'
-    ? (process.env.ALLOWED_ORIGIN || 'https://localhost:5173')
-    : null;
-
-app.use(cors({
-    origin: (origin, callback) => {
-        // In development, allow all origins (including local network IPs)
-        if (!origin || process.env.NODE_ENV !== 'production') {
-            return callback(null, true);
-        }
-        if (origin === allowedOrigin) {
-            return callback(null, true);
-        }
-        return callback(null, false);
-    },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    credentials: true
-}));
-
-app.use(express.json({ limit: '10kb' }));
-
-
-// ── Force HTTPS in production ─────────────
-const FORCE_HTTPS = process.env.FORCE_HTTPS === 'true';
-if (process.env.NODE_ENV === 'production' && FORCE_HTTPS) {
-    app.use((req, res, next) => {
-        if (req.header('x-forwarded-proto') !== 'https') {
-            return res.redirect(`https://${req.header('host')}${req.url}`);
-        }
-        next();
-    });
-}
-
-// ── DB Connection ─────────────────────────
 const db = require('./config/db');
 const runMigrations = require('./config/migration');
-
-// ── Routes ───────────────────────────────
-app.use('/api/v1', require('./routes/v1/index'));
-app.use('/api', require('./routes/v1/index'));
-
-// ── Test Route ────────────────────────────
-app.get('/', (req, res) => {
-    res.json({ message: '🌾 Crop Management API is running!' });
-});
-
-// ── 404 Handler ──────────────────────────
-app.use((req, res) => {
-    res.status(404).json({ message: 'Route not found.' });
-});
-
-// ── Global Error Handler ──────────────────
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(err.status || 500).json({
-        message: process.env.NODE_ENV === 'production'
-            ? 'Something went wrong.'
-            : err.message
-    });
-});
 
 async function startServer() {
     try {

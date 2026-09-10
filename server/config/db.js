@@ -39,7 +39,8 @@ const checkDbHealth = () => {
     });
 };
 
-// Run health check every 30 seconds
-setInterval(checkDbHealth, 30000);
+// Run health check every 30 seconds. Unref'd so the timer never keeps the process alive
+// on its own (matters for short-lived scripts and test runs).
+setInterval(checkDbHealth, 30000).unref();
 
 module.exports = pool.promise();

@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 let psgcData = [];
 try {
@@ -18,6 +19,7 @@ try {
 }
 const { privateKey, publicKey } = require('../config/keys');
 const logActivity = require('../middleware/logger');
+const { extractBearerToken, SESSION_COOKIE_NAME } = require('../middleware/authMiddleware');
 const {
     createSession,
     invalidateSession,
@@ -30,10 +32,22 @@ const MAX_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS) || 5;
 const LOCKOUT_TIME = parseInt(process.env.LOCKOUT_TIME_MINUTES) || 15;
 const CAPTCHA_THRESHOLD = 3;
 
+// Server-side session lifetime for both the legacy JWT row and the opaque cookie row.
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+
+// Host-only cookie: no `domain` attribute is ever set, so the cookie is not shared
+// with sibling subdomains. `secure` is driven only by explicit COOKIE_SECURE.
+const sessionCookieOptions = () => ({
+    httpOnly: true,
+    secure: process.env.COOKIE_SECURE === 'true',
+    sameSite: 'lax',
+    path: '/'
+});
+
 // ── Helper: Generate JWT Tokens (RS256) ───
 const generateTokens = (user) => {
     const accessToken = jwt.sign(
-        { id: user.id },
+        { id: user.id, jti: crypto.randomBytes(16).toString('hex') },
         privateKey,
         { algorithm: 'RS256', expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
     );
@@ -68,9 +82,10 @@ const cleanupLoginAttempts = async () => {
     }
 };
 
-setInterval(cleanupBlacklist, 60 * 60 * 1000);
-setInterval(cleanupSessions, 60 * 60 * 1000);
-setInterval(cleanupLoginAttempts, 60 * 60 * 1000);
+// Unref'd so these janitors never hold the process open by themselves.
+setInterval(cleanupBlacklist, 60 * 60 * 1000).unref();
+setInterval(cleanupSessions, 60 * 60 * 1000).unref();
+setInterval(cleanupLoginAttempts, 60 * 60 * 1000).unref();
 
 // ── LOGIN ─────────────────────────────────
 const login = async (req, res) => {
@@ -146,9 +161,21 @@ const login = async (req, res) => {
         );
 
         const { accessToken, refreshToken } = generateTokens(user);
-        const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
+        const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
+        // Two fully independent sessions are created. Revoking either one leaves the
+        // other usable; only the DB row's SHA-256 hash is persisted for each.
+        // 1. Legacy JWT session row
         await createSession({ userId: user.id, token: accessToken, ip, userAgent, expiresAt });
+
+        // 2. Opaque cookie session row
+        const opaqueToken = crypto.randomBytes(32).toString('hex');
+        await createSession({ userId: user.id, token: opaqueToken, ip, userAgent, expiresAt });
+
+        res.cookie(SESSION_COOKIE_NAME, opaqueToken, {
+            ...sessionCookieOptions(),
+            maxAge: SESSION_TTL_MS
+        });
 
         await logActivity({
             user_id: user.id,
@@ -175,27 +202,65 @@ const login = async (req, res) => {
     }
 };
 
+// ── GET ME ────────────────────────────────
+const getMe = async (req, res) => {
+    try {
+        const [users] = await db.query(
+            'SELECT id, name, username, email, role FROM users WHERE id = ?', 
+            [req.user.id]
+        );
+        if (users.length === 0) return res.status(404).json({ message: 'User not found.' });
+        
+        const user = users[0];
+        res.status(200).json({
+            id: user.id,
+            name: user.name,
+            username: user.username || user.email,
+            role: user.role
+        });
+    } catch (err) {
+        console.error('getMe error:', err.message);
+        res.status(500).json({ message: 'Server error.' });
+    }
+};
+
 // ── LOGOUT ────────────────────────────────
 const logout = async (req, res) => {
-    const token = req.token;
+    const bearerToken = extractBearerToken(req);
+    const cookieToken = req.cookies?.[SESSION_COOKIE_NAME];
     const ip = req.ip;
+    let userId = null;
 
     try {
-        const decoded = jwt.decode(token);
-        const expiredAt = new Date(decoded.exp * 1000);
+        // Each credential is revoked independently; presenting one does not affect the other.
+        if (bearerToken) {
+            const decoded = jwt.decode(bearerToken);
+            if (decoded) {
+                userId = decoded.id ?? null;
+                if (decoded.exp) {
+                    await db.query(
+                        'INSERT IGNORE INTO token_blacklist (token, expired_at) VALUES (?, ?)',
+                        [bearerToken, new Date(decoded.exp * 1000)]
+                    );
+                }
+            }
+            await invalidateSession(bearerToken);
+        }
 
-        await db.query(
-            'INSERT INTO token_blacklist (token, expired_at) VALUES (?, ?)',
-            [token, expiredAt]
-        );
+        if (cookieToken) {
+            await invalidateSession(cookieToken);
+        }
 
-        await invalidateSession(token);
+        // Always clear the cookie regardless of which credentials were presented.
+        res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
 
-        await logActivity({
-            user_id: req.user.id,
-            action: 'LOGOUT',
-            ip_address: ip
-        });
+        if (userId) {
+            await logActivity({
+                user_id: userId,
+                action: 'LOGOUT',
+                ip_address: ip
+            });
+        }
 
         res.status(200).json({ message: 'Logged out successfully.' });
 
@@ -226,6 +291,9 @@ const logoutAllDevices = async (req, res) => {
             action: 'LOGOUT_ALL_DEVICES',
             ip_address: req.ip
         });
+        
+        // Also clear the current session cookie
+        res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
 
         res.status(200).json({ message: 'Logged out from all devices.' });
     } catch (err) {
@@ -252,10 +320,20 @@ const refreshToken = async (req, res) => {
             return res.status(401).json({ message: 'Invalid refresh token.' });
 
         const newAccessToken = jwt.sign(
-            { id: users[0].id },
+            { id: users[0].id, jti: crypto.randomBytes(16).toString('hex') },
             privateKey,
             { algorithm: 'RS256', expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
         );
+
+        // protect() requires a matching session row, so the refreshed Bearer token needs
+        // its own row or it would be rejected on first use.
+        await createSession({
+            userId: users[0].id,
+            token: newAccessToken,
+            ip: req.ip,
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            expiresAt: new Date(Date.now() + SESSION_TTL_MS)
+        });
 
         res.status(200).json({ token: newAccessToken });
 
@@ -504,4 +582,4 @@ const removeFarmLocation = async (req, res) => {
     }
 };
 
-module.exports = { login, logout, getSessions, logoutAllDevices, refreshToken, resolveLocation, updateFarmLocation, removeFarmLocation };
+module.exports = { login, logout, getMe, getSessions, logoutAllDevices, refreshToken, resolveLocation, updateFarmLocation, removeFarmLocation };
