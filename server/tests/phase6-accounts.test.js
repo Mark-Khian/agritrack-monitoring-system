@@ -365,7 +365,7 @@ describe('Phase 6 account administration and forced password change', () => {
         assert.equal(row.disabled_by, adminId);
         assert.equal(await activeSessionCount(worker.id), 0);
         await active.agent.get('/api/v1/auth/me').expect(401);
-        await login({ username: worker.username, password: worker.temporaryPassword }, 403);
+        await login({ username: worker.username, password: worker.temporaryPassword }, 401);
 
         const disabledBefore = await userRow(worker.id);
         await mutation(admin, 'post', `/api/v1/users/${worker.id}/reset-password`)

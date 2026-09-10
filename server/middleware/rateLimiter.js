@@ -1,4 +1,7 @@
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { getClientIp } = require('../utils/clientIp');
+
+const ipKey = (req) => ipKeyGenerator(getClientIp(req), false);
 
 // General API rate limiter
 const apiLimiter = rateLimit({
@@ -17,8 +20,20 @@ const loginLimiter = rateLimit({
     max: 5,                  // max 5 login attempts per 1 min
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: ipKey,
     message: {
         message: 'Too many login attempts. Please try again after 1 minute.'
+    }
+});
+
+const challengeLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: ipKey,
+    message: {
+        message: 'Too many verification requests. Please try again after 1 minute.'
     }
 });
 
@@ -33,4 +48,4 @@ const exportLimiter = rateLimit({
     }
 });
 
-module.exports = { apiLimiter, loginLimiter, exportLimiter };
+module.exports = { apiLimiter, loginLimiter, challengeLimiter, exportLimiter };

@@ -28,10 +28,15 @@ const {
     cleanupSessions
 } = require('../utils/sessionHelper');
 const { comparePassword, hashPassword } = require('../utils/passwordHelper');
-
-const MAX_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS) || 5;
-const LOCKOUT_TIME = parseInt(process.env.LOCKOUT_TIME_MINUTES) || 15;
-const CAPTCHA_THRESHOLD = 3;
+const { getClientIp } = require('../utils/clientIp');
+const { normalizeLoginIdentity } = require('../utils/loginIdentity');
+const {
+    GENERIC_UNAVAILABLE,
+    isChallengeRequired,
+    recordLoginAttempt,
+    incrementUserFailures,
+    resetUserFailures
+} = require('../services/loginChallengeService');
 
 // Server-side session lifetime for both the legacy JWT row and the opaque cookie row.
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
@@ -91,7 +96,8 @@ setInterval(cleanupLoginAttempts, 60 * 60 * 1000).unref();
 // ── LOGIN ─────────────────────────────────
 const login = async (req, res) => {
     const { username, password } = req.body;
-    const ip = req.ip;
+    const ip = req.clientIp || getClientIp(req);
+    const identity = req.loginIdentity || normalizeLoginIdentity(username);
     const userAgent = req.headers['user-agent'] || 'Unknown';
 
     try {
@@ -107,24 +113,15 @@ const login = async (req, res) => {
 
         // Timing attack fix — use a structurally valid dummy hash
         const dummyHash = '$2b$12$lZZgs9Y/TfAIYjZnd643zuE.24O.t.ztKHjW2mHoDBo4F8PfEYrbq';
+        const user = users.length === 1 ? users[0] : null;
         const isMatch = await comparePassword(
             password,
-            users.length === 1 ? users[0].password : dummyHash
+            user ? user.password : dummyHash
         );
 
-        if (users.length !== 1 || !isMatch) {
-            if (users.length === 1) {
-                const user = users[0];
-                const newAttempts = (user.failed_attempts || 0) + 1;
-
-                // Update legacy database columns silently
-                await db.query(
-                    `UPDATE users
-                     SET failed_attempts = ?
-                     WHERE id = ?`,
-                    [newAttempts, user.id]
-                );
-
+        if (!user || !isMatch || !user.is_active) {
+            if (user) {
+                await incrementUserFailures(user.id);
                 await logActivity({
                     user_id: user.id,
                     action: 'LOGIN_FAILED',
@@ -133,38 +130,24 @@ const login = async (req, res) => {
                 });
             }
 
-            // Always record the failure in login_attempts
-            await db.query(
-                `INSERT INTO login_attempts (ip_address, email, success) VALUES (?, ?, 0)`,
-                [ip, username || null]
-            );
+            await recordLoginAttempt(ip, identity, false);
 
-            // Generic failure without exposing existence or locked status
+            let challengeRequired = false;
+            try {
+                challengeRequired = await isChallengeRequired(ip, identity);
+            } catch (err) {
+                console.error('Login challenge evaluation error:', err.message);
+                return res.status(503).json({ message: GENERIC_UNAVAILABLE });
+            }
+
             return res.status(401).json({
                 message: 'Invalid credentials.',
-                captchaRequired: req.captchaRequired || false
+                challengeRequired
             });
         }
 
-        const user = users[0];
-
-        if (!user.is_active)
-            return res.status(403).json({ message: 'This account has been disabled.' });
-
-        // Reset legacy columns upon successful login
-        await db.query(
-            `UPDATE users
-             SET failed_attempts  = 0,
-                 locked_until     = NULL,
-                 captcha_required = 0
-             WHERE id = ?`,
-            [user.id]
-        );
-
-        await db.query(
-            `INSERT INTO login_attempts (ip_address, email, success) VALUES (?, ?, 1)`,
-            [ip, username]
-        );
+        await resetUserFailures(user.id);
+        await recordLoginAttempt(ip, identity, true);
 
         const { accessToken, refreshToken } = generateTokens(user);
         const expiresAt = new Date(Date.now() + SESSION_TTL_MS);

@@ -1,8 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth';
-import { getCurrentUser, loginUser } from '../services/api';
-import { Eye, EyeOff, AlertCircle, Wheat, CheckCircle2, Loader2, ShieldCheck, X } from 'lucide-react';
+import { getCurrentUser, loginUser, requestLoginChallenge } from '../services/api';
+import { Eye, EyeOff, AlertCircle, Loader2, ShieldCheck, X } from 'lucide-react';
 import heroRice from '../assets/hero-rice.png';
 import crmLogo from '../assets/CRM-logo.png';
 import FlipOverlay from '../components/FlipOverlay';
@@ -13,13 +13,18 @@ const Landing = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState('');
-  const [captchaError, setCaptchaError] = useState('');
-  const [captchaRequired, setCaptchaRequired] = useState(false);
-  const [showCaptchaModal, setShowCaptchaModal] = useState(false);
+  const [challenge, setChallenge] = useState(null);
+  const [challengeAnswer, setChallengeAnswer] = useState('');
+  const [challengeError, setChallengeError] = useState('');
+  const [challengeLoading, setChallengeLoading] = useState(false);
+  const [challengeRequired, setChallengeRequired] = useState(false);
+  const [showChallengeModal, setShowChallengeModal] = useState(false);
   const [authPhase, setAuthPhase] = useState('idle');
-  const captchaRef = useRef(null);
-  const captchaRendered = useRef(false);
+  const challengeRef = useRef(null);
+  const challengeAnswerRef = useRef('');
+  const challengeRequiredRef = useRef(false);
+  const usernameRef = useRef('');
+  const passwordRef = useRef('');
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -47,59 +52,47 @@ const Landing = () => {
     };
   }, []);
 
-  // Render reCAPTCHA when required
-  useEffect(() => {
-    if (!captchaRequired) return;
-
-    const renderCaptcha = () => {
-      if (
-        window.grecaptcha &&
-        window.grecaptcha.render &&
-        captchaRef.current &&
-        !captchaRendered.current
-      ) {
-        try {
-          window.grecaptcha.render(captchaRef.current, {
-            sitekey: import.meta.env.VITE_RECAPTCHA_SITE_KEY,
-            callback: (token) => {
-              setCaptchaToken(token);
-              setCaptchaError('');
-              setShowCaptchaModal(false);
-            },
-            'expired-callback': () => setCaptchaToken(''),
-            'error-callback': () => {
-              setCaptchaToken('');
-              setCaptchaError('CAPTCHA error. Please try again.');
-            }
-          });
-          captchaRendered.current = true;
-        } catch (err) {
-          console.error('reCAPTCHA render error:', err);
-        }
-      }
-    };
-
-    if (window.grecaptcha && window.grecaptcha.render) {
-      renderCaptcha();
-    } else {
-      const interval = setInterval(() => {
-        if (window.grecaptcha && window.grecaptcha.render) {
-          clearInterval(interval);
-          renderCaptcha();
-        }
-      }, 100);
-      return () => clearInterval(interval);
+  const loadChallenge = async () => {
+    if (!usernameRef.current.trim()) {
+      setChallengeError('Enter your username before requesting a verification challenge.');
+      setShowChallengeModal(true);
+      return null;
     }
-  }, [captchaRequired]);
+    setChallengeLoading(true);
+    setChallengeError('');
+    try {
+      const response = await requestLoginChallenge(usernameRef.current);
+      const nextChallenge = {
+        id: response.data.challengeId,
+        prompt: response.data.prompt,
+        expiresAt: response.data.expiresAt,
+      };
+      challengeRef.current = nextChallenge;
+      challengeAnswerRef.current = '';
+      setChallenge(nextChallenge);
+      setChallengeAnswer('');
+      setShowChallengeModal(true);
+      return nextChallenge;
+    } catch (error) {
+      setChallengeError(error?.response?.data?.message || 'Verification is unavailable. Please try again.');
+      setShowChallengeModal(true);
+      return null;
+    } finally {
+      setChallengeLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
-    setCaptchaError('');
+    setChallengeError('');
 
-    if (captchaRequired && !captchaToken) {
-      setCaptchaError('Please complete the CAPTCHA verification.');
-      setShowCaptchaModal(true);
+    if (challengeRequiredRef.current && !challengeAnswerRef.current.trim()) {
+      setChallengeError('Complete the verification before continuing.');
+      setShowChallengeModal(true);
+      if (!challengeRef.current) {
+        await loadChallenge();
+      }
       return;
     }
 
@@ -107,11 +100,15 @@ const Landing = () => {
     setIsLoading(true);
     try {
       const delay = new Promise(resolve => setTimeout(resolve, 800));
+      const currentChallenge = challengeRef.current;
       const authenticate = async () => {
         await loginUser({
-          username,
-          password,
-          captchaToken: captchaRequired ? captchaToken : undefined
+          username: usernameRef.current || username,
+          password: passwordRef.current || password,
+          ...(challengeRequiredRef.current && currentChallenge ? {
+            challengeId: currentChallenge.id,
+            challengeAnswer: challengeAnswerRef.current,
+          } : {}),
         });
         return getCurrentUser();
       };
@@ -135,16 +132,16 @@ const Landing = () => {
 
     } catch (error) {
       setAuthPhase('idle');
+      setIsLoading(false);
       const data = error?.response?.data;
-      if (data?.captchaRequired) {
-        setCaptchaRequired(true);
-        setShowCaptchaModal(true);
+      if (data?.challengeRequired) {
+        challengeRequiredRef.current = true;
+        setChallengeRequired(true);
+        setShowChallengeModal(true);
+        await loadChallenge();
       }
       const msg = data?.message || error.message || 'Login failed.';
       setErrorMsg(msg);
-      if (window.grecaptcha && captchaRendered.current) window.grecaptcha.reset();
-      setCaptchaToken('');
-      setIsLoading(false);
     }
   };
 
@@ -181,14 +178,14 @@ const Landing = () => {
         </div>
       )}
 
-      {/* CAPTCHA Modal Overlay */}
-      {captchaRequired && (
-        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${showCaptchaModal ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+      {/* Local login-challenge overlay */}
+      {challengeRequired && (
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${showChallengeModal ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
           <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 max-w-sm w-full flex flex-col items-center relative transform transition-all duration-300 scale-100">
 
             <button
               type="button"
-              onClick={() => setShowCaptchaModal(false)}
+              onClick={() => setShowChallengeModal(false)}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
               aria-label="Close verification"
             >
@@ -203,11 +200,41 @@ const Landing = () => {
             <p className="text-sm text-gray-600 text-center mb-6">Complete the verification before continuing.</p>
 
             <div className="flex justify-center w-full min-h-[78px]">
-              <div ref={captchaRef} />
+              {challengeLoading ? (
+                <Loader2 className="w-6 h-6 animate-spin text-green-600" />
+              ) : (
+                <div className="w-full">
+                  <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-center" aria-live="polite">
+                    <p className="text-lg font-semibold text-gray-900 tracking-wide select-none">
+                      {challenge?.prompt || 'Verification is required.'}
+                    </p>
+                  </div>
+                  <input
+                    id="challenge-answer"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    aria-label="Verification answer"
+                    value={challengeAnswer}
+                    onChange={(e) => {
+                      challengeAnswerRef.current = e.target.value;
+                      setChallengeAnswer(e.target.value);
+                    }}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={loadChallenge}
+                    className="mt-3 text-sm text-gray-600 hover:text-gray-800"
+                  >
+                    Get a new challenge
+                  </button>
+                </div>
+              )}
             </div>
 
-            {captchaError && (
-              <p className="mt-4 text-sm text-red-600 text-center w-full bg-red-50 p-2 rounded">{captchaError}</p>
+            {challengeError && (
+              <p className="mt-4 text-sm text-red-600 text-center w-full bg-red-50 p-2 rounded">{challengeError}</p>
             )}
 
           </div>
@@ -249,7 +276,10 @@ const Landing = () => {
                   type="text"
                   placeholder="admin"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => {
+                    usernameRef.current = e.target.value;
+                    setUsername(e.target.value);
+                  }}
                   disabled={isLoading}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   required
@@ -267,7 +297,10 @@ const Landing = () => {
                     type={showPassword ? 'text' : 'password'}
                     placeholder="••••••••"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      passwordRef.current = e.target.value;
+                      setPassword(e.target.value);
+                    }}
                     disabled={isLoading}
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     required

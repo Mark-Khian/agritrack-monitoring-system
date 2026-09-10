@@ -63,7 +63,8 @@ const TEST_DB = 'crop_management_rearch_test';
     // Auth-era migrations are rerun-safe and applied from the repository files.
     const MIGRATIONS = [
         '008_add_v2_auth_foundation.sql',
-        '009_relax_legacy_activity_date.sql'
+        '009_relax_legacy_activity_date.sql',
+        '010_add_login_challenges.sql'
     ];
 
     for (const file of MIGRATIONS) {

@@ -1,18 +1,29 @@
 const express = require('express');
 const router = express.Router();
 const { login, logout, getMe, refreshToken, getSessions, logoutAllDevices, changePassword, resolveLocation, updateFarmLocation, removeFarmLocation } = require('../controllers/authController');
-const { validateLogin, validateChangePassword } = require('../middleware/validate');
-const { loginLimiter } = require('../middleware/rateLimiter');
+const { issueLoginChallenge } = require('../controllers/challengeController');
+const { validateLogin, validateChangePassword, validateLoginChallenge } = require('../middleware/validate');
+const { loginLimiter, challengeLimiter } = require('../middleware/rateLimiter');
 const { protect, protectPasswordChange } = require('../middleware/authMiddleware');
 const { authorize, CAPABILITIES } = require('../security/rbac');
-const verifyCaptcha = require('../middleware/captcha');
-const captchaGuard = require('../middleware/captchaGuard');
+const verifyChallenge = require('../middleware/captcha');
+const challengeGuard = require('../middleware/captchaGuard');
 
-const loginMiddleware = process.env.NODE_ENV === 'test'
-    ? [validateLogin, login]
-    : [loginLimiter, captchaGuard, verifyCaptcha, validateLogin, login];
+// Abuse protection is always on outside NODE_ENV=test. The opt-in flag can enable
+// the real stack inside the dedicated Phase 7 suite, but cannot disable it in production.
+const abuseProtectionEnabled = process.env.NODE_ENV !== 'test'
+    || process.env.PHASE7_ABUSE_MIDDLEWARE === '1';
+
+const loginMiddleware = abuseProtectionEnabled
+    ? [loginLimiter, validateLogin, challengeGuard, verifyChallenge, login]
+    : [validateLogin, login];
+
+const challengeMiddleware = abuseProtectionEnabled
+    ? [challengeLimiter, validateLoginChallenge, issueLoginChallenge]
+    : [validateLoginChallenge, issueLoginChallenge];
 
 router.post('/login', ...loginMiddleware);
+router.post('/challenge', ...challengeMiddleware);
 
 // Logout is idempotent and does not require active session
 router.post('/logout', logout);

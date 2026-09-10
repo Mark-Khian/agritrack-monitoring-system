@@ -6,6 +6,8 @@ const compression = require('compression');
 const cookieParser = require('cookie-parser');
 
 const app = express();
+// Trust only the local reverse-proxy hop (Ubuntu Nginx → 127.0.0.1:5000).
+// Do not trust arbitrary client-supplied X-Forwarded-For from LAN hosts.
 app.set('trust proxy', 'loopback');
 
 app.use(helmet({

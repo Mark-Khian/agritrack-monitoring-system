@@ -236,7 +236,7 @@ describe('Phase 5 centralized RBAC', () => {
     it('enforces authentication, unknown-role, and inactive-account boundaries', async () => {
         await request(app).get('/api/v1/dashboard/lifecycle-monitoring').expect(401);
         await unknown.get('/api/v1/dashboard/lifecycle-monitoring').expect(403);
-        await request(app).post('/api/v1/auth/login').send(accounts.inactive).expect(403);
+        await request(app).post('/api/v1/auth/login').send(accounts.inactive).expect(401);
     });
 
     it('preserves the transitional Admin contract and returns canonical subordinate roles', async () => {

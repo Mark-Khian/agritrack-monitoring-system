@@ -324,7 +324,7 @@ describe('Phase 3 auth', () => {
             await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${bearerToken}`).expect(403);
             await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${cookieToken}`).expect(403);
             await agent.get('/api/v1/plantings').set('Cookie', `${COOKIE}=${cookieToken}`).expect(403);
-            await agent.post('/api/v1/auth/login').send(TEST_USER).expect(403);
+            await agent.post('/api/v1/auth/login').send(TEST_USER).expect(401);
         } finally {
             await db.query('UPDATE users SET is_active = 1 WHERE id = ?', [adminId]);
         }

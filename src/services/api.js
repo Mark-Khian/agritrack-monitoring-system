@@ -19,6 +19,7 @@ export const setUnauthorizedHandler = (handler) => {
 
 const GLOBAL_401_EXCLUSIONS = new Set([
     '/auth/login',
+    '/auth/challenge',
     '/auth/me',
     '/auth/logout',
 ]);
@@ -42,6 +43,7 @@ export const getLifecycleMonitoring = () => API.get('/dashboard/lifecycle-monito
 
 // ── Auth ──────────────────────────────────
 export const loginUser = (data) => API.post('/auth/login', data);
+export const requestLoginChallenge = (username) => API.post('/auth/challenge', { username });
 export const logoutUser = () => API.post('/auth/logout', undefined, { timeout: 10_000 });
 export const getCurrentUser = () => API.get('/auth/me', { timeout: 10_000 });
 export const changePassword = (data) => API.post('/auth/change-password', data);

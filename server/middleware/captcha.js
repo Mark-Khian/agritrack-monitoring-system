@@ -1,54 +1,53 @@
-const axios = require('axios');
+const { comparePassword } = require('../utils/passwordHelper');
+const { getClientIp } = require('../utils/clientIp');
+const { normalizeLoginIdentity } = require('../utils/loginIdentity');
+const {
+    GENERIC_UNAVAILABLE,
+    recordLoginAttempt,
+    consumeAndVerifyChallenge
+} = require('../services/loginChallengeService');
 
-const verifyCaptcha = async (req, res, next) => {
-    // Skip if CAPTCHA not required for this request
-    if (!req.captchaRequired) {
-        return next();
+const DUMMY_HASH = '$2b$12$lZZgs9Y/TfAIYjZnd643zuE.24O.t.ztKHjW2mHoDBo4F8PfEYrbq';
+
+const rejectChallenge = async (req, res) => {
+    try {
+        await comparePassword('phase7-challenge-gate', DUMMY_HASH);
+        await recordLoginAttempt(
+            req.clientIp || getClientIp(req),
+            req.loginIdentity || normalizeLoginIdentity(req.body?.username),
+            false
+        );
+    } catch (err) {
+        console.error('Challenge rejection accounting error:', err.message);
+        return res.status(503).json({ message: GENERIC_UNAVAILABLE });
     }
 
-    const captchaToken = req.body.captchaToken;
+    return res.status(401).json({
+        message: 'Invalid credentials.',
+        challengeRequired: true
+    });
+};
 
-    if (!captchaToken) {
-        return res.status(400).json({
-            message: 'CAPTCHA verification required.',
-            captchaRequired: true
-        });
-    }
-
-    // Skip verification in development
-    if (process.env.NODE_ENV === 'development') {
+const verifyChallenge = async (req, res, next) => {
+    if (!req.challengeRequired) {
         return next();
     }
 
     try {
-        const response = await axios.post(
-            'https://www.google.com/recaptcha/api/siteverify',
-            null,
-            {
-                params: {
-                    secret: process.env.RECAPTCHA_SECRET_KEY,
-                    response: captchaToken
-                }
-            }
-        );
-
-        const { success } = response.data;
-
-        if (!success) {
-            return res.status(400).json({
-                message: 'CAPTCHA verification failed. Please try again.',
-                captchaRequired: true
-            });
-        }
-
-        next();
-    } catch (err) {
-        console.error('CAPTCHA verification error:', err.message);
-        return res.status(503).json({
-            message: 'CAPTCHA verification service unavailable. Please try again later.',
-            captchaRequired: true
+        const verified = await consumeAndVerifyChallenge({
+            challengeId: req.body?.challengeId,
+            ip: req.clientIp || getClientIp(req),
+            identity: req.loginIdentity || normalizeLoginIdentity(req.body?.username),
+            answer: req.body?.challengeAnswer == null ? '' : String(req.body.challengeAnswer)
         });
+        if (!verified.ok) {
+            return rejectChallenge(req, res);
+        }
+        return next();
+    } catch (err) {
+        console.error('Challenge verification error:', err.message);
+        return res.status(503).json({ message: GENERIC_UNAVAILABLE });
     }
 };
 
-module.exports = verifyCaptcha;
+module.exports = verifyChallenge;

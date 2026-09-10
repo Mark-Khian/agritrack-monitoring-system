@@ -37,6 +37,18 @@ const validateLogin = [
     handleValidation
 ];
 
+const validateLoginChallenge = [
+    body('username')
+        .trim()
+        .toLowerCase()
+        .notEmpty().withMessage('Username or email is required.')
+        .isLength({ min: 3, max: 255 })
+        .withMessage('Username or email must be 3-255 characters.')
+        .matches(/^[a-zA-Z0-9._@-]+$/)
+        .withMessage('Username or email can only contain letters, numbers, periods, underscores, hyphens, and @.'),
+    handleValidation
+];
+
 const rejectUnknownBodyFields = (allowedFields) => (req, res, next) => {
     const unknownFields = Object.keys(req.body || {})
         .filter((field) => !allowedFields.includes(field));
@@ -106,6 +118,7 @@ const validateChangePassword = [
 
 module.exports = {
     validateLogin,
+    validateLoginChallenge,
     validateCreateUser,
     validateUserId,
     validateEmptyBody,
