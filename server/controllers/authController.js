@@ -1,5 +1,4 @@
 const db = require('../config/db');
-const jwt = require('jsonwebtoken');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
@@ -16,10 +15,9 @@ try {
 } catch (e) {
     console.error('Failed to load PSGC data:', e);
 }
-const { privateKey, publicKey } = require('../config/keys');
 const logActivity = require('../middleware/logger');
 const { getClientIp } = require('../utils/clientIp');
-const { extractBearerToken, SESSION_COOKIE_NAME } = require('../middleware/authMiddleware');
+const { SESSION_COOKIE_NAME } = require('../middleware/authMiddleware');
 const {
     createSession,
     invalidateSession,
@@ -38,7 +36,6 @@ const {
     resetUserFailures
 } = require('../services/loginChallengeService');
 
-// Server-side session lifetime for both the legacy JWT row and the opaque cookie row.
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
 // Host-only cookie: no `domain` attribute is ever set, so the cookie is not shared
@@ -49,33 +46,6 @@ const sessionCookieOptions = () => ({
     sameSite: 'lax',
     path: '/'
 });
-
-// ── Helper: Generate JWT Tokens (RS256) ───
-const generateTokens = (user) => {
-    const accessToken = jwt.sign(
-        { id: user.id, jti: crypto.randomBytes(16).toString('hex') },
-        privateKey,
-        { algorithm: 'RS256', expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
-    );
-    const refreshToken = jwt.sign(
-        { id: user.id },
-        privateKey,
-        { algorithm: 'RS256', expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
-    );
-    return { accessToken, refreshToken };
-};
-
-const cleanupBlacklist = async () => {
-    try {
-        const [result] = await db.query(
-            'DELETE FROM token_blacklist WHERE expired_at < NOW()'
-        );
-        if (result.affectedRows > 0)
-            console.log(`🧹 Removed ${result.affectedRows} expired token(s)`);
-    } catch (err) {
-        console.error('Cleanup blacklist error:', err.message);
-    }
-};
 
 const cleanupLoginAttempts = async () => {
     try {
@@ -89,7 +59,6 @@ const cleanupLoginAttempts = async () => {
 };
 
 // Unref'd so these janitors never hold the process open by themselves.
-setInterval(cleanupBlacklist, 60 * 60 * 1000).unref();
 setInterval(cleanupSessions, 60 * 60 * 1000).unref();
 setInterval(cleanupLoginAttempts, 60 * 60 * 1000).unref();
 
@@ -152,15 +121,7 @@ const login = async (req, res) => {
         await resetUserFailures(user.id);
         await recordLoginAttempt(ip, identity, true);
 
-        const { accessToken, refreshToken } = generateTokens(user);
         const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
-
-        // Two fully independent sessions are created. Revoking either one leaves the
-        // other usable; only the DB row's SHA-256 hash is persisted for each.
-        // 1. Legacy JWT session row
-        await createSession({ userId: user.id, token: accessToken, ip, userAgent, expiresAt });
-
-        // 2. Opaque cookie session row
         const opaqueToken = crypto.randomBytes(32).toString('hex');
         await createSession({ userId: user.id, token: opaqueToken, ip, userAgent, expiresAt });
 
@@ -180,8 +141,6 @@ const login = async (req, res) => {
 
         res.status(200).json({
             message: 'Login successful!',
-            token: accessToken,
-            refreshToken,
             user: {
                 id: user.id,
                 name: user.name,
@@ -222,40 +181,21 @@ const getMe = async (req, res) => {
 
 // ── LOGOUT ────────────────────────────────
 const logout = async (req, res) => {
-    const bearerToken = extractBearerToken(req);
     const cookieToken = req.cookies?.[SESSION_COOKIE_NAME];
     const ip = getClientIp(req);
     let userId = null;
 
     try {
-        // Each credential is revoked independently; presenting one does not affect the other.
-        if (bearerToken) {
-            const decoded = jwt.decode(bearerToken);
-            if (decoded) {
-                userId = decoded.id ?? null;
-                if (decoded.exp) {
-                    await db.query(
-                        'INSERT IGNORE INTO token_blacklist (token, expired_at) VALUES (?, ?)',
-                        [bearerToken, new Date(decoded.exp * 1000)]
-                    );
-                }
-            }
-            await invalidateSession(bearerToken);
-        }
-
         if (cookieToken) {
-            if (!userId) {
-                const tokenHash = crypto.createHash('sha256').update(cookieToken).digest('hex');
-                const [sessions] = await db.query(
-                    'SELECT user_id FROM sessions WHERE token_hash = ? LIMIT 1',
-                    [tokenHash]
-                );
-                if (sessions.length) userId = sessions[0].user_id;
-            }
+            const tokenHash = crypto.createHash('sha256').update(cookieToken).digest('hex');
+            const [sessions] = await db.query(
+                'SELECT user_id FROM sessions WHERE token_hash = ? LIMIT 1',
+                [tokenHash]
+            );
+            if (sessions.length) userId = sessions[0].user_id;
             await invalidateSession(cookieToken);
         }
 
-        // Always clear the cookie regardless of which credentials were presented.
         res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
 
         if (userId) {
@@ -381,56 +321,6 @@ const changePassword = async (req, res) => {
         return res.status(500).json({ message: 'Server error.' });
     } finally {
         if (connection) connection.release();
-    }
-};
-
-// ── REFRESH TOKEN ─────────────────────────
-const refreshToken = async (req, res) => {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken)
-        return res.status(401).json({ message: 'Refresh token required.' });
-
-    try {
-        const decoded = jwt.verify(refreshToken, publicKey, { algorithms: ['RS256'] });
-
-        const [users] = await db.query(
-            `SELECT id, is_active, must_change_password
-             FROM users
-             WHERE id = ?`,
-            [decoded.id]
-        );
-
-        if (users.length === 0 || !users[0].is_active)
-            return res.status(401).json({ message: 'Invalid refresh token.' });
-
-        if (users[0].must_change_password) {
-            return res.status(403).json({
-                code: 'PASSWORD_CHANGE_REQUIRED',
-                message: 'Password change required before refreshing this session.'
-            });
-        }
-
-        const newAccessToken = jwt.sign(
-            { id: users[0].id, jti: crypto.randomBytes(16).toString('hex') },
-            privateKey,
-            { algorithm: 'RS256', expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
-        );
-
-        // protect() requires a matching session row, so the refreshed Bearer token needs
-        // its own row or it would be rejected on first use.
-        await createSession({
-            userId: users[0].id,
-            token: newAccessToken,
-            ip: req.ip,
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            expiresAt: new Date(Date.now() + SESSION_TTL_MS)
-        });
-
-        res.status(200).json({ token: newAccessToken });
-
-    } catch (err) {
-        res.status(401).json({ message: 'Invalid or expired refresh token.' });
     }
 };
 
@@ -677,7 +567,6 @@ module.exports = {
     getSessions,
     logoutAllDevices,
     changePassword,
-    refreshToken,
     resolveLocation,
     updateFarmLocation,
     removeFarmLocation

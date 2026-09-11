@@ -190,7 +190,6 @@ describe('Phase 6 account administration and forced password change', () => {
             password: secretary.temporaryPassword,
         });
         secretary.firstAgent = first.agent;
-        secretary.firstBearer = first.response.body.token;
         secretary.firstCookie = cookieValue(first.response);
 
         const me = await first.agent.get('/api/v1/auth/me').expect(200);
@@ -222,7 +221,7 @@ describe('Phase 6 account administration and forced password change', () => {
         await mutation(logoutProbe.agent, 'post', '/api/v1/auth/logout')
             .send({})
             .expect(200);
-        assert.ok(await activeSessionCount(secretary.id) >= 2);
+        assert.ok(await activeSessionCount(secretary.id) >= 1);
     });
 
     it('enforces strong policy, UTF-8 byte limit, and never trims passwords', async () => {
@@ -245,6 +244,10 @@ describe('Phase 6 account administration and forced password change', () => {
             .send({ currentPassword: ` ${secretary.temporaryPassword} `, newPassword: FINAL_PASSWORD })
             .expect(400);
 
+        secretary.sibling = await login({
+            username: secretary.username,
+            password: secretary.temporaryPassword,
+        });
         secretary.sessionsAtChange = (await sessionRows(secretary.id)).map((session) => session.id);
         await mutation(secretary.firstAgent, 'post', '/api/v1/auth/change-password')
             .send({ currentPassword: secretary.temporaryPassword, newPassword: FINAL_PASSWORD })
@@ -262,10 +265,7 @@ describe('Phase 6 account administration and forced password change', () => {
 
     it('preserves only the exact cookie session used to change password', async () => {
         await secretary.firstAgent.get('/api/v1/auth/me').expect(200);
-        await request(app)
-            .get('/api/v1/auth/me')
-            .set('Authorization', `Bearer ${secretary.firstBearer}`)
-            .expect(401);
+        await secretary.sibling.agent.get('/api/v1/auth/me').expect(401);
 
         const rows = await sessionRows(secretary.id);
         const cookieHash = require('node:crypto')
@@ -426,24 +426,20 @@ describe('Phase 6 account administration and forced password change', () => {
         const denied = await fresh.agent.get('/api/v1/dashboard/lifecycle-monitoring').expect(403);
         assert.equal(denied.body.code, 'PASSWORD_CHANGE_REQUIRED');
 
-        const bearer = fresh.response.body.token;
-        await request(app)
-            .post('/api/v1/auth/change-password')
-            .set('Authorization', `Bearer ${bearer}`)
+        const sibling = await login({ username: worker.username, password: freshPassword });
+        await mutation(fresh.agent, 'post', '/api/v1/auth/change-password')
             .send({ currentPassword: freshPassword, newPassword: SECOND_PASSWORD })
             .expect(200);
-        await request(app)
-            .get('/api/v1/auth/me')
-            .set('Authorization', `Bearer ${bearer}`)
-            .expect(200);
-        await fresh.agent.get('/api/v1/auth/me').expect(401);
-        const bearerHash = require('node:crypto').createHash('sha256').update(bearer).digest('hex');
+        await fresh.agent.get('/api/v1/auth/me').expect(200);
+        await sibling.agent.get('/api/v1/auth/me').expect(401);
+        const cookieHash = require('node:crypto')
+            .createHash('sha256').update(cookieValue(fresh.response)).digest('hex');
         const sessions = await sessionRows(worker.id);
-        assert.equal(sessions.find((session) => session.token_hash === bearerHash)?.is_active, 1);
+        assert.equal(sessions.find((session) => session.token_hash === cookieHash)?.is_active, 1);
         assert.ok(sessions
-            .filter((session) => session.token_hash !== bearerHash)
+            .filter((session) => session.token_hash !== cookieHash)
             .every((session) => session.is_active === 0));
-        worker.currentBearer = bearer;
+        worker.currentCookie = cookieValue(fresh.response);
     });
 
     it('revokes subordinate sessions idempotently without changing account state', async () => {
@@ -461,7 +457,7 @@ describe('Phase 6 account administration and forced password change', () => {
         assert.equal(await activeSessionCount(worker.id), 0);
         await request(app)
             .get('/api/v1/auth/me')
-            .set('Authorization', `Bearer ${worker.currentBearer}`)
+            .set('Cookie', `${COOKIE_NAME}=${worker.currentCookie}`)
             .expect(401);
 
         await mutation(admin, 'post', `/api/v1/users/${worker.id}/revoke-sessions`)

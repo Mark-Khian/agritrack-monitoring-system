@@ -1,5 +1,5 @@
 /**
- * Phase 3 — Independent legacy JWT + opaque HttpOnly cookie sessions.
+ * Phase 11 cookie-only auth (rewritten from Phase 3 dual JWT + cookie coverage).
  *
  * Isolation: these env vars are assigned BEFORE any module is required. config/db.js
  * loads dotenv, and dotenv never overrides already-set process.env keys, so DB_NAME
@@ -18,7 +18,10 @@ if (process.env.DB_NAME !== 'crop_management_rearch_test') {
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
+const fs = require('fs');
 const http = require('http');
+const path = require('path');
+const { spawnSync } = require('child_process');
 const request = require('supertest');
 
 const app = require('../app');
@@ -43,30 +46,40 @@ const parseSessionCookie = (setCookieHeader) => {
     return line ? line.split(';')[0].slice(`${COOKIE}=`.length) : null;
 };
 
+const historicalJwtFor = (userId) => {
+    const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({
+        id: userId,
+        jti: crypto.randomBytes(16).toString('hex'),
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 3600
+    })).toString('base64url');
+    return `${header}.${payload}.not-a-real-signature`;
+};
+
 describe('Phase 3 auth', () => {
     let server;
     let agent;
     let adminId;
     let initialUserCount;
 
-    // Every case starts from a clean slate so revocation/expiry edits cannot leak.
     const loginFresh = async () => {
         await db.query('DELETE FROM sessions WHERE user_id = ?', [adminId]);
         await db.query('DELETE FROM token_blacklist');
 
         const res = await agent.post('/api/v1/auth/login').send(TEST_USER).expect(200);
-
-        const bearerToken = res.body.token;
         const cookieToken = parseSessionCookie(res.headers['set-cookie']);
-        assert.ok(bearerToken, 'login should return a JWT bearer token');
+
+        assert.equal(res.body.token, undefined, 'login must not return a token');
+        assert.equal(res.body.refreshToken, undefined, 'login must not return a refreshToken');
         assert.ok(cookieToken, `login should set the ${COOKIE} cookie`);
         assert.equal(res.body.agritrack_session, undefined, 'raw cookie must not appear in JSON');
+        assert.ok(!JSON.stringify(res.body).includes(cookieToken), 'cookie absent from login JSON');
 
-        return { bearerToken, cookieToken, setCookie: res.headers['set-cookie'] };
+        return { cookieToken, setCookie: res.headers['set-cookie'], body: res.body };
     };
 
     before(async () => {
-        // Bind the isolated Phase 3 port explicitly rather than an ephemeral one.
         server = http.createServer(app);
         await new Promise((resolve, reject) => {
             server.once('error', reject);
@@ -94,28 +107,24 @@ describe('Phase 3 auth', () => {
         initialUserCount = counts[0].c;
     });
 
-    // ── Session issuance & storage ────────────────────────────────────────────
-    it('login creates a JWT session and an independent cookie session', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
-        assert.notEqual(bearerToken, cookieToken);
+    it('login creates exactly one opaque cookie session', async () => {
+        const { cookieToken } = await loginFresh();
         assert.match(cookieToken, /^[a-f0-9]{64}$/, 'cookie token should be a 32-byte opaque value');
 
         const [sessions] = await db.query(
             'SELECT token_hash FROM sessions WHERE user_id = ? AND is_active = 1',
             [adminId]
         );
-        const hashes = sessions.map((s) => s.token_hash);
-        assert.equal(hashes.length, 2, 'exactly two independent sessions per login');
-        assert.ok(hashes.includes(sha256(bearerToken)), 'JWT session hash stored');
-        assert.ok(hashes.includes(sha256(cookieToken)), 'opaque cookie session hash stored');
+        assert.equal(sessions.length, 1, 'exactly one session per login');
+        assert.equal(sessions[0].token_hash, sha256(cookieToken));
     });
 
     it('DB stores SHA-256 hashes only — raw tokens absent', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
+        const { cookieToken } = await loginFresh();
 
         const [rawRows] = await db.query(
-            'SELECT id FROM sessions WHERE token_hash IN (?, ?)',
-            [bearerToken, cookieToken]
+            'SELECT id FROM sessions WHERE token_hash = ?',
+            [cookieToken]
         );
         assert.equal(rawRows.length, 0, 'raw tokens must never be stored');
 
@@ -126,58 +135,7 @@ describe('Phase 3 auth', () => {
         for (const row of rows) {
             assert.match(row.token_hash, /^[a-f0-9]{64}$/, 'token_hash must be SHA-256 hex');
             assert.notEqual(row.token_hash, cookieToken);
-            assert.notEqual(row.token_hash, bearerToken);
         }
-    });
-
-    it('jti is independently random and never carries the opaque cookie token', async () => {
-        const { bearerToken, cookieToken, setCookie } = await loginFresh();
-        const [headerB64, payloadB64] = bearerToken.split('.');
-        const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-        const header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
-
-        assert.equal(header.alg, 'RS256');
-        assert.match(payload.jti, /^[a-f0-9]{32}$/, 'jti is 16 random bytes, hex-encoded');
-        assert.notEqual(payload.jti, cookieToken);
-        assert.notEqual(payload.jti, sha256(cookieToken));
-        assert.deepEqual(
-            Object.keys(payload).sort(),
-            ['exp', 'iat', 'id', 'jti'],
-            'JWT payload carries no session/cookie material'
-        );
-
-        // The raw cookie must not appear anywhere in the token or the JSON body.
-        const wire = JSON.stringify({ bearerToken, payload, header });
-        assert.ok(!wire.includes(cookieToken), 'raw cookie token absent from JWT');
-        assert.ok(!wire.includes(sha256(cookieToken)), 'cookie hash absent from JWT');
-
-        // ...and the cookie value appears only in Set-Cookie, never in the body.
-        const body = await agent.post('/api/v1/auth/login').send(TEST_USER).expect(200);
-        const bodyCookie = parseSessionCookie(body.headers['set-cookie']);
-        assert.ok(!JSON.stringify(body.body).includes(bodyCookie), 'cookie absent from login JSON');
-        assert.ok(cookieLine(setCookie).includes(cookieToken), 'cookie delivered via Set-Cookie only');
-    });
-
-    it('Bearer session lookup hashes the FULL JWT, not the jti', async () => {
-        const { bearerToken } = await loginFresh();
-        const payload = JSON.parse(
-            Buffer.from(bearerToken.split('.')[1], 'base64url').toString('utf8')
-        );
-
-        const [rows] = await db.query(
-            'SELECT token_hash FROM sessions WHERE user_id = ? AND is_active = 1',
-            [adminId]
-        );
-        const hashes = rows.map((r) => r.token_hash);
-
-        assert.ok(hashes.includes(sha256(bearerToken)), 'row keyed by SHA-256 of the whole JWT');
-        assert.ok(!hashes.includes(sha256(payload.jti)), 'no row keyed by hash of jti');
-        assert.ok(!hashes.includes(payload.jti), 'jti itself is not a session key');
-
-        // Revoking the full-JWT hash must actually revoke the credential, which only
-        // holds if protect() looks the session up by that same value.
-        await db.query('UPDATE sessions SET is_active = 0 WHERE token_hash = ?', [sha256(bearerToken)]);
-        await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${bearerToken}`).expect(401);
     });
 
     it('session expiry is 8h server-side', async () => {
@@ -189,7 +147,6 @@ describe('Phase 3 auth', () => {
         assert.ok(rows[0].mins >= 475 && rows[0].mins <= 480, `expected ~480m, got ${rows[0].mins}`);
     });
 
-    // ── Cookie attributes ─────────────────────────────────────────────────────
     it('cookie is HttpOnly, SameSite=Lax, Path=/, host-only, and honours COOKIE_SECURE', async () => {
         const { setCookie } = await loginFresh();
         const line = cookieLine(setCookie);
@@ -212,18 +169,6 @@ describe('Phase 3 auth', () => {
         }
     });
 
-    // ── Credential precedence ─────────────────────────────────────────────────
-    it('Bearer-only succeeds on /auth/me', async () => {
-        const { bearerToken } = await loginFresh();
-        const res = await agent
-            .get('/api/v1/auth/me')
-            .set('Authorization', `Bearer ${bearerToken}`)
-            .expect(200);
-        assert.equal(res.body.id, adminId);
-        assert.ok(res.body.username);
-        assert.equal(res.body.role, 'admin');
-    });
-
     it('Cookie-only succeeds on /auth/me', async () => {
         const { cookieToken } = await loginFresh();
         const res = await agent
@@ -231,50 +176,75 @@ describe('Phase 3 auth', () => {
             .set('Cookie', `${COOKIE}=${cookieToken}`)
             .expect(200);
         assert.equal(res.body.id, adminId);
+        assert.ok(res.body.username);
+        assert.equal(res.body.role, 'admin');
     });
 
     it('no credentials returns 401', async () => {
         await agent.get('/api/v1/auth/me').expect(401);
     });
 
-    it('valid Bearer + valid Cookie: Bearer wins (no CSRF required on unsafe method)', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
+    it('historically valid JWT/Bearer alone cannot authenticate', async () => {
+        await loginFresh();
+        const historicalJwt = historicalJwtFor(adminId);
+        await db.query(
+            `INSERT INTO sessions
+             (user_id, token_hash, ip_address, user_agent, device_type, expires_at)
+             VALUES (?, ?, '127.0.0.1', 'phase11-historical-jwt', 'test', DATE_ADD(NOW(), INTERVAL 8 HOUR))`,
+            [adminId, sha256(historicalJwt)]
+        );
+
+        const res = await agent
+            .get('/api/v1/auth/me')
+            .set('Authorization', `Bearer ${historicalJwt}`)
+            .expect(401);
+        assert.equal(res.body.message, 'Access denied. No authentication provided.');
+    });
+
+    it('cookie + Bearer uses the cookie and does not bypass CSRF', async () => {
+        const { cookieToken } = await loginFresh();
+        const historicalJwt = historicalJwtFor(adminId);
+        await db.query(
+            `INSERT INTO sessions
+             (user_id, token_hash, ip_address, user_agent, device_type, expires_at)
+             VALUES (?, ?, '127.0.0.1', 'phase11-historical-jwt', 'test', DATE_ADD(NOW(), INTERVAL 8 HOUR))`,
+            [adminId, sha256(historicalJwt)]
+        );
+
+        const me = await agent
+            .get('/api/v1/auth/me')
+            .set('Authorization', `Bearer ${historicalJwt}`)
+            .set('Cookie', `${COOKIE}=${cookieToken}`)
+            .expect(200);
+        assert.equal(me.body.id, adminId);
+
         await agent
             .post('/api/v1/auth/resolve-location')
-            .set('Authorization', `Bearer ${bearerToken}`)
+            .set('Authorization', `Bearer ${historicalJwt}`)
             .set('Cookie', `${COOKIE}=${cookieToken}`)
+            .send({ location: 'Manila' })
+            .expect(403);
+
+        await agent
+            .post('/api/v1/auth/resolve-location')
+            .set('Authorization', `Bearer ${historicalJwt}`)
+            .set('Cookie', `${COOKIE}=${cookieToken}`)
+            .set('Origin', ALLOWED_ORIGIN)
             .send({ location: 'Manila' })
             .expect(200);
     });
 
-    it('invalid Bearer + valid Cookie returns 401 with no cookie fallback', async () => {
+    it('malformed Bearer + valid cookie still authenticates', async () => {
         const { cookieToken } = await loginFresh();
-
         for (const header of ['Bearer not.a.valid.jwt', 'Bearer ', 'Bearer']) {
             await agent
                 .get('/api/v1/auth/me')
                 .set('Authorization', header)
                 .set('Cookie', `${COOKIE}=${cookieToken}`)
-                .expect(401);
+                .expect(200);
         }
-
-        // The cookie itself must still be usable — the Bearer failure did not revoke it.
-        await agent
-            .get('/api/v1/auth/me')
-            .set('Cookie', `${COOKIE}=${cookieToken}`)
-            .expect(200);
     });
 
-    it('valid Bearer + invalid Cookie: Bearer succeeds', async () => {
-        const { bearerToken } = await loginFresh();
-        await agent
-            .get('/api/v1/auth/me')
-            .set('Authorization', `Bearer ${bearerToken}`)
-            .set('Cookie', `${COOKIE}=${crypto.randomBytes(32).toString('hex')}`)
-            .expect(200);
-    });
-
-    // ── Invalid / expired / revoked ───────────────────────────────────────────
     it('fabricated cookie returns 401', async () => {
         await agent
             .get('/api/v1/auth/me')
@@ -294,34 +264,16 @@ describe('Phase 3 auth', () => {
             .expect(401);
     });
 
-    it('expired Bearer session returns 401', async () => {
-        const { bearerToken } = await loginFresh();
-        await db.query(
-            'UPDATE sessions SET expires_at = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE token_hash = ?',
-            [sha256(bearerToken)]
-        );
-        await agent
-            .get('/api/v1/auth/me')
-            .set('Authorization', `Bearer ${bearerToken}`)
-            .expect(401);
-    });
-
-    it('revoking one credential leaves the other working', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
-
+    it('revoked cookie session returns 401', async () => {
+        const { cookieToken } = await loginFresh();
         await db.query('UPDATE sessions SET is_active = 0 WHERE token_hash = ?', [sha256(cookieToken)]);
         await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${cookieToken}`).expect(401);
-        await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${bearerToken}`).expect(200);
-
-        await db.query('UPDATE sessions SET is_active = 0 WHERE token_hash = ?', [sha256(bearerToken)]);
-        await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${bearerToken}`).expect(401);
     });
 
-    it('users.is_active remains authoritative for both credentials', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
+    it('users.is_active remains authoritative for the cookie session', async () => {
+        const { cookieToken } = await loginFresh();
         await db.query('UPDATE users SET is_active = 0 WHERE id = ?', [adminId]);
         try {
-            await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${bearerToken}`).expect(403);
             await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${cookieToken}`).expect(403);
             await agent.get('/api/v1/plantings').set('Cookie', `${COOKIE}=${cookieToken}`).expect(403);
             await agent.post('/api/v1/auth/login').send(TEST_USER).expect(401);
@@ -332,7 +284,6 @@ describe('Phase 3 auth', () => {
         await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${cookieToken}`).expect(200);
     });
 
-    // ── CSRF ──────────────────────────────────────────────────────────────────
     it('cookie unsafe request with valid Origin is allowed', async () => {
         const { cookieToken } = await loginFresh();
         await agent
@@ -358,7 +309,6 @@ describe('Phase 3 auth', () => {
         const hostile = [
             { Origin: 'http://evil.example' },
             { Referer: 'http://evil.example/x' },
-            // Prefix-confusion: a different port that shares the allowed origin's prefix.
             { Origin: 'http://localhost:51739' },
             { Referer: 'http://localhost:51739/x' },
             {}
@@ -386,93 +336,53 @@ describe('Phase 3 auth', () => {
             .expect(403);
     });
 
-    it('csrfGuard unit: safe methods pass, PATCH is guarded, Bearer is exempt', () => {
-        const run = ({ method, authMethod, headers = {} }) => {
+    it('csrfGuard unit: safe methods pass and unsafe methods are never Bearer-exempt', () => {
+        const run = ({ method, headers = {} }) => {
             let status = null;
             let passed = false;
-            const req = { method, authMethod, headers };
+            const req = { method, headers };
             const res = { status: (s) => { status = s; return { json: () => {} }; } };
             csrfGuard(req, res, () => { passed = true; });
             return { status, passed };
         };
 
-        assert.equal(run({ method: 'GET', authMethod: 'cookie' }).passed, true);
-        assert.equal(run({ method: 'HEAD', authMethod: 'cookie' }).passed, true);
-        assert.equal(run({ method: 'OPTIONS', authMethod: 'cookie' }).passed, true);
-        assert.equal(run({ method: 'PATCH', authMethod: 'bearer' }).passed, true);
-        assert.equal(run({ method: 'PATCH', authMethod: 'cookie' }).status, 403);
+        assert.equal(run({ method: 'GET' }).passed, true);
+        assert.equal(run({ method: 'HEAD' }).passed, true);
+        assert.equal(run({ method: 'OPTIONS' }).passed, true);
+        assert.equal(run({ method: 'PATCH' }).status, 403);
         assert.equal(
-            run({ method: 'PATCH', authMethod: 'cookie', headers: { origin: ALLOWED_ORIGIN } }).passed,
+            run({ method: 'PATCH', headers: { origin: ALLOWED_ORIGIN } }).passed,
             true
         );
     });
 
-    it('Bearer unsafe requests need no CSRF header (JWT compatibility)', async () => {
-        const { bearerToken } = await loginFresh();
-        await agent
-            .post('/api/v1/auth/resolve-location')
-            .set('Authorization', `Bearer ${bearerToken}`)
-            .send({ location: 'Manila' })
-            .expect(200);
-    });
-
-    // ── Logout ────────────────────────────────────────────────────────────────
-    it('logout revokes both credentials and clears the cookie', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
+    it('logout revokes the cookie session and clears the cookie', async () => {
+        const { cookieToken } = await loginFresh();
 
         const res = await agent
             .post('/api/v1/auth/logout')
-            .set('Authorization', `Bearer ${bearerToken}`)
             .set('Cookie', `${COOKIE}=${cookieToken}`)
             .expect(200);
 
         assert.match(cookieLine(res.headers['set-cookie']) || '', /Expires=/i, 'cookie cleared');
 
         const [rows] = await db.query(
-            'SELECT token_hash, is_active FROM sessions WHERE token_hash IN (?, ?)',
-            [sha256(bearerToken), sha256(cookieToken)]
+            'SELECT token_hash, is_active FROM sessions WHERE token_hash = ?',
+            [sha256(cookieToken)]
         );
-        assert.equal(rows.length, 2);
-        for (const row of rows) assert.equal(row.is_active, 0);
-
-        await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${bearerToken}`).expect(401);
-        await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${cookieToken}`).expect(401);
-    });
-
-    it('Bearer-only logout does not revoke the cookie session', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
-
-        const res = await agent
-            .post('/api/v1/auth/logout')
-            .set('Authorization', `Bearer ${bearerToken}`)
-            .expect(200);
-        assert.match(cookieLine(res.headers['set-cookie']) || '', /Expires=/i, 'cookie always cleared');
-
-        await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${bearerToken}`).expect(401);
-        await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${cookieToken}`).expect(200);
-    });
-
-    it('cookie-only logout does not revoke the Bearer session', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
-
-        await agent
-            .post('/api/v1/auth/logout')
-            .set('Cookie', `${COOKIE}=${cookieToken}`)
-            .expect(200);
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].is_active, 0);
 
         await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${cookieToken}`).expect(401);
-        await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${bearerToken}`).expect(200);
     });
 
     it('logout is idempotent and clears the cookie with no credentials', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
-        const creds = { Authorization: `Bearer ${bearerToken}`, Cookie: `${COOKIE}=${cookieToken}` };
+        const { cookieToken } = await loginFresh();
 
         for (let i = 0; i < 2; i += 1) {
             await agent
                 .post('/api/v1/auth/logout')
-                .set('Authorization', creds.Authorization)
-                .set('Cookie', creds.Cookie)
+                .set('Cookie', `${COOKIE}=${cookieToken}`)
                 .expect(200);
         }
 
@@ -486,48 +396,76 @@ describe('Phase 3 auth', () => {
     });
 
     it('logout-all revokes every session for the user', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
+        const first = await loginFresh();
+        const second = await agent.post('/api/v1/auth/login').send(TEST_USER).expect(200);
+        const secondCookie = parseSessionCookie(second.headers['set-cookie']);
+
         await agent
             .post('/api/v1/auth/logout-all')
-            .set('Authorization', `Bearer ${bearerToken}`)
+            .set('Cookie', `${COOKIE}=${first.cookieToken}`)
+            .set('Origin', ALLOWED_ORIGIN)
             .expect(200);
 
-        await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${bearerToken}`).expect(401);
-        await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${cookieToken}`).expect(401);
+        await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${first.cookieToken}`).expect(401);
+        await agent.get('/api/v1/auth/me').set('Cookie', `${COOKIE}=${secondCookie}`).expect(401);
     });
 
-    // ── Protected crop endpoints / regression ─────────────────────────────────
-    it('protected crop endpoints accept both Bearer and Cookie', async () => {
-        const { bearerToken, cookieToken } = await loginFresh();
+    it('protected crop endpoints accept cookie and reject missing credentials', async () => {
+        const { cookieToken } = await loginFresh();
 
         const paths = [
             '/api/v1/plantings',
             '/api/v1/varieties',
             '/api/v1/dashboard/lifecycle-monitoring'
         ];
-        for (const path of paths) {
-            await agent.get(path).set('Authorization', `Bearer ${bearerToken}`).expect(200);
-            await agent.get(path).set('Cookie', `${COOKIE}=${cookieToken}`).expect(200);
+        for (const pathName of paths) {
+            await agent.get(pathName).set('Cookie', `${COOKIE}=${cookieToken}`).expect(200);
         }
 
-        for (const path of ['/api/v1/plantings', '/api/v1/varieties']) {
-            await agent.get(path).expect(401);
+        for (const pathName of ['/api/v1/plantings', '/api/v1/varieties']) {
+            await agent.get(pathName).expect(401);
         }
     });
 
-    it('refreshed Bearer token is immediately usable', async () => {
-        await db.query('DELETE FROM sessions WHERE user_id = ?', [adminId]);
-        const login = await agent.post('/api/v1/auth/login').send(TEST_USER).expect(200);
-
-        const refreshed = await agent
-            .post('/api/v1/auth/refresh')
-            .send({ refreshToken: login.body.refreshToken })
-            .expect(200);
-
+    it('refresh endpoint is gone', async () => {
         await agent
-            .get('/api/v1/auth/me')
-            .set('Authorization', `Bearer ${refreshed.body.token}`)
-            .expect(200);
+            .post('/api/v1/auth/refresh')
+            .send({ refreshToken: 'legacy-refresh' })
+            .expect(404);
+    });
+
+    it('process starts with RSA auth key files absent', () => {
+        const keyDir = path.join(__dirname, '..');
+        const files = ['private.key', 'public.key'];
+        const hidden = [];
+
+        for (const name of files) {
+            const src = path.join(keyDir, name);
+            if (fs.existsSync(src)) {
+                const dest = `${src}.phase11bak`;
+                fs.renameSync(src, dest);
+                hidden.push([src, dest]);
+            }
+        }
+
+        try {
+            const result = spawnSync(process.execPath, ['-e', `
+process.env.NODE_ENV = 'test';
+process.env.DB_NAME = 'crop_management_rearch_test';
+process.env.COOKIE_SECURE = 'false';
+process.env.ALLOWED_ORIGIN = 'http://localhost:5173';
+require(${JSON.stringify(path.join(__dirname, '..', 'app'))});
+process.stdout.write('booted');
+process.exit(0);
+`], { encoding: 'utf8', timeout: 30000 });
+
+            assert.equal(result.status, 0, result.stderr);
+            assert.match(result.stdout, /booted/);
+        } finally {
+            for (const [src, dest] of hidden) {
+                if (fs.existsSync(dest)) fs.renameSync(dest, src);
+            }
+        }
     });
 
     it('no subordinate accounts are created', async () => {

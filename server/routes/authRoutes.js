@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { login, logout, getMe, refreshToken, getSessions, logoutAllDevices, changePassword, resolveLocation, updateFarmLocation, removeFarmLocation } = require('../controllers/authController');
+const { login, logout, getMe, getSessions, logoutAllDevices, changePassword, resolveLocation, updateFarmLocation, removeFarmLocation } = require('../controllers/authController');
 const { issueLoginChallenge } = require('../controllers/challengeController');
 const { validateLogin, validateChangePassword, validateLoginChallenge } = require('../middleware/validate');
 const { loginLimiter, challengeLimiter } = require('../middleware/rateLimiter');
@@ -29,7 +29,6 @@ router.post('/challenge', ...challengeMiddleware);
 router.post('/logout', logout);
 
 router.post('/logout-all', protect, authorize(CAPABILITIES.SESSION_REVOKE_OWN), logoutAllDevices);
-router.post('/refresh', refreshToken);
 
 // Protected endpoints
 router.get('/me', protectPasswordChange, authorize(CAPABILITIES.SESSION_READ_OWN), getMe);

@@ -10,11 +10,6 @@ const originOf = (value) => {
 };
 
 const csrfGuard = (req, res, next) => {
-    // Bearer-authenticated requests carry no ambient credential, so CSRF cannot apply.
-    if (req.authMethod !== 'cookie') {
-        return next();
-    }
-
     if (SAFE_METHODS.includes(req.method.toUpperCase())) {
         return next();
     }
