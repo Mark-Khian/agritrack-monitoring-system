@@ -10,6 +10,7 @@ process.env.DB_NAME = 'crop_management_rearch_test';
 process.env.PORT = '5100';
 process.env.COOKIE_SECURE = 'false';
 process.env.ALLOWED_ORIGIN = 'http://localhost:5173';
+process.env.ALLOWED_ORIGINS = '';
 
 if (process.env.DB_NAME !== 'crop_management_rearch_test') {
     throw new Error('Refusing to run Phase 3 tests outside crop_management_rearch_test');
@@ -102,6 +103,19 @@ describe('Phase 3 auth', () => {
             'UPDATE users SET is_active = 1, failed_attempts = 0, locked_until = NULL, captcha_required = 0 WHERE id = ?',
             [adminId]
         );
+
+        const [fixtureUsers] = await db.query(
+            "SELECT id FROM users WHERE username LIKE 'lan_csrf_%' OR name = 'LAN CSRF Secretary'"
+        );
+        for (const row of fixtureUsers) {
+            await db.query(
+                `DELETE FROM activity_logs
+                 WHERE user_id = ? OR (entity = 'users' AND entity_id = ?)`,
+                [row.id, row.id]
+            );
+            await db.query('DELETE FROM sessions WHERE user_id = ?', [row.id]);
+            await db.query('DELETE FROM users WHERE id = ?', [row.id]);
+        }
 
         const [counts] = await db.query('SELECT COUNT(*) AS c FROM users');
         initialUserCount = counts[0].c;
@@ -311,6 +325,7 @@ describe('Phase 3 auth', () => {
             { Referer: 'http://evil.example/x' },
             { Origin: 'http://localhost:51739' },
             { Referer: 'http://localhost:51739/x' },
+            { Origin: 'http://192.168.11.159:5173' },
             {}
         ];
         for (const headers of hostile) {
@@ -354,6 +369,213 @@ describe('Phase 3 auth', () => {
             run({ method: 'PATCH', headers: { origin: ALLOWED_ORIGIN } }).passed,
             true
         );
+        assert.equal(run({ method: 'POST' }).status, 403);
+        assert.equal(run({ method: 'POST', headers: { origin: 'http://evil.example' } }).status, 403);
+        assert.equal(run({ method: 'POST', headers: { origin: 'http://localhost:51739' } }).status, 403);
+        assert.equal(run({ method: 'POST', headers: { origin: 'http://192.168.11.159:5173' } }).status, 403);
+
+        const previousOrigins = process.env.ALLOWED_ORIGINS;
+        process.env.ALLOWED_ORIGINS = `${ALLOWED_ORIGIN},http://192.168.11.159:5173`;
+        try {
+            assert.equal(
+                run({ method: 'POST', headers: { origin: 'http://192.168.11.159:5173' } }).passed,
+                true
+            );
+            assert.equal(
+                run({ method: 'POST', headers: { origin: ALLOWED_ORIGIN } }).passed,
+                true
+            );
+            assert.equal(
+                run({ method: 'POST', headers: { referer: 'http://192.168.11.159:5173/accounts' } }).passed,
+                true
+            );
+            assert.equal(run({ method: 'POST', headers: { origin: '*' } }).status, 403);
+        } finally {
+            if (previousOrigins === undefined) delete process.env.ALLOWED_ORIGINS;
+            else process.env.ALLOWED_ORIGINS = previousOrigins;
+        }
+    });
+
+    it('trusted origin parser normalizes exact origins and ignores junk', () => {
+        const { originOf, parseOriginList, getTrustedOrigins } = require('../config/trustedOrigins');
+        assert.equal(originOf('http://localhost:5173/accounts'), 'http://localhost:5173');
+        assert.equal(originOf('http://192.168.11.159:5173'), 'http://192.168.11.159:5173');
+        assert.equal(originOf('*'), null);
+        assert.equal(originOf('not-a-url'), null);
+        assert.deepEqual(
+            parseOriginList(' http://localhost:5173 , http://127.0.0.1:5173, ,bogus,* '),
+            ['http://localhost:5173', 'http://127.0.0.1:5173']
+        );
+
+        const previousOrigins = process.env.ALLOWED_ORIGINS;
+        const previousOrigin = process.env.ALLOWED_ORIGIN;
+        try {
+            delete process.env.ALLOWED_ORIGINS;
+            process.env.ALLOWED_ORIGIN = 'http://localhost:5173/dashboard';
+            assert.deepEqual(getTrustedOrigins(), ['http://localhost:5173']);
+
+            process.env.ALLOWED_ORIGINS = 'http://localhost:5173,http://192.168.11.159:5173';
+            assert.deepEqual(getTrustedOrigins(), [
+                'http://localhost:5173',
+                'http://192.168.11.159:5173'
+            ]);
+        } finally {
+            if (previousOrigins === undefined) delete process.env.ALLOWED_ORIGINS;
+            else process.env.ALLOWED_ORIGINS = previousOrigins;
+            process.env.ALLOWED_ORIGIN = previousOrigin;
+        }
+    });
+
+    it('production fails closed without trusted origins; development falls back to localhost', () => {
+        const { getTrustedOrigins } = require('../config/trustedOrigins');
+        const previousEnv = process.env.NODE_ENV;
+        const previousOrigins = process.env.ALLOWED_ORIGINS;
+        const previousOrigin = process.env.ALLOWED_ORIGIN;
+        try {
+            delete process.env.ALLOWED_ORIGINS;
+            delete process.env.ALLOWED_ORIGIN;
+
+            process.env.NODE_ENV = 'development';
+            assert.deepEqual(getTrustedOrigins(), ['http://localhost:5173']);
+
+            process.env.NODE_ENV = 'production';
+            assert.throws(
+                () => getTrustedOrigins(),
+                (err) => err instanceof Error && /ALLOWED_ORIGINS|ALLOWED_ORIGIN/.test(err.message)
+            );
+
+            process.env.ALLOWED_ORIGIN = 'https://app.example';
+            assert.deepEqual(getTrustedOrigins(), ['https://app.example']);
+
+            process.env.ALLOWED_ORIGINS = 'https://eval.example,https://app.example';
+            assert.deepEqual(getTrustedOrigins(), ['https://eval.example', 'https://app.example']);
+        } finally {
+            process.env.NODE_ENV = previousEnv;
+            if (previousOrigins === undefined) delete process.env.ALLOWED_ORIGINS;
+            else process.env.ALLOWED_ORIGINS = previousOrigins;
+            if (previousOrigin === undefined) delete process.env.ALLOWED_ORIGIN;
+            else process.env.ALLOWED_ORIGIN = previousOrigin;
+        }
+    });
+
+    it('credentialed CORS allows listed origins and rejects unlisted origins', async () => {
+        const allowed = await request(app).get('/').set('Origin', ALLOWED_ORIGIN);
+        assert.equal(allowed.headers['access-control-allow-origin'], ALLOWED_ORIGIN);
+        assert.equal(allowed.headers['access-control-allow-credentials'], 'true');
+
+        const denied = await request(app).get('/').set('Origin', 'http://evil.example');
+        assert.notEqual(denied.headers['access-control-allow-origin'], 'http://evil.example');
+
+        const previousOrigins = process.env.ALLOWED_ORIGINS;
+        process.env.ALLOWED_ORIGINS = `${ALLOWED_ORIGIN},http://192.168.11.159:5173`;
+        try {
+            const lan = await request(app).get('/').set('Origin', 'http://192.168.11.159:5173');
+            assert.equal(lan.headers['access-control-allow-origin'], 'http://192.168.11.159:5173');
+            const prefix = await request(app).get('/').set('Origin', 'http://localhost:51739');
+            assert.notEqual(prefix.headers['access-control-allow-origin'], 'http://localhost:51739');
+        } finally {
+            if (previousOrigins === undefined) delete process.env.ALLOWED_ORIGINS;
+            else process.env.ALLOWED_ORIGINS = previousOrigins;
+        }
+    });
+
+    it('listed LAN origin can mutate Accounts, Plantings, and Harvests without CSRF 403', async () => {
+        const lanOrigin = 'http://192.168.11.159:5173';
+        const previousOrigins = process.env.ALLOWED_ORIGINS;
+        process.env.ALLOWED_ORIGINS = `${ALLOWED_ORIGIN},${lanOrigin}`;
+        const { cookieToken } = await loginFresh();
+        const csrfFailed = (res) => res.body && res.body.message === 'CSRF validation failed.';
+        let createdUserId = null;
+        const deleteCsrfFixtureUsers = async () => {
+            const [rows] = await db.query(
+                "SELECT id FROM users WHERE username LIKE 'lan_csrf_%' OR name = 'LAN CSRF Secretary'"
+            );
+            for (const row of rows) {
+                await db.query(
+                    `DELETE FROM activity_logs
+                     WHERE user_id = ? OR (entity = 'users' AND entity_id = ?)`,
+                    [row.id, row.id]
+                );
+                await db.query('DELETE FROM sessions WHERE user_id = ?', [row.id]);
+                await db.query('DELETE FROM users WHERE id = ?', [row.id]);
+            }
+        };
+        await deleteCsrfFixtureUsers();
+
+        try {
+            const created = await agent
+                .post('/api/v1/users')
+                .set('Cookie', `${COOKIE}=${cookieToken}`)
+                .set('Origin', lanOrigin)
+                .send({
+                    name: 'LAN CSRF Secretary',
+                    username: `lan_csrf_${Date.now()}`,
+                    role: 'SECRETARY'
+                });
+            assert.equal(csrfFailed(created), false);
+            assert.notEqual(created.status, 403);
+            createdUserId = created.body?.user?.id || created.body?.id || null;
+
+            if (createdUserId) {
+                const userId = created.body.user?.id || created.body.id;
+                const patched = await agent
+                    .patch(`/api/v1/users/${userId}/disable`)
+                    .set('Cookie', `${COOKIE}=${cookieToken}`)
+                    .set('Origin', lanOrigin)
+                    .send({});
+                assert.equal(csrfFailed(patched), false);
+                assert.notEqual(patched.status, 403);
+            }
+
+            const planting = await agent
+                .post('/api/v1/plantings')
+                .set('Cookie', `${COOKIE}=${cookieToken}`)
+                .set('Origin', lanOrigin)
+                .send({
+                    field_name: `LAN CSRF ${Date.now()}`,
+                    variety_class: 'Irrigated / Lowland Varieties',
+                    variety: 'NSIC Rc110',
+                    planting_date: '2026-01-10',
+                    cropping_season: 'DRY_SEASON',
+                    establishment_method: 'TRANSPLANTED',
+                    field_condition: 'IRRIGATED',
+                    lifecycle_state: 'ACTIVE',
+                    status: 'active',
+                });
+            assert.equal(csrfFailed(planting), false);
+            assert.notEqual(planting.status, 403);
+
+            const harvest = await agent
+                .post('/api/v1/harvests')
+                .set('Cookie', `${COOKIE}=${cookieToken}`)
+                .set('Origin', lanOrigin)
+                .send({
+                    planting_id: planting.body?.plantingId || 1,
+                    harvest_date: '2026-09-01',
+                    yield_kg: 10,
+                    quality_grade: 'A',
+                });
+            assert.equal(csrfFailed(harvest), false);
+            assert.notEqual(harvest.status, 403);
+        } finally {
+            await deleteCsrfFixtureUsers();
+            if (previousOrigins === undefined) delete process.env.ALLOWED_ORIGINS;
+            else process.env.ALLOWED_ORIGINS = previousOrigins;
+        }
+    });
+
+    it('GET remains CSRF-safe even when Origin is unlisted', async () => {
+        const { cookieToken } = await loginFresh();
+        await agent
+            .get('/api/v1/users')
+            .set('Cookie', `${COOKIE}=${cookieToken}`)
+            .set('Origin', 'http://192.168.11.159:5173')
+            .expect(200);
+        await agent
+            .get('/api/v1/auth/me')
+            .set('Cookie', `${COOKIE}=${cookieToken}`)
+            .set('Origin', 'http://evil.example')
+            .expect(200);
     });
 
     it('logout revokes the cookie session and clears the cookie', async () => {
@@ -434,6 +656,15 @@ describe('Phase 3 auth', () => {
             .expect(404);
     });
 
+    it('HTTP deployment does not emit Strict-Transport-Security', async () => {
+        const res = await request(app).get('/api/v1/auth/me').expect(401);
+        assert.equal(res.headers['strict-transport-security'], undefined);
+        assert.equal(res.headers['x-content-type-options'], 'nosniff');
+        assert.match(String(res.headers['x-frame-options'] || ''), /SAMEORIGIN/i);
+        assert.ok(res.headers['content-security-policy']);
+        assert.equal(res.headers['referrer-policy'], 'no-referrer');
+    });
+
     it('process starts with RSA auth key files absent', () => {
         const keyDir = path.join(__dirname, '..');
         const files = ['private.key', 'public.key'];
@@ -454,6 +685,7 @@ process.env.NODE_ENV = 'test';
 process.env.DB_NAME = 'crop_management_rearch_test';
 process.env.COOKIE_SECURE = 'false';
 process.env.ALLOWED_ORIGIN = 'http://localhost:5173';
+process.env.ALLOWED_ORIGINS = '';
 require(${JSON.stringify(path.join(__dirname, '..', 'app'))});
 process.stdout.write('booted');
 process.exit(0);

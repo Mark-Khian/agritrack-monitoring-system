@@ -2,7 +2,8 @@
  * NotificationBell.jsx
  *
  * Self-contained notification bell for the Navbar.
- * - Polls GET /api/v1/notifications every 60 seconds (no WebSockets).
+ * - Polls GET /api/v1/notifications every 60 seconds as a resilience fallback.
+ * - Subscribes to GET /api/v1/notifications/events (SSE) for immediate invalidation.
  * - Shows an animated unread badge.
  * - Dropdown lists up to 20 notifications with type icons, title, message, time.
  * - Clicking a notification marks it as read.
@@ -30,6 +31,43 @@ import {
     deleteNotification,
 } from '../services/api';
 import ConfirmDialog from './ConfirmDialog';
+
+// Shared EventSource for notification invalidation (one connection for both bells).
+let sharedNotifSource = null;
+let sharedNotifRefCount = 0;
+const sharedNotifListeners = new Set();
+
+const subscribeNotificationEvents = (onChanged) => {
+    sharedNotifListeners.add(onChanged);
+    sharedNotifRefCount += 1;
+
+    if (!sharedNotifSource) {
+        try {
+            sharedNotifSource = new EventSource('/api/v1/notifications/events');
+        } catch {
+            sharedNotifListeners.delete(onChanged);
+            sharedNotifRefCount = Math.max(0, sharedNotifRefCount - 1);
+            return () => {};
+        }
+
+        sharedNotifSource.addEventListener('notifications-changed', () => {
+            for (const fn of [...sharedNotifListeners]) {
+                try { fn(); } catch { /* ignore listener errors */ }
+            }
+        });
+        // Native EventSource reconnects on transient errors; do not surface UI alarms.
+        sharedNotifSource.onerror = () => {};
+    }
+
+    return () => {
+        sharedNotifListeners.delete(onChanged);
+        sharedNotifRefCount = Math.max(0, sharedNotifRefCount - 1);
+        if (sharedNotifRefCount === 0 && sharedNotifSource) {
+            sharedNotifSource.close();
+            sharedNotifSource = null;
+        }
+    };
+};
 
 // ── Type → icon + accent colours ─────────────────────────────────────────────
 
@@ -128,15 +166,22 @@ const NotificationBell = ({ mode = 'activity' }) => {
         } catch {
             // silently fail — non-critical
         }
-    }, []);
+    }, [mode]);
 
-    // Initial load + polling every 60 s
+    // Initial load + polling every 60 s (SSE provides immediate sync; poll is fallback)
     useEffect(() => {
         setLoading(true);
         fetchNotifications().finally(() => setLoading(false));
 
         intervalRef.current = setInterval(fetchNotifications, 60_000);
         return () => clearInterval(intervalRef.current);
+    }, [fetchNotifications]);
+
+    // Cross-client notification invalidation (SSE). Event is a signal only — always refetch.
+    useEffect(() => {
+        return subscribeNotificationEvents(() => {
+            fetchNotifications();
+        });
     }, [fetchNotifications]);
 
     // Refresh notifications listener

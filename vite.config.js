@@ -6,7 +6,7 @@ import babel from '@rolldown/plugin-babel'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   const proxyTarget = env.VITE_API_PROXY_TARGET
-    || (mode === 'phase4' ? 'http://127.0.0.1:5100' : 'http://localhost:5000')
+    || (mode === 'phase4' ? 'http://127.0.0.1:5100' : 'http://127.0.0.1:5000')
 
   return {
     plugins: [

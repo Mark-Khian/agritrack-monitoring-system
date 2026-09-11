@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getAllPlantings, getPlantingById,
     createPlanting, updatePlanting,
-    deletePlanting } = require('../controllers/plantingController');
+    deletePlanting, streamPlantingEvents } = require('../controllers/plantingController');
 const { exportPlantingsCSV, exportPlantingsPDF, exportPlantingPDF } = require('../controllers/exportController');
 const { protect } = require('../middleware/authMiddleware');
 const { authorize, CAPABILITIES } = require('../security/rbac');
@@ -11,6 +11,7 @@ const { validatePlanting,
     validatePlantingUpdate,
     validateId } = require('../middleware/validateData');
 
+router.get('/events', protect, authorize(CAPABILITIES.PLANTING_READ), streamPlantingEvents);
 router.get('/', protect, authorize(CAPABILITIES.PLANTING_READ), getAllPlantings);
 router.get('/export/csv', protect, authorize(CAPABILITIES.PLANTING_EXPORT), exportLimiter, exportPlantingsCSV);
 router.get('/export/pdf', protect, authorize(CAPABILITIES.PLANTING_EXPORT), exportLimiter, exportPlantingsPDF);

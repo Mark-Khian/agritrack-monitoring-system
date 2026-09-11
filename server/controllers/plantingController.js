@@ -18,6 +18,11 @@ const {
     findVarietyByClassAndName,
     countSystemGeneratedActivities,
 } = require('../services/varietyService');
+const {
+    addClient,
+    removeClient,
+    broadcastPlantingsChanged,
+} = require('../utils/plantingHub');
 
 const VARIETY_MAP = {
     'Irrigated / Lowland Varieties': [
@@ -99,6 +104,18 @@ const PLANTING_JOINS = `
     LEFT JOIN varieties v ON plantings.variety_id = v.id
 `;
 
+/** Worker-visible current plantings only (operational + lifecycle). */
+const WORKER_VISIBLE_LIFECYCLE_STATES = Object.freeze([
+    'ACTIVE',
+    'MATURING',
+    'READY_FOR_HARVEST',
+]);
+
+const isWorkerVisiblePlanting = (planting) => (
+    String(planting?.status || '').toLowerCase() === 'active'
+    && WORKER_VISIBLE_LIFECYCLE_STATES.includes(planting?.lifecycle_state)
+);
+
 const toWorkerPlanting = (planting) => ({
     id: planting.id,
     field_name: planting.field_name,
@@ -168,8 +185,12 @@ const getAllPlantings = async (req, res) => {
         const offset = (page - 1) * limit;
 
         const workerRead = req.user.role === ROLES.FARM_WORKER;
+        // Workers: forced current-planting scope. Query status/lifecycle params cannot expand access.
         const effectiveStatus = workerRead ? 'active' : req.query.status;
         const statusFilter = effectiveStatus ? 'AND plantings.status = ?' : '';
+        const workerLifecycleFilter = workerRead
+            ? `AND plantings.lifecycle_state IN (${WORKER_VISIBLE_LIFECYCLE_STATES.map(() => '?').join(', ')})`
+            : '';
         const varietyIdFilter = req.query.variety_id ? 'AND plantings.variety_id = ?' : '';
         const varietyClassFilter = req.query.variety_class
             ? 'AND plantings.variety_class = ?'
@@ -180,6 +201,7 @@ const getAllPlantings = async (req, res) => {
 
         const listParams = [];
         if (effectiveStatus) listParams.push(effectiveStatus);
+        if (workerRead) listParams.push(...WORKER_VISIBLE_LIFECYCLE_STATES);
         if (req.query.variety_id) listParams.push(Number(req.query.variety_id));
         if (req.query.variety_class) listParams.push(String(req.query.variety_class).trim());
         listParams.push(limit, offset);
@@ -190,6 +212,7 @@ const getAllPlantings = async (req, res) => {
              ${PLANTING_JOINS}
              WHERE plantings.deleted_at IS NULL
                ${statusFilter}
+               ${workerLifecycleFilter}
                ${varietyIdFilter}
                ${varietyClassFilter}
                ${varietyNullFilter}
@@ -200,10 +223,11 @@ const getAllPlantings = async (req, res) => {
 
         const countParams = [];
         if (effectiveStatus) countParams.push(effectiveStatus);
+        if (workerRead) countParams.push(...WORKER_VISIBLE_LIFECYCLE_STATES);
         if (req.query.variety_id) countParams.push(Number(req.query.variety_id));
         if (req.query.variety_class) countParams.push(String(req.query.variety_class).trim());
 
-        const countWhere = `${statusFilter} ${varietyIdFilter} ${varietyClassFilter} ${varietyNullFilter}`;
+        const countWhere = `${statusFilter} ${workerLifecycleFilter} ${varietyIdFilter} ${varietyClassFilter} ${varietyNullFilter}`;
         const [[{ total }]] = await db.query(
             `SELECT COUNT(*) as total
              FROM plantings
@@ -240,7 +264,7 @@ const getPlantingById = async (req, res) => {
         );
         if (
             plantings.length === 0
-            || (workerRead && String(plantings[0].status).toLowerCase() !== 'active')
+            || (workerRead && !isWorkerVisiblePlanting(plantings[0]))
         )
             return res.status(404).json({ message: 'Planting not found.' });
 
@@ -393,6 +417,7 @@ const createPlanting = async (req, res) => {
 
         const msg = 'Planting created! System activities have been generated for this crop.';
 
+        broadcastPlantingsChanged();
         res.status(201).json({
             message: msg,
             plantingId: pid
@@ -667,6 +692,7 @@ const updatePlanting = async (req, res) => {
             console.error('Audit log failed:', auditErr.message);
         }
 
+        broadcastPlantingsChanged();
         res.status(200).json({ message: 'Planting updated!' });
     } catch (err) {
         console.error('Update planting error:', err.message);
@@ -691,6 +717,7 @@ const deletePlanting = async (req, res) => {
             entity_id: parseInt(req.params.id, 10),
         });
 
+        broadcastPlantingsChanged();
         res.status(200).json({ message: 'Planting deleted!' });
     } catch (err) {
         console.error('Delete planting error:', err.message);
@@ -698,10 +725,49 @@ const deletePlanting = async (req, res) => {
     }
 };
 
+/**
+ * GET /api/v1/plantings/events — SSE invalidation stream (Plantings only).
+ */
+const streamPlantingEvents = (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+    }
+
+    try {
+        res.write(': connected\n\n');
+    } catch {
+        return;
+    }
+
+    addClient(res);
+
+    const heartbeat = setInterval(() => {
+        try {
+            res.write(': heartbeat\n\n');
+        } catch {
+            clearInterval(heartbeat);
+            removeClient(res);
+        }
+    }, 25_000);
+
+    const cleanup = () => {
+        clearInterval(heartbeat);
+        removeClient(res);
+    };
+
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+};
+
 module.exports = {
     getAllPlantings,
     getPlantingById,
     createPlanting,
     updatePlanting,
-    deletePlanting
+    deletePlanting,
+    streamPlantingEvents,
 };

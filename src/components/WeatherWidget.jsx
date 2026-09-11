@@ -23,6 +23,17 @@ let weatherCache = {
 
 const CACHE_DURATION = 15 * 60 * 1000;
 
+const resetWeatherCache = () => {
+    weatherCache = {
+        weather: null,
+        forecast: null,
+        dailyForecast: null,
+        uvIndex: null,
+        locationName: null,
+        lastFetched: null,
+    };
+};
+
 /**
  * Returns a context-aware weather icon based on the OWM condition code AND
  * the current hour (0-23).  Priority order:
@@ -281,12 +292,43 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
         fetchWeather();
         const interval = setInterval(() => fetchWeather(true), CACHE_DURATION);
         const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible') fetchWeather();
+            if (document.visibilityState === 'visible') {
+                // Force refetch so returning tabs are not blocked by the 15-minute client cache.
+                fetchWeather(true);
+            }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
         return () => {
             clearInterval(interval);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [fetchWeather]);
+
+    // Cross-client farm-location invalidation (SSE). Event is a signal only — always refetch.
+    useEffect(() => {
+        let cancelled = false;
+        let source = null;
+
+        try {
+            source = new EventSource('/api/v1/weather/events');
+        } catch {
+            return undefined;
+        }
+
+        const onLocationChanged = () => {
+            if (cancelled) return;
+            resetWeatherCache();
+            fetchWeather(true);
+        };
+
+        source.addEventListener('farm-location-changed', onLocationChanged);
+        // Native EventSource reconnects on transient errors; do not surface UI alarms.
+        source.onerror = () => {};
+
+        return () => {
+            cancelled = true;
+            source.removeEventListener('farm-location-changed', onLocationChanged);
+            source.close();
         };
     }, [fetchWeather]);
 
@@ -431,7 +473,7 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
             setSuggestions([]);
             setShowSuggestions(false);
 
-            weatherCache.lastFetched = null;
+            resetWeatherCache();
             await fetchWeather(true);
         } catch (err) {
             setConfigError(err.response?.data?.message || 'Failed to save location.');
@@ -447,14 +489,7 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
     const confirmRemoveLocation = async () => {
         try {
             await deleteFarmLocation();
-            weatherCache = {
-                weather: null,
-                forecast: null,
-                dailyForecast: null,
-                uvIndex: null,
-                locationName: null,
-                lastFetched: null,
-            };
+            resetWeatherCache();
             setLocationName('Farm Location');
             setIsConfigured(false);
             setWeather(null);
@@ -565,27 +600,6 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
                         </div>
                     )}
 
-                    {resolvedLocation && (
-                        <div className="mb-4">
-                            <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                Selected Location Preview
-                            </p>
-                            <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-slate-900/50 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'}`}>
-                                <div className="flex items-start gap-3">
-                                    <MapPin className="text-emerald-500 mt-1 shrink-0" size={18} />
-                                    <div>
-                                        <p className="font-semibold text-sm">{formatLocationDisplay(resolvedLocation.resolvedName)}</p>
-                                        <p className={`text-xs mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                            PSGC: {resolvedLocation.psgcCode}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-
-
                     <div className="flex justify-end gap-3 mt-6">
                         <button
                             onClick={handleCloseModal}
@@ -632,18 +646,18 @@ const WeatherWidget = ({ variant = 'default', rainExpected = null }) => {
             <>
                 <div
                     onClick={canManageLocation ? () => setShowConfigModal(true) : undefined}
-                    className={canManageLocation ? 'hover:scale-[1.01] transition-transform cursor-pointer' : ''}
+                    className={`rounded-2xl flex flex-col items-center justify-center text-center px-5 py-6 sm:py-7 min-h-[120px] sm:min-h-[140px] ${
+                        canManageLocation ? 'hover:scale-[1.01] transition-transform cursor-pointer' : ''
+                    }`}
                     style={{
-                        borderRadius: '20px', padding: '1.5rem',
                         background: isDarkMode
                             ? 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)'
                             : 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
-                        minHeight: '160px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center'
                     }}
                 >
-                    <MapPin size={28} className={isDarkMode ? 'text-emerald-400 mb-3' : 'text-emerald-600 mb-3'} />
+                    <MapPin size={26} className={isDarkMode ? 'text-emerald-400 mb-2.5' : 'text-emerald-600 mb-2.5'} />
                     <h3 className={`font-semibold mb-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Farm Location Not Set</h3>
-                    <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <p className={`text-sm max-w-md ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                         {canManageLocation
                             ? 'Click to configure your farm location for accurate weather tracking.'
                             : 'Farm location is not configured.'}

@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test';
 process.env.DB_NAME = 'crop_management_rearch_test';
 process.env.COOKIE_SECURE = 'false';
 process.env.ALLOWED_ORIGIN = 'http://localhost:5173';
+process.env.ALLOWED_ORIGINS = '';
 
 if (process.env.DB_NAME !== 'crop_management_rearch_test') {
     throw new Error('Refusing to run Phase 6 tests outside crop_management_rearch_test');

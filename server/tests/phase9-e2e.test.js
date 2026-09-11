@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test';
 process.env.DB_NAME = 'crop_management_rearch_test';
 process.env.COOKIE_SECURE = 'false';
 process.env.ALLOWED_ORIGIN = 'http://127.0.0.1:5179';
+process.env.ALLOWED_ORIGINS = '';
 process.env.LOGIN_CHALLENGE_SECRET = process.env.LOGIN_CHALLENGE_SECRET
     || 'phase9-test-challenge-secret-32bytes-min';
 
@@ -421,6 +422,9 @@ describe('Phase 9 full E2E, regression, and security validation', () => {
 
         const list = await workerAgent.get('/api/v1/plantings?status=completed').expect(200);
         assert.ok(list.body.data.every((row) => row.status === 'active'));
+        assert.ok(list.body.data.every((row) => (
+            ['ACTIVE', 'MATURING', 'READY_FOR_HARVEST'].includes(row.lifecycle_state)
+        )));
         assert.ok(list.body.data.every((row) => !Object.prototype.hasOwnProperty.call(row, 'user_id')));
 
         const beforePlantings = await snapshotRow('plantings', crop.plantingId);

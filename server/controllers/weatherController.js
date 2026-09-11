@@ -1,11 +1,15 @@
 /**
  * weatherController.js
- * Backend proxy for OpenWeatherMap — fetches by farm.location (city name).
+ * Backend proxy for OpenWeatherMap — fetches by active admin farm coordinates.
  * Server-side cache: 30 minutes per location.
  */
 
 const https = require('https');
-const db = require('../config/db'); // Import DB connection
+const { getActiveAdmin } = require('../utils/activeAdmin');
+const {
+    addClient,
+    removeClient,
+} = require('../utils/weatherLocationHub');
 
 const API_KEY = process.env.OPENWEATHER_API_KEY;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -29,7 +33,7 @@ const httpsGet = (url) =>
     });
 
 /**
- * GET /api/v1/weather?location=<city name>
+ * GET /api/v1/weather
  * Returns: { current, forecast, rainExpected, cachedAt }
  */
 const getWeather = async (req, res) => {
@@ -40,13 +44,11 @@ const getWeather = async (req, res) => {
     }
 
     try {
-        // Fetch farm location from users table (single admin)
-        const [users] = await db.query(`SELECT farm_latitude, farm_longitude, farm_location_name FROM users WHERE role = 'admin' LIMIT 1`);
-        if (users.length === 0) {
-            return res.status(500).json({ message: 'Admin user not found.' });
+        const admin = await getActiveAdmin();
+        if (!admin) {
+            return res.status(500).json({ message: 'No active administrator account found.' });
         }
 
-        const admin = users[0];
         if (admin.farm_latitude == null || admin.farm_longitude == null) {
             return res.status(400).json({
                 message: 'Farm weather location has not been configured.',
@@ -67,7 +69,7 @@ const getWeather = async (req, res) => {
             return res.status(200).json({ ...cached.data, fromCache: true });
         }
 
-        // Step 2 — Parallel: current weather + 5-day forecast + UV index
+        // Parallel: current weather + 5-day forecast + UV index
         const currentUrl  = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`;
         const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric&cnt=40`;
         const uviUrl      = `https://api.openweathermap.org/data/2.5/uvi?lat=${lat}&lon=${lon}&appid=${API_KEY}`;
@@ -78,7 +80,7 @@ const getWeather = async (req, res) => {
             httpsGet(uviUrl).catch(() => null), // UV is non-critical
         ]);
 
-        // Determine if rain is expected in next 6 forecast slots (~18 hours)
+        // Rain expected in next 6 forecast slots (~18 hours)
         const next6 = (forecastRes.list || []).slice(0, 6);
         const rainExpected = next6.some(f => f.weather[0]?.id >= 500 && f.weather[0]?.id < 600);
 
@@ -102,4 +104,42 @@ const getWeather = async (req, res) => {
     }
 };
 
-module.exports = { getWeather };
+/**
+ * GET /api/v1/weather/events — SSE invalidation stream (Weather location only).
+ */
+const streamWeatherLocationEvents = (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+    }
+
+    try {
+        res.write(': connected\n\n');
+    } catch {
+        return;
+    }
+
+    addClient(res);
+
+    const heartbeat = setInterval(() => {
+        try {
+            res.write(': heartbeat\n\n');
+        } catch {
+            clearInterval(heartbeat);
+            removeClient(res);
+        }
+    }, 25_000);
+
+    const cleanup = () => {
+        clearInterval(heartbeat);
+        removeClient(res);
+    };
+
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+};
+
+module.exports = { getWeather, streamWeatherLocationEvents };

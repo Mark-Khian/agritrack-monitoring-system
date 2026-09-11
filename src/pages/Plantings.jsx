@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Plus, Edit2, Trash2, Sprout, AlertTriangle, ChevronDown, FileDown, Loader2, Printer, X, Calendar, Check, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -16,6 +16,26 @@ import { SkeletonTable } from '../components/Skeleton';
 import { formatDisplayDate } from '../utils/dateFormatter';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES } from '../security/permissions';
+
+/** Stable fingerprint of API planting rows (already RBAC-filtered) for realtime toast gating. */
+const plantingListFingerprint = (rows) => JSON.stringify(
+    [...(rows || [])]
+        .map((p) => ({
+            id: p.id,
+            status: p.status,
+            lifecycle_state: p.lifecycle_state,
+            field_name: p.field_name,
+            variety: p.variety,
+            planting_date: p.planting_date,
+            expected_growth_days: p.expected_growth_days,
+            adjustment_days: p.adjustment_days,
+            growth_plan_manual_override: p.growth_plan_manual_override,
+        }))
+        .sort((a, b) => Number(a.id) - Number(b.id))
+);
+
+/** Remote SSE clients reuse the existing update success toast wording/style. */
+const PLANTINGS_REALTIME_TOAST = 'Planting updated successfully!';
 
 const RICE_VARIETY_OPTIONS = {
     'Irrigated / Lowland Varieties': [
@@ -113,6 +133,15 @@ const Plantings = () => {
     const [saving, setSaving] = useState(false);
 
     const globalToast = useToast();
+    const suppressRealtimeToastUntilRef = useRef(0);
+    const plantingsRef = useRef(plantings);
+    plantingsRef.current = plantings;
+
+    const suppressRealtimeToast = useCallback(() => {
+        // Cover the window where our own mutation's SSE echo may arrive.
+        suppressRealtimeToastUntilRef.current = Date.now() + 2500;
+    }, []);
+
     const [validationErrors, setValidationErrors] = useState({});
 
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -222,6 +251,49 @@ const Plantings = () => {
             clearInterval(timer);
         };
     }, []);
+
+    // Cross-client Plantings invalidation (SSE). Event is a signal only — always refetch.
+    useEffect(() => {
+        let cancelled = false;
+        let source = null;
+
+        try {
+            source = new EventSource('/api/v1/plantings/events');
+        } catch {
+            return undefined;
+        }
+
+        const onPlantingsChanged = async () => {
+            if (cancelled) return;
+            const before = plantingListFingerprint(plantingsRef.current);
+            try {
+                const pRes = await getPlantings();
+                if (cancelled) return;
+                const data = pRes.data.data || [];
+                setError(null);
+                setPlantings(data);
+                plantingsCache = data;
+                const after = plantingListFingerprint(data);
+                const suppressed = Date.now() < suppressRealtimeToastUntilRef.current;
+                if (!suppressed && before !== after) {
+                    globalToast.success(PLANTINGS_REALTIME_TOAST);
+                }
+            } catch (err) {
+                if (cancelled || err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
+                console.error(err);
+            }
+        };
+
+        source.addEventListener('plantings-changed', onPlantingsChanged);
+        // Native EventSource reconnects on transient errors; do not surface UI alarms.
+        source.onerror = () => {};
+
+        return () => {
+            cancelled = true;
+            source.removeEventListener('plantings-changed', onPlantingsChanged);
+            source.close();
+        };
+    }, [globalToast]);
 
     useEffect(() => {
         let cancelled = false;
@@ -390,6 +462,7 @@ const Plantings = () => {
                     status: formData.status,
                     generate_template_indices: partialPayload,
                 });
+                suppressRealtimeToast();
                 globalToast.success('Planting updated successfully!');
             } else {
                 await createPlanting({
@@ -410,6 +483,7 @@ const Plantings = () => {
                     lifecycle_state: formData.lifecycle_state,
                     generate_template_indices: partialPayload,
                 });
+                suppressRealtimeToast();
                 globalToast.success('Planting created successfully!');
             }
             handleCloseModal();
@@ -431,6 +505,7 @@ const Plantings = () => {
     const confirmDelete = async () => {
         try {
             await deletePlanting(deletingId);
+            suppressRealtimeToast();
             await fetchData();
             globalToast.success('Planting deleted successfully!');
         }
@@ -587,7 +662,11 @@ const Plantings = () => {
                     <div className="flex items-center bg-gray-50 p-1 rounded-xl border border-gray-200 w-full sm:w-fit overflow-x-auto">
                         {[
                             { id: 'all', label: 'All' },
-                            { id: 'active', label: 'Active' },
+                            // Workers see MATURING / READY_FOR_HARVEST too — "Current" is clearer than "Active".
+                            {
+                                id: 'active',
+                                label: can(CAPABILITIES.PLANTING_UPDATE) ? 'Active' : 'Current',
+                            },
                             { id: 'completed', label: 'Completed' }
                         ].filter((tab) => can(CAPABILITIES.PLANTING_UPDATE) || tab.id === 'active').map(tab => (
                             <button

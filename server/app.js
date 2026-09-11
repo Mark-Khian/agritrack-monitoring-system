@@ -10,28 +10,36 @@ const app = express();
 // Do not trust arbitrary client-supplied X-Forwarded-For from LAN hosts.
 app.set('trust proxy', 'loopback');
 
+// HTTP LAN deployment (Phase 12 Transport B): do not emit HSTS/preload.
+// Other Helmet defaults (CSP, frame protection, nosniff, Referrer-Policy) stay on.
 app.use(helmet({
-    hsts: {
-        maxAge: 31536000,
-        includeSubDomains: true,
-        preload: true
-    }
+    hsts: false
 }));
-app.use(compression());
+app.use(compression({
+    filter: (req, res) => {
+        // SSE must not be compressed/buffered.
+        if (req.path && (
+            req.path.includes('/weather/events')
+            || req.path.includes('/notifications/events')
+            || req.path.includes('/plantings/events')
+        )) {
+            return false;
+        }
+        return compression.filter(req, res);
+    },
+}));
 app.use(morgan(
     process.env.NODE_ENV === 'production' ? 'combined' : 'dev'
 ));
 
-const allowedOrigin = process.env.NODE_ENV === 'production'
-    ? (process.env.ALLOWED_ORIGIN || 'https://localhost:5173')
-    : null;
+const { isTrustedOrigin } = require('./config/trustedOrigins');
 
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || process.env.NODE_ENV !== 'production') {
+        if (!origin) {
             return callback(null, true);
         }
-        if (origin === allowedOrigin) {
+        if (isTrustedOrigin(origin)) {
             return callback(null, true);
         }
         return callback(null, false);

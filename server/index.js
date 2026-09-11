@@ -5,6 +5,7 @@ const generateCerts = require('./config/https');
 require('dotenv').config();
 
 const app = require('./app');
+const { getTrustedOrigins } = require('./config/trustedOrigins');
 const { scheduleBackups } = require('./utils/backup');
 const { runActivityCycle, runWeatherCycle } = require('./utils/notificationService');
 
@@ -14,7 +15,8 @@ const runMigrations = require('./config/migration');
 async function startServer() {
     try {
         console.log('🚀 Starting application...');
-        
+        getTrustedOrigins();
+
         // 1. Run migrations synchronously
         await runMigrations(db);
 

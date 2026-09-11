@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test';
 process.env.DB_NAME = 'crop_management_rearch_test';
 process.env.COOKIE_SECURE = 'false';
 process.env.ALLOWED_ORIGIN = 'http://localhost:5173';
+process.env.ALLOWED_ORIGINS = '';
 
 if (process.env.DB_NAME !== 'crop_management_rearch_test') {
     throw new Error('Refusing to run Phase 5 tests outside crop_management_rearch_test');
@@ -312,10 +313,46 @@ describe('Phase 5 centralized RBAC', () => {
 
     it('limits Worker to current planting reads and the exact progress patch', async () => {
         await worker.get('/api/v1/dashboard/lifecycle-monitoring').expect(200);
-        const plantingResponse = await worker.get('/api/v1/plantings').expect(200);
+
+        const visibleLifecycle = new Set(['ACTIVE', 'MATURING', 'READY_FOR_HARVEST']);
+        const fixtureIds = {};
+        for (const state of ['PLANNED', 'ACTIVE', 'MATURING', 'READY_FOR_HARVEST', 'ABANDONED']) {
+            const id = await createPlanting(secretary, `${PREFIX}_lc_${state.toLowerCase()}`);
+            fixtureIds[state] = id;
+            await db.query(
+                'UPDATE plantings SET lifecycle_state = ?, status = ? WHERE id = ?',
+                [state, 'active', id]
+            );
+        }
+        // HARVESTED path already covered by harvestPlantingId (status=completed).
+        // Also leave one abandoned with status still active (consistency gap fixture).
+        assert.equal((await rowSnapshot('plantings', fixtureIds.ABANDONED)).status, 'active');
+
+        const plantingResponse = await worker.get('/api/v1/plantings?limit=100').expect(200);
         assert.ok(plantingResponse.body.data.every((row) => row.status === 'active'));
+        assert.ok(plantingResponse.body.data.every((row) => visibleLifecycle.has(row.lifecycle_state)));
         assert.ok(plantingResponse.body.data.every((row) => row.user_id === undefined));
+
+        const listedIds = new Set(plantingResponse.body.data.map((row) => row.id));
+        assert.equal(listedIds.has(fixtureIds.PLANNED), false);
+        assert.equal(listedIds.has(fixtureIds.ACTIVE), true);
+        assert.equal(listedIds.has(fixtureIds.MATURING), true);
+        assert.equal(listedIds.has(fixtureIds.READY_FOR_HARVEST), true);
+        assert.equal(listedIds.has(fixtureIds.ABANDONED), false);
+        assert.equal(listedIds.has(harvestPlantingId), false);
+
+        await worker.get(`/api/v1/plantings/${fixtureIds.PLANNED}`).expect(404);
+        await worker.get(`/api/v1/plantings/${fixtureIds.ACTIVE}`).expect(200);
+        await worker.get(`/api/v1/plantings/${fixtureIds.MATURING}`).expect(200);
+        await worker.get(`/api/v1/plantings/${fixtureIds.READY_FOR_HARVEST}`).expect(200);
+        await worker.get(`/api/v1/plantings/${fixtureIds.ABANDONED}`).expect(404);
         await worker.get(`/api/v1/plantings/${harvestPlantingId}`).expect(404);
+
+        const bypass = await worker.get('/api/v1/plantings?status=completed&limit=100').expect(200);
+        assert.ok(bypass.body.data.every((row) => row.status === 'active'));
+        assert.ok(bypass.body.data.every((row) => visibleLifecycle.has(row.lifecycle_state)));
+        assert.equal(bypass.body.data.some((row) => row.id === harvestPlantingId), false);
+
         await worker.get('/api/v1/activities').expect(200);
         await worker.get('/api/v1/notes').expect(200);
 

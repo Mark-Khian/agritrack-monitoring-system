@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const logActivity = require('../middleware/logger');
 const { utcTodayYmd } = require('../utils/plantingDates');
+const { broadcastNotificationsChanged } = require('../utils/notificationHub');
 
 const deriveActivityStatus = (activity) => {
     let s = (activity.status || 'PENDING').toUpperCase();
@@ -262,11 +263,14 @@ const updateActivity = async (req, res) => {
         }
 
         if (['COMPLETED', 'SKIPPED', 'CANCELLED'].includes(finalStatus)) {
-            await db.query(
+            const [notifResult] = await db.query(
                 `DELETE FROM notifications 
                  WHERE type IN ('activity_due', 'activity_overdue') AND related_id = ?`,
                 [req.params.id]
             );
+            if ((notifResult.affectedRows || 0) > 0) {
+                broadcastNotificationsChanged();
+            }
         }
 
         await logActivity.fromRequest(req, {
@@ -314,11 +318,14 @@ const updateActivityProgress = async (req, res) => {
             [actual_date, req.params.id]
         );
 
-        await db.query(
+        const [notifResult] = await db.query(
             `DELETE FROM notifications
              WHERE type IN ('activity_due', 'activity_overdue') AND related_id = ?`,
             [req.params.id]
         );
+        if ((notifResult.affectedRows || 0) > 0) {
+            broadcastNotificationsChanged();
+        }
 
         await logActivity.fromRequest(req, {
             action: 'UPDATE_ACTIVITY_PROGRESS',
@@ -344,11 +351,14 @@ const deleteActivity = async (req, res) => {
         if (result.affectedRows === 0)
             return res.status(404).json({ message: 'Activity not found.' });
 
-        await db.query(
+        const [notifResult] = await db.query(
             `DELETE FROM notifications 
              WHERE type IN ('activity_due', 'activity_overdue') AND related_id = ?`,
             [req.params.id]
         );
+        if ((notifResult.affectedRows || 0) > 0) {
+            broadcastNotificationsChanged();
+        }
 
         await logActivity.fromRequest(req, {
             action: 'DELETE_ACTIVITY',

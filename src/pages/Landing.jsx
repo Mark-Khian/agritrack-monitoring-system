@@ -25,8 +25,16 @@ const Landing = () => {
   const challengeRequiredRef = useRef(false);
   const usernameRef = useRef('');
   const passwordRef = useRef('');
-  const { login } = useAuth();
+  // Snapshot of credentials captured at initial login; survives challenge modal remounts.
+  const pendingCredentialsRef = useRef({ username: '', password: '' });
+  const { login, notice, clearNotice } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (notice) {
+      setErrorMsg(notice);
+    }
+  }, [notice]);
 
   // Temporarily disable dark mode and hide scrollbars while viewing the login page
   useEffect(() => {
@@ -52,8 +60,44 @@ const Landing = () => {
     };
   }, []);
 
-  const loadChallenge = async () => {
-    if (!usernameRef.current.trim()) {
+  const clearPendingCredentials = () => {
+    pendingCredentialsRef.current = { username: '', password: '' };
+  };
+
+  const capturePendingCredentials = () => {
+    const nextUsername = (usernameRef.current || username || '').trim();
+    const nextPassword = passwordRef.current || password || '';
+    if (nextUsername && nextPassword) {
+      pendingCredentialsRef.current = {
+        username: nextUsername,
+        password: nextPassword,
+      };
+    }
+    return pendingCredentialsRef.current;
+  };
+
+  const resolveCredentials = () => {
+    const pending = pendingCredentialsRef.current;
+    const nextUsername = (
+      pending.username
+      || usernameRef.current
+      || username
+      || ''
+    ).trim();
+    const nextPassword = pending.password || passwordRef.current || password || '';
+    return { username: nextUsername, password: nextPassword };
+  };
+
+  const loadChallenge = async (identityUsername) => {
+    const challengeUsername = (
+      identityUsername
+      || pendingCredentialsRef.current.username
+      || usernameRef.current
+      || username
+      || ''
+    ).trim();
+
+    if (!challengeUsername) {
       setChallengeError('Enter your username before requesting a verification challenge.');
       setShowChallengeModal(true);
       return null;
@@ -61,7 +105,7 @@ const Landing = () => {
     setChallengeLoading(true);
     setChallengeError('');
     try {
-      const response = await requestLoginChallenge(usernameRef.current);
+      const response = await requestLoginChallenge(challengeUsername);
       const nextChallenge = {
         id: response.data.challengeId,
         prompt: response.data.prompt,
@@ -82,43 +126,32 @@ const Landing = () => {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const completeLogin = async ({ username: loginUsername, password: loginPassword, challengeId, challengeAnswer: answer }) => {
     setErrorMsg('');
     setChallengeError('');
-
-    if (challengeRequiredRef.current && !challengeAnswerRef.current.trim()) {
-      setChallengeError('Complete the verification before continuing.');
-      setShowChallengeModal(true);
-      if (!challengeRef.current) {
-        await loadChallenge();
-      }
-      return;
-    }
-
     setAuthPhase('loading');
     setIsLoading(true);
+
+    const payload = {
+      username: loginUsername,
+      password: loginPassword,
+      ...(challengeId && answer != null && String(answer).length
+        ? { challengeId, challengeAnswer: String(answer) }
+        : {}),
+    };
+
     try {
-      const delay = new Promise(resolve => setTimeout(resolve, 800));
-      const currentChallenge = challengeRef.current;
+      const delay = new Promise((resolve) => setTimeout(resolve, 800));
       const authenticate = async () => {
-        await loginUser({
-          username: usernameRef.current || username,
-          password: passwordRef.current || password,
-          ...(challengeRequiredRef.current && currentChallenge ? {
-            challengeId: currentChallenge.id,
-            challengeAnswer: challengeAnswerRef.current,
-          } : {}),
-        });
+        await loginUser(payload);
         return getCurrentUser();
       };
-      const [meResponse] = await Promise.all([
-        authenticate(),
-        delay
-      ]);
+      const [meResponse] = await Promise.all([authenticate(), delay]);
+      clearPendingCredentials();
+      passwordRef.current = '';
+      setPassword('');
       login(meResponse.data);
 
-      // Show success screen then redirect
       setAuthPhase('success');
       const requiresPasswordChange =
         meResponse.data?.must_change_password === true
@@ -129,20 +162,98 @@ const Landing = () => {
         () => navigate(requiresPasswordChange ? '/change-password' : '/dashboard'),
         2000
       );
-
     } catch (error) {
       setAuthPhase('idle');
       setIsLoading(false);
       const data = error?.response?.data;
+
       if (data?.challengeRequired) {
         challengeRequiredRef.current = true;
         setChallengeRequired(true);
         setShowChallengeModal(true);
-        await loadChallenge();
+        // Keep pending credentials; only refresh the challenge prompt.
+        await loadChallenge(loginUsername);
       }
+
       const msg = data?.message || error.message || 'Login failed.';
       setErrorMsg(msg);
+      if (challengeRequiredRef.current) {
+        setShowChallengeModal(true);
+        setChallengeError(msg);
+      }
     }
+  };
+
+  const handleInitialLogin = async (e) => {
+    e.preventDefault();
+    clearNotice?.();
+    const captured = capturePendingCredentials();
+    if (!captured.username || !captured.password) {
+      setErrorMsg('Username and password are required.');
+      return;
+    }
+
+    if (challengeRequiredRef.current && !challengeAnswerRef.current.trim()) {
+      setChallengeError('Complete the verification before continuing.');
+      setShowChallengeModal(true);
+      if (!challengeRef.current) {
+        await loadChallenge(captured.username);
+      }
+      return;
+    }
+
+    const currentChallenge = challengeRef.current;
+    await completeLogin({
+      username: captured.username,
+      password: captured.password,
+      ...(challengeRequiredRef.current && currentChallenge
+        ? {
+            challengeId: currentChallenge.id,
+            challengeAnswer: challengeAnswerRef.current,
+          }
+        : {}),
+    });
+  };
+
+  const handleChallengeSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setChallengeError('');
+
+    const credentials = resolveCredentials();
+    if (!credentials.username || !credentials.password) {
+      setChallengeError('Your login session expired. Close this dialog and sign in again.');
+      setShowChallengeModal(true);
+      return;
+    }
+
+    if (!challengeAnswerRef.current.trim()) {
+      setChallengeError('Complete the verification before continuing.');
+      setShowChallengeModal(true);
+      if (!challengeRef.current) {
+        await loadChallenge(credentials.username);
+      }
+      return;
+    }
+
+    const currentChallenge = challengeRef.current;
+    if (!currentChallenge?.id) {
+      setChallengeError('Verification expired. Get a new challenge and try again.');
+      await loadChallenge(credentials.username);
+      return;
+    }
+
+    await completeLogin({
+      username: credentials.username,
+      password: credentials.password,
+      challengeId: currentChallenge.id,
+      challengeAnswer: challengeAnswerRef.current,
+    });
+  };
+
+  const handleCloseChallenge = () => {
+    setShowChallengeModal(false);
+    setChallengeError('');
   };
 
   return (
@@ -185,7 +296,7 @@ const Landing = () => {
 
             <button
               type="button"
-              onClick={() => setShowChallengeModal(false)}
+              onClick={handleCloseChallenge}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
               aria-label="Close verification"
             >
@@ -199,11 +310,11 @@ const Landing = () => {
             <h3 className="text-xl font-bold text-gray-900 mb-2">Security Verification</h3>
             <p className="text-sm text-gray-600 text-center mb-6">Complete the verification before continuing.</p>
 
-            <div className="flex justify-center w-full min-h-[78px]">
+            <div className="flex justify-center w-full">
               {challengeLoading ? (
                 <Loader2 className="w-6 h-6 animate-spin text-green-600" />
               ) : (
-                <div className="w-full">
+                <form onSubmit={handleChallengeSubmit} className="w-full">
                   <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-center" aria-live="polite">
                     <p className="text-lg font-semibold text-gray-900 tracking-wide select-none">
                       {challenge?.prompt || 'Verification is required.'}
@@ -220,16 +331,32 @@ const Landing = () => {
                       challengeAnswerRef.current = e.target.value;
                       setChallengeAnswer(e.target.value);
                     }}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all"
+                    disabled={isLoading}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                   <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full mt-4 py-3 px-4 rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-semibold transition-all duration-200 flex items-center justify-center gap-2 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Verifying...
+                      </>
+                    ) : (
+                      'Verify'
+                    )}
+                  </button>
+                  <button
                     type="button"
-                    onClick={loadChallenge}
-                    className="mt-3 text-sm text-gray-600 hover:text-gray-800"
+                    onClick={() => loadChallenge()}
+                    disabled={isLoading}
+                    className="mt-3 text-sm text-gray-600 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Get a new challenge
                   </button>
-                </div>
+                </form>
               )}
             </div>
 
@@ -264,7 +391,7 @@ const Landing = () => {
             <p className="text-gray-600 text-sm mb-5 sm:mb-8">Enter your credentials to access the system</p>
 
             {/* Login Form */}
-            <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
+            <form onSubmit={handleInitialLogin} className="space-y-4 sm:space-y-5">
 
               {/* Username Input */}
               <div>

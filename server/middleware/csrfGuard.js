@@ -1,26 +1,14 @@
-const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'];
+const { originOf, isTrustedOrigin } = require('../config/trustedOrigins');
 
-const originOf = (value) => {
-    if (!value || typeof value !== 'string') return null;
-    try {
-        return new URL(value).origin;
-    } catch (e) {
-        return null;
-    }
-};
+const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'];
 
 const csrfGuard = (req, res, next) => {
     if (SAFE_METHODS.includes(req.method.toUpperCase())) {
         return next();
     }
 
-    const allowedOrigin = originOf(process.env.ALLOWED_ORIGIN) || 'https://localhost:5173';
-
-    // Compare full origins only. Prefix matching would accept http://localhost:51739
-    // when the allowed origin is http://localhost:5173.
     const requestOrigin = originOf(req.headers.origin) || originOf(req.headers.referer);
-
-    if (requestOrigin && requestOrigin === allowedOrigin) {
+    if (requestOrigin && isTrustedOrigin(requestOrigin)) {
         return next();
     }
 

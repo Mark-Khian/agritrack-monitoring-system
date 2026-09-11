@@ -101,21 +101,29 @@ const Sidebar = ({ onNavClick }) => {
                 <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
                     {navLinks.map((link) => {
                         const Icon = link.icon;
+                        const showAdminDivider =
+                            link.name === 'Accounts' && navLinks.some((item) => item.name === 'Analytics');
                         return (
-                            <NavLink
-                                key={link.name}
-                                to={link.path}
-                                className={({ isActive }) =>
-                                    `flex items-center gap-3 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 ${isActive
-                                        ? 'bg-green-600 text-white shadow-sm'
-                                        : 'text-green-200 hover:bg-green-800 hover:text-white'
-                                    }`
-                                }
-                                onClick={onNavClick}
-                            >
-                                <Icon size={18} />
-                                {link.name}
-                            </NavLink>
+                            <React.Fragment key={link.name}>
+                                {showAdminDivider && (
+                                    <div className="py-3" role="separator" aria-hidden="true">
+                                        <div className="h-px w-full bg-green-200/25" />
+                                    </div>
+                                )}
+                                <NavLink
+                                    to={link.path}
+                                    className={({ isActive }) =>
+                                        `flex items-center gap-3 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 ${isActive
+                                            ? 'bg-green-600 text-white shadow-sm'
+                                            : 'text-green-200 hover:bg-green-800 hover:text-white'
+                                        }`
+                                    }
+                                    onClick={onNavClick}
+                                >
+                                    <Icon size={18} />
+                                    {link.name}
+                                </NavLink>
+                            </React.Fragment>
                         );
                     })}
                 </nav>

@@ -35,6 +35,8 @@ const {
     incrementUserFailures,
     resetUserFailures
 } = require('../services/loginChallengeService');
+const { broadcastFarmLocationChanged } = require('../utils/weatherLocationHub');
+const { broadcastNotificationsChanged } = require('../utils/notificationHub');
 
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
@@ -516,6 +518,7 @@ const updateFarmLocation = async (req, res) => {
             entity_id: req.user.id
         });
 
+        broadcastFarmLocationChanged();
         res.status(200).json({ message: 'Farm location saved successfully.' });
     } catch (err) {
         console.error('Update farm location error:', err.message);
@@ -536,7 +539,7 @@ const removeFarmLocation = async (req, res) => {
             [req.user.id]
         );
 
-        await connection.query(
+        const [notifResult] = await connection.query(
             `DELETE FROM notifications
              WHERE type = 'weather_alert' AND user_id = ?`,
             [req.user.id]
@@ -550,6 +553,10 @@ const removeFarmLocation = async (req, res) => {
             entity_id: req.user.id
         });
 
+        broadcastFarmLocationChanged();
+        if ((notifResult.affectedRows || 0) > 0) {
+            broadcastNotificationsChanged();
+        }
         res.status(200).json({ message: 'Farm location removed successfully.' });
     } catch (err) {
         if (connection) await connection.rollback();

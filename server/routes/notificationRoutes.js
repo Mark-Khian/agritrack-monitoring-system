@@ -13,6 +13,7 @@ const { protect } = require('../middleware/authMiddleware');
 const { authorize, CAPABILITIES } = require('../security/rbac');
 const {
     getNotifications,
+    streamNotificationEvents,
     markAsRead,
     markAllRead,
     deleteNotification,
@@ -21,6 +22,9 @@ const {
 // All routes require authentication
 router.use(protect);
 router.use(authorize(CAPABILITIES.NOTIFICATION_MANAGE_OWN));
+
+// GET  /api/v1/notifications/events — SSE invalidation (before /)
+router.get('/events', streamNotificationEvents);
 
 // GET  /api/v1/notifications          — list latest 20 + unread count
 router.get('/', getNotifications);

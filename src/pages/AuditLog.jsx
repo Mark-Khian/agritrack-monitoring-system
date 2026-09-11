@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, ScrollText } from 'lucide-react';
 import Badge from '../components/Badge';
+import ConfirmDialog from '../components/ConfirmDialog';
 import Select from '../components/Select';
 import { SkeletonCard, SkeletonTable } from '../components/Skeleton';
 import { getAuditLogs } from '../services/api';
@@ -39,8 +40,14 @@ const AuditLog = () => {
   const [status, setStatus] = useState('');
   const [action, setAction] = useState('');
   const [actionDraft, setActionDraft] = useState('');
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());
+  const [pendingRemoveId, setPendingRemoveId] = useState(null);
 
   const pageCount = Math.max(1, Math.ceil(total / limit) || 1);
+  const visibleLogs = useMemo(
+    () => logs.filter((log) => !hiddenIds.has(log.id)),
+    [logs, hiddenIds]
+  );
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -74,7 +81,35 @@ const AuditLog = () => {
     setAction(actionDraft.trim());
   };
 
-  const columns = ['Timestamp', 'Actor', 'Actor Role', 'Action', 'Entity', 'Entity ID', 'IP', 'Status'];
+  const hidePendingLog = () => {
+    if (pendingRemoveId == null) return;
+    setHiddenIds((current) => {
+      const next = new Set(current);
+      next.add(pendingRemoveId);
+      return next;
+    });
+  };
+
+  const columns = [
+    { key: 'timestamp', label: 'Timestamp', headerClass: 'w-[16%]', cellClass: 'text-xs text-gray-600 whitespace-nowrap' },
+    { key: 'role', label: 'Role', headerClass: 'w-[11%]', cellClass: 'text-sm text-gray-700' },
+    { key: 'action', label: 'Action', headerClass: 'w-[18%]', cellClass: 'text-sm font-medium text-gray-900 break-all' },
+    { key: 'entity', label: 'Entity', headerClass: 'w-[12%]', cellClass: 'text-sm text-gray-700' },
+    { key: 'entityId', label: 'Entity ID', headerClass: 'w-[9%]', cellClass: 'text-sm text-gray-700' },
+    { key: 'ip', label: 'IP', headerClass: 'w-[12%]', cellClass: 'text-xs text-gray-600' },
+    { key: 'status', label: 'Status', headerClass: 'w-[10%]', cellClass: '' },
+    { key: 'actions', label: '', headerClass: 'w-[12%]', cellClass: 'text-right' },
+  ];
+
+  const RemoveButton = ({ log }) => (
+    <button
+      type="button"
+      onClick={() => setPendingRemoveId(log.id)}
+      className="inline-flex items-center justify-center px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:bg-red-600 hover:!text-white dark:hover:bg-red-600 transition-colors"
+    >
+      Remove
+    </button>
+  );
 
   return (
     <div className="space-y-6">
@@ -127,10 +162,10 @@ const AuditLog = () => {
       {loading ? (
         <>
           <div className="md:hidden space-y-3">
-            {Array.from({ length: 4 }).map((_, index) => <SkeletonCard key={index} lines={5} />)}
+            {Array.from({ length: 4 }).map((_, index) => <SkeletonCard key={index} lines={4} />)}
           </div>
           <div className="hidden md:block">
-            <SkeletonTable rows={6} cols={8} columnHeaders={columns} />
+            <SkeletonTable rows={6} cols={8} columnHeaders={columns.map((column) => column.label)} />
           </div>
         </>
       ) : logs.length === 0 ? (
@@ -141,7 +176,7 @@ const AuditLog = () => {
       ) : (
         <>
           <div className="md:hidden space-y-3">
-            {logs.map((log) => (
+            {visibleLogs.map((log) => (
               <div key={log.id} className="rounded-2xl border border-gray-100 bg-white shadow-sm p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -152,11 +187,7 @@ const AuditLog = () => {
                 </div>
                 <div className="mt-3 border-t border-gray-100 pt-3 space-y-2.5 text-sm">
                   <div className="flex justify-between gap-3">
-                    <span className="text-xs text-gray-500">Actor</span>
-                    <span className="font-medium text-gray-800 text-right">{log.actor || '—'}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-xs text-gray-500">Actor Role</span>
+                    <span className="text-xs text-gray-500">Role</span>
                     <span className="font-medium text-gray-800">{actorRoleLabel(log.actor_role)}</span>
                   </div>
                   <div className="flex justify-between gap-3">
@@ -168,31 +199,36 @@ const AuditLog = () => {
                     <span className="text-xs text-gray-700">{log.ip_address || '—'}</span>
                   </div>
                 </div>
+                <div className="mt-3 pt-3 border-t border-gray-100 flex justify-end">
+                  <RemoveButton log={log} />
+                </div>
               </div>
             ))}
           </div>
 
           <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-225">
+              <table className="w-full table-fixed text-left border-collapse min-w-210">
                 <thead>
                   <tr className="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {columns.map((column) => (
-                      <th key={column} className="px-6 py-3">{column}</th>
+                      <th key={column.key} className={`px-6 py-3 ${column.key === 'actions' ? 'text-right' : ''} ${column.headerClass}`}>{column.label}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.map((log) => (
+                  {visibleLogs.map((log) => (
                     <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 text-xs text-gray-600 whitespace-nowrap">{formatTimestamp(log.created_at)}</td>
-                      <td className="px-6 py-4 text-sm text-gray-800">{log.actor || '—'}</td>
-                      <td className="px-6 py-4 text-sm text-gray-700">{actorRoleLabel(log.actor_role)}</td>
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900">{log.action}</td>
-                      <td className="px-6 py-4 text-sm text-gray-700">{log.entity || '—'}</td>
-                      <td className="px-6 py-4 text-sm text-gray-700">{log.entity_id ?? '—'}</td>
-                      <td className="px-6 py-4 text-xs text-gray-600">{log.ip_address || '—'}</td>
-                      <td className="px-6 py-4"><Badge status={log.status} /></td>
+                      <td className={`px-6 py-4 ${columns[0].cellClass}`}>{formatTimestamp(log.created_at)}</td>
+                      <td className={`px-6 py-4 ${columns[1].cellClass}`}>{actorRoleLabel(log.actor_role)}</td>
+                      <td className={`px-6 py-4 ${columns[2].cellClass}`}>{log.action}</td>
+                      <td className={`px-6 py-4 ${columns[3].cellClass}`}>{log.entity || '—'}</td>
+                      <td className={`px-6 py-4 ${columns[4].cellClass}`}>{log.entity_id ?? '—'}</td>
+                      <td className={`px-6 py-4 ${columns[5].cellClass}`}>{log.ip_address || '—'}</td>
+                      <td className={`px-6 py-4 ${columns[6].cellClass}`}><Badge status={log.status} /></td>
+                      <td className={`px-6 py-4 ${columns[7].cellClass}`}>
+                        <RemoveButton log={log} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -225,6 +261,16 @@ const AuditLog = () => {
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        isOpen={pendingRemoveId != null}
+        onClose={() => setPendingRemoveId(null)}
+        onConfirm={hidePendingLog}
+        title="Remove"
+        message="Remove this log from the current view?"
+        confirmText="Remove"
+        confirmColor="bg-red-600 hover:bg-red-700 text-white"
+      />
     </div>
   );
 };

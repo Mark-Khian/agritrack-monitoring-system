@@ -13,7 +13,7 @@ import {
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-const MiniCalendarWidget = ({ activities = [] }) => {
+const MiniCalendarWidget = ({ activities = [], className = '' }) => {
   const navigate = useNavigate();
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -53,7 +53,7 @@ const MiniCalendarWidget = ({ activities = [] }) => {
   return (
     <div
       onClick={handleOpenCalendar}
-      className="group relative flex flex-col justify-between bg-white border border-gray-100 dark:bg-slate-900/90 dark:border-slate-800 rounded-3xl p-4 shadow-sm hover:shadow-xl transition-all duration-300 hover:border-emerald-500/30 cursor-pointer overflow-hidden text-gray-900 dark:text-white"
+      className={`group relative flex flex-col bg-white border border-gray-100 dark:bg-slate-900/90 dark:border-slate-800 rounded-3xl p-4 shadow-sm hover:shadow-xl transition-all duration-300 hover:border-emerald-500/30 cursor-pointer overflow-hidden text-gray-900 dark:text-white ${className}`}
     >
       
       {/* Ambient background glow */}

@@ -2,11 +2,17 @@
 
 const db = require('../config/db');
 const { pruneNotifications } = require('../utils/notificationService');
+const {
+    addClient,
+    removeClient,
+    broadcastNotificationsChanged,
+} = require('../utils/notificationHub');
 
 // ── GET /api/v1/notifications ─────────────────────────────────────────────────
 const getNotifications = async (req, res) => {
     try {
-        // Run pruning to ensure outdated/obsolete notifications are cleared before retrieval
+        // Run pruning to ensure outdated/obsolete notifications are cleared before retrieval.
+        // Do not broadcast from GET-time prune (avoids SSE ↔ refetch loops).
         await pruneNotifications();
 
         const [rows] = await db.query(
@@ -44,6 +50,44 @@ const getNotifications = async (req, res) => {
     }
 };
 
+/**
+ * GET /api/v1/notifications/events — SSE invalidation stream (notifications only).
+ */
+const streamNotificationEvents = (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+    }
+
+    try {
+        res.write(': connected\n\n');
+    } catch {
+        return;
+    }
+
+    addClient(res);
+
+    const heartbeat = setInterval(() => {
+        try {
+            res.write(': heartbeat\n\n');
+        } catch {
+            clearInterval(heartbeat);
+            removeClient(res);
+        }
+    }, 25_000);
+
+    const cleanup = () => {
+        clearInterval(heartbeat);
+        removeClient(res);
+    };
+
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+};
+
 // ── PATCH /api/v1/notifications/:id/read ─────────────────────────────────────
 const markAsRead = async (req, res) => {
     try {
@@ -55,6 +99,7 @@ const markAsRead = async (req, res) => {
         if (result.affectedRows === 0)
             return res.status(404).json({ message: 'Notification not found.' });
 
+        broadcastNotificationsChanged();
         res.status(200).json({ message: 'Notification marked as read.' });
     } catch (err) {
         console.error('markAsRead error:', err.message);
@@ -75,7 +120,10 @@ const markAllRead = async (req, res) => {
             sql += ` AND type != 'weather_alert'`;
         }
 
-        await db.query(sql, params);
+        const [result] = await db.query(sql, params);
+        if ((result.affectedRows || 0) > 0) {
+            broadcastNotificationsChanged();
+        }
         res.status(200).json({ message: 'Notifications marked as read.' });
     } catch (err) {
         console.error('markAllRead error:', err.message);
@@ -94,6 +142,7 @@ const deleteNotification = async (req, res) => {
         if (result.affectedRows === 0)
             return res.status(404).json({ message: 'Notification not found.' });
 
+        broadcastNotificationsChanged();
         res.status(200).json({ message: 'Notification deleted successfully.' });
     } catch (err) {
         console.error('deleteNotification error:', err.message);
@@ -101,4 +150,10 @@ const deleteNotification = async (req, res) => {
     }
 };
 
-module.exports = { getNotifications, markAsRead, markAllRead, deleteNotification };
+module.exports = {
+    getNotifications,
+    streamNotificationEvents,
+    markAsRead,
+    markAllRead,
+    deleteNotification,
+};

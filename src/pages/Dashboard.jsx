@@ -39,7 +39,7 @@ import {
     getWeather
 } from '../services/api';
 import useAuth from '../context/useAuth';
-import { CAPABILITIES } from '../security/permissions';
+import { CAPABILITIES, ROLES, normalizeRole } from '../security/permissions';
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
 
@@ -151,6 +151,8 @@ const Dashboard = () => {
     const { user, can } = useAuth();
     const canReadHarvests = can(CAPABILITIES.HARVEST_READ);
     const canCreatePlantings = can(CAPABILITIES.PLANTING_CREATE);
+    // Desktop-only Worker sidebar stack (stats → calendar → alerts). Mobile/tablet unchanged.
+    const isFarmWorker = normalizeRole(user?.role) === ROLES.FARM_WORKER;
     const initialCache = dashboardCache?.role === user?.role ? dashboardCache : null;
 
     const [isPlantingsModalOpen, setIsPlantingsModalOpen] = useState(() => {
@@ -435,7 +437,7 @@ const Dashboard = () => {
 
     const getPriorityBadge = (activityType) => {
         const t = normalize(activityType);
-        const base = 'inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold';
+        const base = 'inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap max-w-full';
 
         if (t === 'seeding' || t === 'direct seeding' || t === 'fertilizing') {
             return <span className={`${base} bg-green-100 text-green-700`}>PRIORITY</span>;
@@ -742,6 +744,10 @@ const Dashboard = () => {
         { label: 'Total Harvests', value: Math.max(0, stats.harvests), icon: Wheat, accent: '#d97706', iconBg: '#fffbeb', path: '/harvests', iconColor: '#d97706', hoverBg: 'bg-amber-50 dark:bg-amber-500/10' },
     ];
 
+    const visibleStatCards = statCards.filter(
+        (card) => canReadHarvests || card.path !== '/harvests'
+    );
+
     const renderStatCard = (card) => {
         const Icon = card.icon;
         return (
@@ -749,32 +755,76 @@ const Dashboard = () => {
                 key={card.label}
                 type="button"
                 onClick={() => navigate(card.path)}
-                className="group relative flex flex-col items-center justify-center gap-2 rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 shadow-sm p-3 text-center transition-colors md:flex-row md:items-center md:justify-start md:text-left md:gap-4 md:px-5 md:py-5 w-full overflow-hidden"
+                className="group relative flex flex-col items-center justify-center gap-1.5 rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 shadow-sm p-3 text-center transition-colors sm:flex-row sm:items-center sm:justify-start sm:text-left sm:gap-3 sm:px-4 sm:py-4 w-full overflow-hidden"
             >
                 {/* Hover Overlay */}
                 <div className={`absolute inset-0 transition-opacity opacity-0 group-hover:opacity-100 ${card.hoverBg}`} />
 
                 <span
-                    className="absolute left-0 top-0 w-full h-[3px] rounded-t-2xl md:h-full md:w-[4px] md:rounded-l-2xl md:rounded-t-none z-10"
+                    className="absolute left-0 top-0 w-full h-[3px] rounded-t-2xl sm:h-full sm:w-[4px] sm:rounded-l-2xl sm:rounded-t-none z-10"
                     style={{ backgroundColor: card.accent }}
                 />
-                <span className="relative z-10 flex h-9 w-9 items-center justify-center rounded-xl md:h-10 md:w-10 dark:bg-slate-700/50" style={{ backgroundColor: card.iconBg }}>
-                    <Icon size={18} className="md:size-[20px]" style={{ color: card.iconColor }} />
+                <span className="relative z-10 flex h-9 w-9 items-center justify-center rounded-xl dark:bg-slate-700/50" style={{ backgroundColor: card.iconBg }}>
+                    <Icon size={18} style={{ color: card.iconColor }} />
                 </span>
-                <span className="relative z-10 flex flex-col items-center md:items-start">
-                    <span className="block text-xl font-bold text-gray-900 dark:text-white leading-none md:text-2xl">{card.value}</span>
-                    <span className="mt-1 block text-[10px] font-medium text-gray-500 dark:text-slate-400 leading-tight md:text-xs md:mt-2">{card.label}</span>
+                <span className="relative z-10 flex flex-col items-center sm:items-start min-w-0">
+                    <span className="block text-xl font-bold text-gray-900 dark:text-white leading-none sm:text-2xl">{card.value}</span>
+                    <span className="mt-1 block text-[10px] font-medium text-gray-500 dark:text-slate-400 leading-tight sm:text-xs sm:mt-1.5">{card.label}</span>
                 </span>
             </button>
         );
     };
 
+    const renderCriticalAlertsCard = (extraClassName = '') => (
+        <div className={`rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-5 sm:p-6 lg:p-5 shadow-sm flex flex-col w-full h-auto ${extraClassName}`}>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Critical Alerts</h2>
+
+            <div className="mt-4 lg:mt-3 space-y-3 lg:space-y-2.5">
+                <div className={`flex items-start gap-3 rounded-xl p-4 lg:p-3 ${overdueHarvestCount > 0 ? 'bg-red-50 dark:bg-red-950/30' : 'bg-gray-50 dark:bg-slate-900/50'}`}>
+                    <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${overdueHarvestCount > 0 ? 'text-red-600' : 'text-gray-500 dark:text-slate-400'}`} />
+                    <div>
+                        <p className="font-bold text-gray-900 dark:text-white">Overdue Harvest</p>
+                        <p className={`mt-1 text-xs ${overdueHarvestCount > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-600 dark:text-slate-400'}`}>
+                            {overdueHarvestCount > 0
+                                ? `${overdueHarvestCount} planting(s) are past their expected harvest date. Review field conditions and harvest plans.`
+                                : 'No plantings are past expected harvest date.'}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-start gap-3 rounded-xl p-4 lg:p-3 bg-gray-50 dark:bg-slate-900/50">
+                    <Clock className="mt-0.5 h-5 w-5 text-gray-600 dark:text-slate-400 shrink-0" />
+                    <div>
+                        <p className="font-bold text-gray-900 dark:text-white">Pending Activities</p>
+                        <p className="mt-1 text-xs text-gray-600 dark:text-slate-400">
+                            {pendingActivitiesThisMonthCount} pending/ongoing activity(ies) scheduled for this month.
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-start gap-3 rounded-xl p-4 lg:p-3 bg-yellow-50 dark:bg-yellow-950/20">
+                    <Info className="mt-0.5 h-5 w-5 text-yellow-700 dark:text-yellow-400 shrink-0" />
+                    <div>
+                        <p className="font-bold text-gray-900 dark:text-white">
+                            {activitiesThisMonthCount === 0 ? 'Low Activity' : 'Monthly Activity'}
+                        </p>
+                        <p className="mt-1 text-xs text-yellow-900/80 dark:text-yellow-200/80">
+                            {activitiesThisMonthCount === 0
+                                ? 'No activities logged this month. Schedule key field operations to stay on track.'
+                                : `${activitiesThisMonthCount} activity(ies) logged this month. Keep planning future tasks.`}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
     return (
-        <div className="flex flex-col gap-6 lg:gap-8 bg-[#f5f5f0] min-h-full text-gray-900">
+        <div className="flex flex-col gap-5 sm:gap-6 lg:gap-6 bg-[#f5f5f0] dark:bg-transparent min-h-full text-gray-900 dark:text-white">
             {/* Header */}
             <div>
-                <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-                <p className="mt-1 text-sm text-gray-600">
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+                <p className="mt-1 text-sm text-gray-600 dark:text-slate-400">
                     Real-time agronomic insights for AgriTrack
                 </p>
             </div>
@@ -789,14 +839,14 @@ const Dashboard = () => {
 
             {/* No plantings onboarding (avoid "system error" confusion) */}
             {(!plantingsList || plantingsList.filter(p => !isCompletedPlanting(p)).length === 0) && (
-                <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-5 shadow-sm">
+                    <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-center lg:justify-between">
                         <div>
-                            <p className="text-sm font-semibold text-gray-900">No active plantings yet</p>
-                            <p className="mt-1 text-sm text-gray-500">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">No active plantings yet</p>
+                            <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">
                                 Create your first planting to unlock lifecycle tasks, activities, and harvest planning.
                             </p>
-                            <p className="mt-2 text-xs text-gray-400">
+                            <p className="mt-2 text-xs text-gray-400 dark:text-slate-500">
                                 Season is a reporting label for your planting record, not a system availability requirement.
                             </p>
                         </div>
@@ -815,29 +865,33 @@ const Dashboard = () => {
             )}
 
             {/* Summary Cards (Mobile/Tablet Only) */}
-            <div className="grid grid-cols-3 gap-2 md:grid-cols-2 lg:hidden md:gap-4 lg:gap-6">
-                {statCards
-                    .filter((card) => canReadHarvests || card.path !== '/harvests')
-                    .map(renderStatCard)}
+            <div
+                className={`grid gap-3 lg:hidden ${
+                    visibleStatCards.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'
+                } md:gap-4`}
+            >
+                {visibleStatCards.map(renderStatCard)}
             </div>
 
 
-            <div className="contents lg:grid lg:gap-6 lg:grid-cols-3">
-                {/* Left column */}
-                <div className="order-1 lg:order-none lg:col-span-2 flex flex-col h-full w-full">
+
+            {/* ── Farm Worker DESKTOP: independent left/right columns (equal column height; last cards absorb slack) ── */}
+            {isFarmWorker && (
+                <div className="hidden lg:grid lg:grid-cols-3 lg:gap-5 lg:items-stretch w-full">
+                    <div className="lg:col-span-2 flex flex-col gap-5 min-w-0 h-full min-h-0">
                     {/* Today's Tasks */}
-                    <div className="rounded-2xl bg-white border border-gray-100 p-5 pb-3 space-y-4 flex-1 flex flex-col">
-                        <div className="flex items-center justify-between border-b border-gray-50 pb-2.5">
+                    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-4 sm:p-5 pb-3 space-y-4 flex flex-col min-w-0 w-full max-w-full max-lg:overflow-x-hidden">
+                        <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-700/60 pb-2.5">
                             <div className="flex items-center gap-3">
-                                <h2 className="text-lg font-bold text-gray-900">Today's Tasks</h2>
-                                <span className="inline-flex items-center rounded-full bg-emerald-50 border border-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Today's Tasks</h2>
+                                <span className="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/40 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
                                     {activeTasksCount} Operations
                                 </span>
                             </div>
                         </div>
 
                         {/* Section 1: Field Operations */}
-                        <div className="space-y-2.5">
+                        <div className="space-y-2.5 min-w-0 w-full max-w-full">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Field Operations</h3>
                             {topPendingTasks.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-4 text-sm text-gray-400 dark:text-slate-400 bg-gray-50/50 dark:bg-slate-800/50 rounded-xl border border-dashed border-gray-200 dark:border-slate-700">
@@ -845,15 +899,15 @@ const Dashboard = () => {
                                     No pending field operations right now.
                                 </div>
                             ) : (
-                                <div className="grid gap-2">
+                                <div className="grid gap-2 min-w-0 w-full max-w-full">
                                     {topPendingTasks.map((act) => {
                                         const activityName = normalize(act?.activity_type)?.replaceAll('_', ' ') || 'Activity';
                                         return (
                                             <div
                                                 key={act.id}
-                                                className="flex flex-col justify-between rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/30 px-3.5 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-slate-800/50 cursor-default"
+                                                className="flex flex-col justify-between rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/30 px-3.5 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-slate-800/50 cursor-default w-full max-w-full min-w-0 max-lg:overflow-hidden"
                                             >
-                                                <div className="flex items-center justify-between w-full gap-3 h-full">
+                                                <div className="flex items-center justify-between w-full max-w-full min-w-0 gap-3 h-full max-lg:flex-wrap">
                                                     <div className="flex items-start gap-3 flex-1 min-w-0">
                                                         <div className="mt-0.5 flex-shrink-0">
                                                             {getTaskIconBox(act.activity_type)}
@@ -870,7 +924,929 @@ const Dashboard = () => {
                                                             )}
                                                         </div>
                                                     </div>
-                                                    <div className="flex-shrink-0">
+                                                    <div className="shrink-0 max-lg:ml-auto">
+                                                        {getPriorityBadge(act.activity_type)}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Section 2: Quick Reminders & Ideas */}
+                        <div className="space-y-2.5">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Quick Reminders & Ideas</h3>
+                                {quickTasks.length > 0 && (
+                                    <span className="text-[10px] font-bold text-gray-400">
+                                        {quickTasks.filter(t => !t.completed).length} remaining
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* Input Form */}
+                            <form onSubmit={handleCreateQuickTask} className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={quickTaskInput}
+                                    onChange={(e) => setQuickTaskInput(e.target.value)}
+                                    placeholder="Add a quick task or idea... (e.g. Check irrigation gate)"
+                                    className="flex-1 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50/50 dark:bg-slate-900/50 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-emerald-100 dark:focus:ring-emerald-900/50 focus:border-emerald-500 dark:focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition-all placeholder:text-gray-400 dark:text-white"
+                                />
+                                <button
+                                    type="submit"
+                                    className="inline-flex items-center justify-center rounded-xl bg-emerald-700 hover:bg-emerald-800 px-3.5 py-1.5 text-sm font-semibold text-white transition-colors"
+                                >
+                                    Add
+                                </button>
+                            </form>
+
+                            {/* Checklist */}
+                            {quickTasks.length === 0 ? (
+                                <div className="text-center py-2 text-xs text-gray-400 dark:text-slate-400 bg-gray-50/30 dark:bg-slate-800/50 rounded-xl border border-dashed border-gray-200 dark:border-slate-700">
+                                    💡 No quick reminders yet. Type an idea above to keep track of thoughts!
+                                </div>
+                            ) : (
+                                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                    {quickTasks.map((task) => (
+                                        <div
+                                            key={task.id}
+                                            className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl border border-gray-100 dark:border-slate-700/50 bg-gray-50/30 dark:bg-slate-800/30 hover:bg-gray-50 dark:hover:bg-slate-800/60 transition-colors group"
+                                        >
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleToggleQuickTask(task.id)}
+                                                    className="text-gray-400 hover:text-emerald-600 transition-colors shrink-0"
+                                                >
+                                                    {task.completed ? (
+                                                        <CheckCircle className="h-5 w-5 text-emerald-600 fill-emerald-50" />
+                                                    ) : (
+                                                        <Circle className="h-5 w-5 text-gray-300 dark:text-slate-500 hover:text-emerald-500 dark:hover:text-emerald-400" />
+                                                    )}
+                                                </button>
+                                                <span
+                                                    className={`text-sm truncate ${task.completed ? 'line-through text-gray-400 dark:text-slate-500 font-normal' : 'font-medium text-gray-700 dark:text-slate-200'}`}
+                                                >
+                                                    {task.text}
+                                                </span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setDeletingQuickTaskId(task.id)}
+                                                className="text-gray-300 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"
+                                            >
+                                                <Trash2 size={15} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Upcoming Activities */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-700">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Upcoming Activities</h2>
+                        </div>
+
+                        {/* Desktop Table View */}
+                        <div className="overflow-x-auto hidden sm:block">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-white dark:bg-slate-800/50">
+                                    <tr className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">
+                                        <th className="px-5 py-3">ACTIVITY</th>
+                                        <th className="px-5 py-3">FIELD</th>
+                                        <th className="px-5 py-3">DATE</th>
+                                        <th className="px-5 py-3">STATUS</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-slate-700/50">
+                                    {recentActivities.slice(0, 5).map((act) => {
+                                        const { dot, text, rowHover } = getTableStatus(act);
+                                        return (
+                                            <tr key={act.id} className={`${rowHover} transition-colors cursor-default`}>
+                                                <td className="px-5 py-3">
+                                                    <span className="font-semibold text-gray-900 dark:text-white capitalize">
+                                                        {normalize(act?.activity_type).replaceAll('_', ' ')}
+                                                    </span>
+                                                </td>
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-300">
+                                                    {act.field_name || act.planting_variety || '—'}
+                                                </td>
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-300">
+                                                    {act.activity_date ? formatDisplayDate(act.activity_date) : '—'}
+                                                </td>
+                                                <td className="px-5 py-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`h-2 w-2 rounded-full ${dot}`} />
+                                                        <span className="text-gray-700 dark:text-slate-300 font-medium">{text}</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {recentActivities.length === 0 && (
+                                        <tr>
+                                            <td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-400 dark:text-slate-500">
+                                                No upcoming activities yet.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Mobile List View */}
+                        <div className="block sm:hidden divide-y divide-gray-100 dark:divide-slate-700/50">
+                            {recentActivities.slice(0, 5).map((act) => {
+                                const { dot, text, rowHover } = getTableStatus(act);
+                                const iconElement = getIconForType(act.activity_type);
+
+                                return (
+                                    <div key={act.id} className={`p-4 flex items-start gap-3 ${rowHover} transition-colors cursor-default`}>
+                                        <div className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-700 flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300">
+                                            {iconElement}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <h3 className="text-sm font-semibold text-slate-900 dark:text-white capitalize truncate">
+                                                    {normalize(act?.activity_type).replaceAll('_', ' ')}
+                                                </h3>
+                                                <span className="shrink-0 text-[10px] text-slate-400 dark:text-slate-400 whitespace-nowrap mt-0.5">
+                                                    {act.activity_date ? formatDisplayDate(act.activity_date) : '—'}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
+                                                {act.field_name || '—'} {act.planting_variety ? `(${act.planting_variety})` : ''}
+                                            </p>
+                                            <div className="flex items-center gap-1.5 mt-2">
+                                                <span className={`h-2 w-2 rounded-full ${dot}`} />
+                                                <span className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">{text}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {recentActivities.length === 0 && (
+                                <div className="p-8 text-center text-sm text-gray-400 dark:text-slate-500">
+                                    No upcoming activities yet.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Plot Overview */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-6 shadow-sm flex flex-col flex-1 min-h-0 h-auto">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Plot Overview</h2>
+                                    <p className="mt-1 text-xs text-gray-400 dark:text-slate-400">
+                                        View active plot activities separately from completed harvest records.
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPlotOverviewTab('active')}
+                                        className={`rounded-xl px-3 py-1.5 text-xs font-semibold border transition-colors ${plotOverviewTab === 'active'
+                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-300 dark:border-emerald-700/50'
+                                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700'
+                                            }`}
+                                    >
+                                        Active Plots
+                                    </button>
+                                    {canReadHarvests && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setPlotOverviewTab('completed')}
+                                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold border transition-colors ${plotOverviewTab === 'completed'
+                                                ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:border-amber-700/50'
+                                                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700'
+                                                }`}
+                                        >
+                                            Completed Harvests
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                                <input
+                                    type="text"
+                                    value={plotSearch}
+                                    onChange={(e) => setPlotSearch(e.target.value)}
+                                    placeholder="Search by plot or variety..."
+                                    className="w-full sm:w-72 rounded-xl border border-gray-200 dark:border-slate-700 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-900/50 bg-white dark:bg-slate-900/50 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder-slate-400"
+                                />
+                                {plotOverviewTab === 'active' && (
+                                    <div className="relative inline-block w-full sm:w-auto">
+                                        <select
+                                            value={activityStatusFilter}
+                                            onChange={(e) => setActivityStatusFilter(e.target.value)}
+                                            className="w-full rounded-xl border border-gray-200 dark:border-slate-700 pl-3 pr-8 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-900/50 appearance-none bg-white dark:bg-slate-900/50 text-gray-800 dark:text-slate-200"
+                                        >
+                                            <option value="all">All statuses</option>
+                                            <option value="pending">Pending</option>
+                                            <option value="ongoing">Ongoing</option>
+                                        </select>
+                                        <span className="absolute inset-y-0 right-2.5 flex items-center pointer-events-none text-gray-400">
+                                            <ChevronDown size={14} />
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {plotOverviewTab === 'active' && (
+                                <div className="mt-4 flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-thin">
+                                    {activePlots.map((plot) => {
+                                        const pid = plot.id;
+                                        const pendingCount = activitiesList.filter((a) => a.planting_id === pid && hasPendingOrOngoing(a)).length;
+                                        const criticalCount = activitiesList.filter((a) => {
+                                            if (a.planting_id !== pid || !hasPendingOrOngoing(a)) return false;
+                                            const t = normalize(a.activity_type);
+                                            return t === 'irrigation' || t === 'pest control';
+                                        }).length;
+
+                                        const plotTitle = `${plot.variety || 'Plot'}${plot.field_name ? ` • ${plot.field_name}` : ''}`;
+                                        const progressPercent = getLifecycleProgressPercent(plot);
+                                        const matchingHarvest = harvestsList
+                                            .filter((h) => h.planting_id === pid)
+                                            .slice()
+                                            .sort((a, b) => new Date(b.harvest_date || 0) - new Date(a.harvest_date || 0))[0];
+                                        const yieldClass = getYieldClass(matchingHarvest?.yield_kg);
+
+                                        return (
+                                            <div key={pid} className="flex-shrink-0 w-72 snap-start rounded-xl border border-gray-200 dark:border-slate-700 hover:border-emerald-500/30 dark:hover:border-emerald-500/30 shadow-sm bg-white dark:bg-slate-800 transition-all hover:shadow-md overflow-hidden">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedPlotDetails({ type: 'active', data: plot })}
+                                                    className="w-full text-left p-4 focus:outline-none hover:bg-gray-50 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
+                                                >
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <p className="font-semibold text-gray-900 dark:text-white truncate">{plotTitle}</p>
+                                                            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 truncate">
+                                                                {plot.planting_date ? `Planted: ${formatDisplayDate(plot.planting_date)}` : 'Planted: —'}
+                                                            </p>
+                                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap">
+                                                                    {pendingCount} pending
+                                                                </span>
+                                                                {canReadHarvests && (
+                                                                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${yieldClass.className}`}>
+                                                                        {yieldClass.label}
+                                                                    </span>
+                                                                )}
+                                                                {criticalCount > 0 && (
+                                                                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-100 text-red-700 whitespace-nowrap">
+                                                                        {criticalCount} critical
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <ChevronRight className="h-5 w-5 text-gray-400 opacity-50 shrink-0" />
+                                                    </div>
+                                                    <div className="mt-3">
+                                                        <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400">
+                                                            <span>Lifecycle Progress</span>
+                                                            <span className="font-semibold text-gray-700 dark:text-slate-200">{progressPercent}%</span>
+                                                        </div>
+                                                        <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100 dark:bg-slate-900 overflow-hidden">
+                                                            <div
+                                                                className="h-full rounded-full bg-emerald-600"
+                                                                style={{ width: `${progressPercent}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                    {activePlots.length === 0 && (
+                                        <div className="w-full rounded-xl border border-dashed border-gray-200 dark:border-slate-700 p-6 text-center">
+                                            <p className="text-sm font-semibold text-gray-900 dark:text-white">No active plots yet.</p>
+                                            <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">Create a planting to start tracking crop progress.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {canReadHarvests && plotOverviewTab === 'completed' && (
+                                <div className="mt-4 flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-thin">
+                                    {completedHarvests.map((harvest) => {
+                                        const planting = plantingsList.find((p) => p.id === harvest.planting_id);
+                                        const cardTitle = `${harvest.planting_variety || planting?.variety || 'Harvest'}${harvest.field_name ? ` • ${harvest.field_name}` : (planting?.field_name ? ` • ${planting.field_name}` : '')}`;
+
+                                        return (
+                                            <div key={harvest.id} className="flex-shrink-0 w-72 snap-start rounded-xl border border-gray-200 dark:border-slate-700 hover:border-amber-500/30 dark:hover:border-amber-500/30 shadow-sm bg-white dark:bg-slate-800 transition-all hover:shadow-md overflow-hidden">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedPlotDetails({ type: 'completed', data: harvest, planting })}
+                                                    className="w-full text-left p-4 focus:outline-none hover:bg-gray-50 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
+                                                >
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <p className="font-semibold text-gray-900 dark:text-white truncate">{cardTitle}</p>
+                                                            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 truncate">
+                                                                {harvest.harvest_date ? `Harvested: ${formatDisplayDate(harvest.harvest_date)}` : 'Harvested: —'}
+                                                            </p>
+                                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap">
+                                                                    Yield: {harvest.yield_kg || '0'} kg
+                                                                </span>
+                                                                {harvest.quality_grade && (
+                                                                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-slate-300 whitespace-nowrap capitalize">
+                                                                        {harvest.quality_grade}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <ChevronRight className="h-5 w-5 text-gray-400 opacity-50 shrink-0" />
+                                                    </div>
+                                                    {/* Invisible spacer to guarantee identical card height to Active Plots */}
+                                                    <div className="mt-3 invisible pointer-events-none" aria-hidden="true">
+                                                        <div className="flex items-center justify-between text-[11px]">
+                                                            <span>Spacer</span>
+                                                            <span>0%</span>
+                                                        </div>
+                                                        <div className="mt-1 h-1.5 w-full"></div>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                    {completedHarvests.length === 0 && (
+                                        <div className="w-full rounded-xl border border-dashed border-amber-200 dark:border-amber-700/50 p-6 text-center text-sm text-amber-700/70 dark:text-amber-500/80">
+                                            No completed harvest records yet.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex flex-col gap-5 min-w-0 w-full h-full min-h-0">
+                        {mostRecentPlanting && (
+                            <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-5 shadow-sm h-auto">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <h2 className="text-lg font-bold text-gray-900 dark:text-white">Active Planting</h2>
+                                    </div>
+                                    <button
+                                        onClick={() => setIsPlantingsModalOpen(true)}
+                                        className="group p-1.5 rounded-lg hover:bg-emerald-500/10 transition-all duration-300 hover:scale-110 active:scale-95 focus:outline-none cursor-pointer"
+                                        title="View all active plantings"
+                                    >
+                                        <Layers className="h-6 w-6 text-emerald-700 dark:text-emerald-400 transition-colors duration-300 group-hover:text-emerald-500 group-hover:dark:text-emerald-300" />
+                                    </button>
+                                </div>
+                                <div className="mt-4">
+                                    <div className="flex items-center justify-between text-[10px] lg:text-[9px] xl:text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-600 px-1">
+                                        {lifecycleStageLabels.map((label, idx) => {
+                                            const fullLabel = FULL_STAGE_NAMES[idx].toUpperCase();
+                                            const displayFullLabel = fullLabel === 'REPRODUCTIVE' ? 'REPROD.' : fullLabel;
+                                            return (
+                                                <span key={label} title={FULL_STAGE_NAMES[idx]}>
+                                                    <span className={`cursor-default transition-colors hidden lg:inline ${idx === lifecycleStageIndex ? `${STAGE_COLORS[idx].text} font-extrabold` : STAGE_COLORS[idx].hover}`}>{displayFullLabel}</span>
+                                                </span>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="mt-2 h-2 w-full rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden">
+                                        <div
+                                            className={`h-full ${STAGE_COLORS[lifecycleStageIndex]?.bg || 'bg-emerald-600'}`}
+                                            style={{ width: `${((lifecycleStageIndex + 1) / 5) * 100}%` }}
+                                        />
+                                    </div>
+                                    <div className="mt-3 flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                                        <div>
+                                            Stage: <span className="font-bold text-gray-900 dark:text-white capitalize">{FULL_STAGE_NAMES[lifecycleStageIndex]?.toLowerCase()}</span>
+                                        </div>
+                                        <div>
+                                            <span className="font-bold text-gray-900 dark:text-white">{Math.min(totalLifecycleDays, currentLifecycleDay)}</span> of{' '}
+                                            <span className="font-bold text-gray-900 dark:text-white">{totalLifecycleDays}</span> days
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        {visibleStatCards.map(renderStatCard)}
+                        <MiniCalendarWidget activities={activitiesList} />
+                        {renderCriticalAlertsCard('flex-1 min-h-0')}
+                    </div>
+                </div>
+            )}
+
+            {/* ── Farm Worker MOBILE/TABLET: preserve approved stacking (hidden on desktop) ── */}
+            {isFarmWorker && (
+                <div className="flex flex-col gap-5 lg:hidden w-full min-w-0 max-w-full">
+                    {/* Today's Tasks */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-4 sm:p-5 pb-3 space-y-4 flex flex-col min-w-0 w-full max-w-full max-lg:overflow-x-hidden">
+                        <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-700/60 pb-2.5">
+                            <div className="flex items-center gap-3">
+                                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Today's Tasks</h2>
+                                <span className="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/40 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                                    {activeTasksCount} Operations
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Section 1: Field Operations */}
+                        <div className="space-y-2.5 min-w-0 w-full max-w-full">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Field Operations</h3>
+                            {topPendingTasks.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center py-4 text-sm text-gray-400 dark:text-slate-400 bg-gray-50/50 dark:bg-slate-800/50 rounded-xl border border-dashed border-gray-200 dark:border-slate-700">
+                                    <Tractor size={24} className="mb-1 text-gray-300 dark:text-slate-600 animate-pulse" />
+                                    No pending field operations right now.
+                                </div>
+                            ) : (
+                                <div className="grid gap-2 min-w-0 w-full max-w-full">
+                                    {topPendingTasks.map((act) => {
+                                        const activityName = normalize(act?.activity_type)?.replaceAll('_', ' ') || 'Activity';
+                                        return (
+                                            <div
+                                                key={act.id}
+                                                className="flex flex-col justify-between rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/30 px-3.5 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-slate-800/50 cursor-default w-full max-w-full min-w-0 max-lg:overflow-hidden"
+                                            >
+                                                <div className="flex items-center justify-between w-full max-w-full min-w-0 gap-3 h-full max-lg:flex-wrap">
+                                                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                        <div className="mt-0.5 flex-shrink-0">
+                                                            {getTaskIconBox(act.activity_type)}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm font-bold capitalize text-gray-900 dark:text-white truncate">{activityName}</p>
+                                                            <p className="mt-0.5 text-xs text-gray-500 dark:text-slate-400 font-medium truncate">
+                                                                {act.field_name || '—'} {act.planting_variety ? `(${act.planting_variety})` : ''}
+                                                            </p>
+                                                            {act.notes && (
+                                                                <p className="mt-1.5 text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 line-clamp-2 leading-relaxed whitespace-normal">
+                                                                    <span className="font-semibold text-gray-400 dark:text-slate-500">System:</span> {act.notes}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="shrink-0 max-lg:ml-auto">
+                                                        {getPriorityBadge(act.activity_type)}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Section 2: Quick Reminders & Ideas */}
+                        <div className="space-y-2.5">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Quick Reminders & Ideas</h3>
+                                {quickTasks.length > 0 && (
+                                    <span className="text-[10px] font-bold text-gray-400">
+                                        {quickTasks.filter(t => !t.completed).length} remaining
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* Input Form */}
+                            <form onSubmit={handleCreateQuickTask} className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={quickTaskInput}
+                                    onChange={(e) => setQuickTaskInput(e.target.value)}
+                                    placeholder="Add a quick task or idea... (e.g. Check irrigation gate)"
+                                    className="flex-1 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50/50 dark:bg-slate-900/50 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-emerald-100 dark:focus:ring-emerald-900/50 focus:border-emerald-500 dark:focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition-all placeholder:text-gray-400 dark:text-white"
+                                />
+                                <button
+                                    type="submit"
+                                    className="inline-flex items-center justify-center rounded-xl bg-emerald-700 hover:bg-emerald-800 px-3.5 py-1.5 text-sm font-semibold text-white transition-colors"
+                                >
+                                    Add
+                                </button>
+                            </form>
+
+                            {/* Checklist */}
+                            {quickTasks.length === 0 ? (
+                                <div className="text-center py-2 text-xs text-gray-400 dark:text-slate-400 bg-gray-50/30 dark:bg-slate-800/50 rounded-xl border border-dashed border-gray-200 dark:border-slate-700">
+                                    💡 No quick reminders yet. Type an idea above to keep track of thoughts!
+                                </div>
+                            ) : (
+                                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                    {quickTasks.map((task) => (
+                                        <div
+                                            key={task.id}
+                                            className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl border border-gray-100 dark:border-slate-700/50 bg-gray-50/30 dark:bg-slate-800/30 hover:bg-gray-50 dark:hover:bg-slate-800/60 transition-colors group"
+                                        >
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleToggleQuickTask(task.id)}
+                                                    className="text-gray-400 hover:text-emerald-600 transition-colors shrink-0"
+                                                >
+                                                    {task.completed ? (
+                                                        <CheckCircle className="h-5 w-5 text-emerald-600 fill-emerald-50" />
+                                                    ) : (
+                                                        <Circle className="h-5 w-5 text-gray-300 dark:text-slate-500 hover:text-emerald-500 dark:hover:text-emerald-400" />
+                                                    )}
+                                                </button>
+                                                <span
+                                                    className={`text-sm truncate ${task.completed ? 'line-through text-gray-400 dark:text-slate-500 font-normal' : 'font-medium text-gray-700 dark:text-slate-200'}`}
+                                                >
+                                                    {task.text}
+                                                </span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setDeletingQuickTaskId(task.id)}
+                                                className="text-gray-300 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-1"
+                                            >
+                                                <Trash2 size={15} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    {mostRecentPlanting && (
+                        <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-5 sm:p-6 shadow-sm">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Active Planting</h2>
+                                </div>
+                                <button
+                                    onClick={() => setIsPlantingsModalOpen(true)}
+                                    className="group p-1.5 rounded-lg hover:bg-emerald-500/10 transition-all duration-300 hover:scale-110 active:scale-95 focus:outline-none cursor-pointer"
+                                    title="View all active plantings"
+                                >
+                                    <Layers className="h-6 w-6 text-emerald-700 dark:text-emerald-400 transition-colors duration-300 group-hover:text-emerald-500 group-hover:dark:text-emerald-300" />
+                                </button>
+                            </div>
+                            <div className="mt-4">
+                                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-600 px-1">
+                                    {lifecycleStageLabels.map((label, idx) => (
+                                        <span key={label} title={FULL_STAGE_NAMES[idx]}>
+                                            <span className={`cursor-default transition-colors ${idx === lifecycleStageIndex ? `${STAGE_COLORS[idx].text} font-extrabold` : STAGE_COLORS[idx].hover}`}>{label}</span>
+                                        </span>
+                                    ))}
+                                </div>
+                                <div className="mt-2 h-2 w-full rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden">
+                                    <div
+                                        className={`h-full ${STAGE_COLORS[lifecycleStageIndex]?.bg || 'bg-emerald-600'}`}
+                                        style={{ width: `${((lifecycleStageIndex + 1) / 5) * 100}%` }}
+                                    />
+                                </div>
+                                <div className="mt-3 flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                                    <div>
+                                        Stage: <span className="font-bold text-gray-900 dark:text-white capitalize">{FULL_STAGE_NAMES[lifecycleStageIndex]?.toLowerCase()}</span>
+                                    </div>
+                                    <div>
+                                        <span className="font-bold text-gray-900 dark:text-white">{Math.min(totalLifecycleDays, currentLifecycleDay)}</span> of{' '}
+                                        <span className="font-bold text-gray-900 dark:text-white">{totalLifecycleDays}</span> days
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <MiniCalendarWidget activities={activitiesList} />
+                    {/* Upcoming Activities */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-700">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Upcoming Activities</h2>
+                        </div>
+
+                        {/* Desktop Table View */}
+                        <div className="overflow-x-auto hidden sm:block">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-white dark:bg-slate-800/50">
+                                    <tr className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">
+                                        <th className="px-5 py-3">ACTIVITY</th>
+                                        <th className="px-5 py-3">FIELD</th>
+                                        <th className="px-5 py-3">DATE</th>
+                                        <th className="px-5 py-3">STATUS</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-slate-700/50">
+                                    {recentActivities.slice(0, 5).map((act) => {
+                                        const { dot, text, rowHover } = getTableStatus(act);
+                                        return (
+                                            <tr key={act.id} className={`${rowHover} transition-colors cursor-default`}>
+                                                <td className="px-5 py-3">
+                                                    <span className="font-semibold text-gray-900 dark:text-white capitalize">
+                                                        {normalize(act?.activity_type).replaceAll('_', ' ')}
+                                                    </span>
+                                                </td>
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-300">
+                                                    {act.field_name || act.planting_variety || '—'}
+                                                </td>
+                                                <td className="px-5 py-3 text-gray-700 dark:text-slate-300">
+                                                    {act.activity_date ? formatDisplayDate(act.activity_date) : '—'}
+                                                </td>
+                                                <td className="px-5 py-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`h-2 w-2 rounded-full ${dot}`} />
+                                                        <span className="text-gray-700 dark:text-slate-300 font-medium">{text}</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {recentActivities.length === 0 && (
+                                        <tr>
+                                            <td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-400 dark:text-slate-500">
+                                                No upcoming activities yet.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Mobile List View */}
+                        <div className="block sm:hidden divide-y divide-gray-100 dark:divide-slate-700/50">
+                            {recentActivities.slice(0, 5).map((act) => {
+                                const { dot, text, rowHover } = getTableStatus(act);
+                                const iconElement = getIconForType(act.activity_type);
+
+                                return (
+                                    <div key={act.id} className={`p-4 flex items-start gap-3 ${rowHover} transition-colors cursor-default`}>
+                                        <div className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-700 flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300">
+                                            {iconElement}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <h3 className="text-sm font-semibold text-slate-900 dark:text-white capitalize truncate">
+                                                    {normalize(act?.activity_type).replaceAll('_', ' ')}
+                                                </h3>
+                                                <span className="shrink-0 text-[10px] text-slate-400 dark:text-slate-400 whitespace-nowrap mt-0.5">
+                                                    {act.activity_date ? formatDisplayDate(act.activity_date) : '—'}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
+                                                {act.field_name || '—'} {act.planting_variety ? `(${act.planting_variety})` : ''}
+                                            </p>
+                                            <div className="flex items-center gap-1.5 mt-2">
+                                                <span className={`h-2 w-2 rounded-full ${dot}`} />
+                                                <span className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">{text}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {recentActivities.length === 0 && (
+                                <div className="p-8 text-center text-sm text-gray-400 dark:text-slate-500">
+                                    No upcoming activities yet.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Plot Overview */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-6 shadow-sm flex flex-col flex-1 lg:flex-none h-auto">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Plot Overview</h2>
+                                    <p className="mt-1 text-xs text-gray-400 dark:text-slate-400">
+                                        View active plot activities separately from completed harvest records.
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPlotOverviewTab('active')}
+                                        className={`rounded-xl px-3 py-1.5 text-xs font-semibold border transition-colors ${plotOverviewTab === 'active'
+                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-300 dark:border-emerald-700/50'
+                                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700'
+                                            }`}
+                                    >
+                                        Active Plots
+                                    </button>
+                                    {canReadHarvests && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setPlotOverviewTab('completed')}
+                                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold border transition-colors ${plotOverviewTab === 'completed'
+                                                ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:border-amber-700/50'
+                                                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700'
+                                                }`}
+                                        >
+                                            Completed Harvests
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                                <input
+                                    type="text"
+                                    value={plotSearch}
+                                    onChange={(e) => setPlotSearch(e.target.value)}
+                                    placeholder="Search by plot or variety..."
+                                    className="w-full sm:w-72 rounded-xl border border-gray-200 dark:border-slate-700 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-900/50 bg-white dark:bg-slate-900/50 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder-slate-400"
+                                />
+                                {plotOverviewTab === 'active' && (
+                                    <div className="relative inline-block w-full sm:w-auto">
+                                        <select
+                                            value={activityStatusFilter}
+                                            onChange={(e) => setActivityStatusFilter(e.target.value)}
+                                            className="w-full rounded-xl border border-gray-200 dark:border-slate-700 pl-3 pr-8 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-900/50 appearance-none bg-white dark:bg-slate-900/50 text-gray-800 dark:text-slate-200"
+                                        >
+                                            <option value="all">All statuses</option>
+                                            <option value="pending">Pending</option>
+                                            <option value="ongoing">Ongoing</option>
+                                        </select>
+                                        <span className="absolute inset-y-0 right-2.5 flex items-center pointer-events-none text-gray-400">
+                                            <ChevronDown size={14} />
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {plotOverviewTab === 'active' && (
+                                <div className="mt-4 flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-thin">
+                                    {activePlots.map((plot) => {
+                                        const pid = plot.id;
+                                        const pendingCount = activitiesList.filter((a) => a.planting_id === pid && hasPendingOrOngoing(a)).length;
+                                        const criticalCount = activitiesList.filter((a) => {
+                                            if (a.planting_id !== pid || !hasPendingOrOngoing(a)) return false;
+                                            const t = normalize(a.activity_type);
+                                            return t === 'irrigation' || t === 'pest control';
+                                        }).length;
+
+                                        const plotTitle = `${plot.variety || 'Plot'}${plot.field_name ? ` • ${plot.field_name}` : ''}`;
+                                        const progressPercent = getLifecycleProgressPercent(plot);
+                                        const matchingHarvest = harvestsList
+                                            .filter((h) => h.planting_id === pid)
+                                            .slice()
+                                            .sort((a, b) => new Date(b.harvest_date || 0) - new Date(a.harvest_date || 0))[0];
+                                        const yieldClass = getYieldClass(matchingHarvest?.yield_kg);
+
+                                        return (
+                                            <div key={pid} className="flex-shrink-0 w-72 snap-start rounded-xl border border-gray-200 dark:border-slate-700 hover:border-emerald-500/30 dark:hover:border-emerald-500/30 shadow-sm bg-white dark:bg-slate-800 transition-all hover:shadow-md overflow-hidden">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedPlotDetails({ type: 'active', data: plot })}
+                                                    className="w-full text-left p-4 focus:outline-none hover:bg-gray-50 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
+                                                >
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <p className="font-semibold text-gray-900 dark:text-white truncate">{plotTitle}</p>
+                                                            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 truncate">
+                                                                {plot.planting_date ? `Planted: ${formatDisplayDate(plot.planting_date)}` : 'Planted: —'}
+                                                            </p>
+                                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap">
+                                                                    {pendingCount} pending
+                                                                </span>
+                                                                {canReadHarvests && (
+                                                                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${yieldClass.className}`}>
+                                                                        {yieldClass.label}
+                                                                    </span>
+                                                                )}
+                                                                {criticalCount > 0 && (
+                                                                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-100 text-red-700 whitespace-nowrap">
+                                                                        {criticalCount} critical
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <ChevronRight className="h-5 w-5 text-gray-400 opacity-50 shrink-0" />
+                                                    </div>
+                                                    <div className="mt-3">
+                                                        <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400">
+                                                            <span>Lifecycle Progress</span>
+                                                            <span className="font-semibold text-gray-700 dark:text-slate-200">{progressPercent}%</span>
+                                                        </div>
+                                                        <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100 dark:bg-slate-900 overflow-hidden">
+                                                            <div
+                                                                className="h-full rounded-full bg-emerald-600"
+                                                                style={{ width: `${progressPercent}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                    {activePlots.length === 0 && (
+                                        <div className="w-full rounded-xl border border-dashed border-gray-200 dark:border-slate-700 p-6 text-center">
+                                            <p className="text-sm font-semibold text-gray-900 dark:text-white">No active plots yet.</p>
+                                            <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">Create a planting to start tracking crop progress.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {canReadHarvests && plotOverviewTab === 'completed' && (
+                                <div className="mt-4 flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-thin">
+                                    {completedHarvests.map((harvest) => {
+                                        const planting = plantingsList.find((p) => p.id === harvest.planting_id);
+                                        const cardTitle = `${harvest.planting_variety || planting?.variety || 'Harvest'}${harvest.field_name ? ` • ${harvest.field_name}` : (planting?.field_name ? ` • ${planting.field_name}` : '')}`;
+
+                                        return (
+                                            <div key={harvest.id} className="flex-shrink-0 w-72 snap-start rounded-xl border border-gray-200 dark:border-slate-700 hover:border-amber-500/30 dark:hover:border-amber-500/30 shadow-sm bg-white dark:bg-slate-800 transition-all hover:shadow-md overflow-hidden">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedPlotDetails({ type: 'completed', data: harvest, planting })}
+                                                    className="w-full text-left p-4 focus:outline-none hover:bg-gray-50 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
+                                                >
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <p className="font-semibold text-gray-900 dark:text-white truncate">{cardTitle}</p>
+                                                            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 truncate">
+                                                                {harvest.harvest_date ? `Harvested: ${formatDisplayDate(harvest.harvest_date)}` : 'Harvested: —'}
+                                                            </p>
+                                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap">
+                                                                    Yield: {harvest.yield_kg || '0'} kg
+                                                                </span>
+                                                                {harvest.quality_grade && (
+                                                                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-600 dark:text-slate-300 whitespace-nowrap capitalize">
+                                                                        {harvest.quality_grade}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <ChevronRight className="h-5 w-5 text-gray-400 opacity-50 shrink-0" />
+                                                    </div>
+                                                    {/* Invisible spacer to guarantee identical card height to Active Plots */}
+                                                    <div className="mt-3 invisible pointer-events-none" aria-hidden="true">
+                                                        <div className="flex items-center justify-between text-[11px]">
+                                                            <span>Spacer</span>
+                                                            <span>0%</span>
+                                                        </div>
+                                                        <div className="mt-1 h-1.5 w-full"></div>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                    {completedHarvests.length === 0 && (
+                                        <div className="w-full rounded-xl border border-dashed border-amber-200 dark:border-amber-700/50 p-6 text-center text-sm text-amber-700/70 dark:text-amber-500/80">
+                                            No completed harvest records yet.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    {renderCriticalAlertsCard('shadow-sm')}
+                </div>
+            )}
+
+            {/* ── Admin / Secretary (all breakpoints): original two-row grid layout ── */}
+            {!isFarmWorker && (
+                <div className="contents lg:flex lg:flex-col lg:gap-5 w-full">
+            <div className="contents lg:grid lg:gap-5 lg:grid-cols-3 lg:items-stretch">
+                {/* Left column */}
+                <div className="order-1 lg:order-none lg:col-span-2 flex flex-col w-full min-w-0 max-w-full lg:h-full">
+                    {/* Today's Tasks */}
+                    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-4 sm:p-5 pb-3 space-y-4 flex flex-col min-w-0 w-full max-w-full max-lg:overflow-x-hidden lg:flex-1 lg:h-full">
+                        <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-700/60 pb-2.5">
+                            <div className="flex items-center gap-3">
+                                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Today's Tasks</h2>
+                                <span className="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/40 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                                    {activeTasksCount} Operations
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Section 1: Field Operations */}
+                        <div className="space-y-2.5 min-w-0 w-full max-w-full">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Field Operations</h3>
+                            {topPendingTasks.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center py-4 text-sm text-gray-400 dark:text-slate-400 bg-gray-50/50 dark:bg-slate-800/50 rounded-xl border border-dashed border-gray-200 dark:border-slate-700">
+                                    <Tractor size={24} className="mb-1 text-gray-300 dark:text-slate-600 animate-pulse" />
+                                    No pending field operations right now.
+                                </div>
+                            ) : (
+                                <div className="grid gap-2 min-w-0 w-full max-w-full">
+                                    {topPendingTasks.map((act) => {
+                                        const activityName = normalize(act?.activity_type)?.replaceAll('_', ' ') || 'Activity';
+                                        return (
+                                            <div
+                                                key={act.id}
+                                                className="flex flex-col justify-between rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900/30 px-3.5 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-slate-800/50 cursor-default w-full max-w-full min-w-0 max-lg:overflow-hidden"
+                                            >
+                                                <div className="flex items-center justify-between w-full max-w-full min-w-0 gap-3 h-full max-lg:flex-wrap">
+                                                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                        <div className="mt-0.5 flex-shrink-0">
+                                                            {getTaskIconBox(act.activity_type)}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm font-bold capitalize text-gray-900 dark:text-white truncate">{activityName}</p>
+                                                            <p className="mt-0.5 text-xs text-gray-500 dark:text-slate-400 font-medium truncate">
+                                                                {act.field_name || '—'} {act.planting_variety ? `(${act.planting_variety})` : ''}
+                                                            </p>
+                                                            {act.notes && (
+                                                                <p className="mt-1.5 text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 line-clamp-2 leading-relaxed whitespace-normal">
+                                                                    <span className="font-semibold text-gray-400 dark:text-slate-500">System:</span> {act.notes}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="shrink-0 max-lg:ml-auto">
                                                         {getPriorityBadge(act.activity_type)}
                                                     </div>
                                                 </div>
@@ -954,15 +1930,20 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                {/* Right column of Grid 1: Crop Lifecycle */}
-                <div className={`order-2 lg:order-none lg:col-span-1 h-full gap-6 w-full ${mostRecentPlanting ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}`}>
-
+                {/* Right column of Grid 1: Crop Lifecycle + desktop stats */}
+                <div
+                    className={`order-2 lg:order-none lg:col-span-1 w-full gap-4 lg:gap-5 lg:h-full ${
+                        mostRecentPlanting
+                            ? 'flex flex-col'
+                            : 'hidden lg:flex lg:flex-col'
+                    }`}
+                >
                     {/* Crop Lifecycle */}
                     {mostRecentPlanting && (
-                        <div className="rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
+                        <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-5 sm:p-6 shadow-sm">
                         <div className="flex items-start justify-between gap-3">
                             <div>
-                                <h2 className="text-lg font-bold">Active Planting</h2>
+                                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Active Planting</h2>
 
                             </div>
                             <button
@@ -1011,18 +1992,20 @@ const Dashboard = () => {
                         )}
                     </div>
                     )}
-                    {/* Desktop-only Stat Cards Stack */}
-                    <div className={`hidden lg:flex flex-col ${mostRecentPlanting ? 'flex-1 justify-between' : 'gap-6'}`}>
-                        {renderStatCard(statCards[0])} {/* Active Plantings */}
-                        {canReadHarvests && renderStatCard(statCards[2])} {/* Total Harvests */}
-                        {renderStatCard(statCards[1])} {/* Total Activities */}
+                    {/* Desktop-only Stat Cards — equal height to Today's Tasks */}
+                    <div className="hidden lg:flex flex-col gap-3 w-full lg:flex-1 lg:h-full min-h-0">
+                        {visibleStatCards.map((card) => (
+                            <div key={card.label} className="flex-1 min-h-0 flex [&>button]:h-full [&>button]:w-full">
+                                {renderStatCard(card)}
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>
 
             {/* Grid Row 2: Upcoming Activities and Critical Alerts */}
-            <div className="contents lg:grid lg:gap-6 lg:grid-cols-3">
-                <div className="order-4 lg:order-none lg:col-span-2 flex flex-col gap-6 min-w-0 w-full">
+            <div className="contents lg:grid lg:gap-5 lg:grid-cols-3 lg:items-stretch">
+                <div className="order-4 lg:order-none lg:col-span-2 flex flex-col gap-6 lg:gap-5 min-w-0 w-full">
                     {/* Upcoming Activities */}
                     <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 overflow-hidden">
                         <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-700">
@@ -1305,55 +2288,18 @@ const Dashboard = () => {
                         </div>
                 </div>
 
-                {/* Right column of Grid 2: Critical Alerts & Calendar */}
-                <div className="contents lg:flex lg:flex-col lg:gap-6 lg:col-span-1 lg:min-w-0">
+                <div className="contents lg:flex lg:flex-col lg:gap-5 lg:col-span-1 lg:min-w-0">
                     <div className="order-3 lg:order-none w-full">
                         <MiniCalendarWidget activities={activitiesList} />
                     </div>
 
-                    <div className="order-5 lg:order-none rounded-2xl bg-white border border-gray-100 p-6 shadow-sm flex-1 flex flex-col w-full">
-                        <h2 className="text-lg font-bold">Critical Alerts</h2>
-
-                        <div className="mt-4 space-y-3">
-                            <div className={`flex items-start gap-3 rounded-xl p-4 ${overdueHarvestCount > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
-                                <AlertTriangle className={`mt-0.5 h-5 w-5 ${overdueHarvestCount > 0 ? 'text-red-600' : 'text-gray-500'}`} />
-                                <div>
-                                    <p className="font-bold text-gray-900">Overdue Harvest</p>
-                                    <p className={`mt-1 text-xs ${overdueHarvestCount > 0 ? 'text-red-700' : 'text-gray-600'}`}>
-                                        {overdueHarvestCount > 0
-                                            ? `${overdueHarvestCount} planting(s) are past their expected harvest date. Review field conditions and harvest plans.`
-                                            : 'No plantings are past expected harvest date.'}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex items-start gap-3 rounded-xl p-4 bg-gray-50">
-                                <Clock className="mt-0.5 h-5 w-5 text-gray-600" />
-                                <div>
-                                    <p className="font-bold text-gray-900">Pending Activities</p>
-                                    <p className="mt-1 text-xs text-gray-600">
-                                        {pendingActivitiesThisMonthCount} pending/ongoing activity(ies) scheduled for this month.
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex items-start gap-3 rounded-xl p-4 bg-yellow-50">
-                                <Info className="mt-0.5 h-5 w-5 text-yellow-700" />
-                                <div>
-                                    <p className="font-bold text-gray-900">
-                                        {activitiesThisMonthCount === 0 ? 'Low Activity' : 'Monthly Activity'}
-                                    </p>
-                                    <p className="mt-1 text-xs text-yellow-900/80">
-                                        {activitiesThisMonthCount === 0
-                                            ? 'No activities logged this month. Schedule key field operations to stay on track.'
-                                            : `${activitiesThisMonthCount} activity(ies) logged this month. Keep planning future tasks.`}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
+                    <div className="order-5 lg:order-none w-full lg:flex-1 lg:flex lg:flex-col">
+                        {renderCriticalAlertsCard('shadow-sm lg:flex-1')}
                     </div>
                 </div>
             </div>
+                </div>
+            )}
 
             {selectedPlotDetails && selectedPlotDetails.type === 'active' && (
                 <Modal

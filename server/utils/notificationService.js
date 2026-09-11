@@ -18,12 +18,21 @@
 
 const db = require('../config/db');
 const https = require('https');
+const { getActiveAdmin, getActiveAdminId } = require('./activeAdmin');
+const { broadcastNotificationsChanged } = require('./notificationHub');
 
 // ── Internal weather helper (mirrors weatherController but headless) ──────────
 
 const API_KEY = process.env.OPENWEATHER_API_KEY;
 const WEATHER_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours (scheduler runs every 12h)
 const _weatherCache = new Map();
+
+/** Test-only override for rain status (null = use live/cached OpenWeather). */
+let _rainStatusOverride = null;
+
+const setRainStatusOverrideForTests = (fnOrNull) => {
+    _rainStatusOverride = typeof fnOrNull === 'function' ? fnOrNull : null;
+};
 
 const httpsGet = (url) =>
     new Promise((resolve, reject) => {
@@ -42,6 +51,10 @@ const httpsGet = (url) =>
  * Returns { rainExpected: bool } or null on error.
  */
 const fetchRainStatus = async (lat, lon) => {
+    if (_rainStatusOverride) {
+        return _rainStatusOverride(lat, lon);
+    }
+
     if (!API_KEY) return null;
 
     const cacheKey = `${parseFloat(lat).toFixed(4)},${parseFloat(lon).toFixed(4)}`;
@@ -66,40 +79,38 @@ const fetchRainStatus = async (lat, lon) => {
     }
 };
 
-// Single admin user — notifications are not per-user scoped.
-// The admin_id is fetched once at startup and reused by all generators.
-let ADMIN_ID = null;
-
+// Single active admin — notifications are not per-farm-user scoped at insert time.
+// Uses the shared active-admin helper (never inactive historical admins).
 const getAdminId = async () => {
-    if (ADMIN_ID) return ADMIN_ID;
     try {
-        const [rows] = await db.query(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`);
-        if (rows.length > 0) {
-            ADMIN_ID = rows[0].id;
-            return ADMIN_ID;
-        }
+        return await getActiveAdminId();
     } catch (err) {
         console.error('[NotifService] Failed to query admin ID:', err.message);
+        return null;
     }
-    return null;
 };
 
 // ── Safe insert ───────────────────────────────────────────────────────────────
 
+/**
+ * @returns {Promise<boolean>} true when a new row was inserted
+ */
 const insertNotification = async (type, title, message, relatedId = null) => {
     const adminId = await getAdminId();
     if (!adminId) {
         console.log(`[NotifService] Generation skipped — no valid admin account found for notification type: ${type}`);
-        return;
+        return false;
     }
     try {
-        await db.query(
+        const [result] = await db.query(
             `INSERT IGNORE INTO notifications (user_id, type, title, message, related_id, notif_date)
              VALUES (?, ?, ?, ?, ?, CURDATE())`,
             [adminId, type, title, message, relatedId]
         );
+        return (result.affectedRows || 0) > 0;
     } catch (err) {
         console.error('[NotifService] Insert error:', err.message);
+        return false;
     }
 };
 
@@ -149,8 +160,8 @@ const STAGE_MESSAGES = {
 // ── 1. Activity Due (today) ───────────────────────────────────────────────────
 
 const generateActivityNotifications = async () => {
+    let inserted = 0;
     try {
-        // Fetch all pending activities scheduled for today (plantings owns field metadata)
         const [rows] = await db.query(
             `SELECT
                 a.id            AS activity_id,
@@ -171,25 +182,28 @@ const generateActivityNotifications = async () => {
         for (const row of rows) {
             const actLabel = String(row.activity_type).replaceAll('_', ' ');
             const plotLabel = [row.variety, row.field_name].filter(Boolean).join(' · ');
-            await insertNotification(
+            const ok = await insertNotification(
                 'activity_due',
                 `${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)} Due Today${plotLabel ? ` — ${plotLabel}` : ''}`,
                 `Your ${actLabel} activity is scheduled for today${plotLabel ? ` on ${plotLabel}` : ''}. Complete it to stay on track with your crop lifecycle.`,
                 row.activity_id
             );
+            if (ok) inserted += 1;
         }
 
-        if (rows.length > 0) {
-            console.log(`[NotifService] activity_due: generated up to ${rows.length} notification(s)`);
+        if (inserted > 0) {
+            console.log(`[NotifService] activity_due: generated ${inserted} notification(s)`);
         }
     } catch (err) {
         console.error('[NotifService] generateActivityNotifications error:', err.message);
     }
+    return inserted > 0;
 };
 
 // ── 2. Overdue Activities ─────────────────────────────────────────────────────
 
 const generateOverdueNotifications = async () => {
+    let inserted = 0;
     try {
         const [rows] = await db.query(
             `SELECT
@@ -212,27 +226,29 @@ const generateOverdueNotifications = async () => {
             const actLabel = String(row.activity_type).replaceAll('_', ' ');
             const plotLabel = [row.variety, row.field_name].filter(Boolean).join(' · ');
             const daysLabel = row.days_overdue === 1 ? '1 day' : `${row.days_overdue} days`;
-            await insertNotification(
+            const ok = await insertNotification(
                 'activity_overdue',
                 `Overdue: ${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)}${plotLabel ? ` — ${plotLabel}` : ''}`,
                 `Your ${actLabel} activity${plotLabel ? ` on ${plotLabel}` : ''} is ${daysLabel} overdue. Take action immediately to protect crop health.`,
                 row.activity_id
             );
+            if (ok) inserted += 1;
         }
 
-        if (rows.length > 0) {
-            console.log(`[NotifService] activity_overdue: generated up to ${rows.length} notification(s)`);
+        if (inserted > 0) {
+            console.log(`[NotifService] activity_overdue: generated ${inserted} notification(s)`);
         }
     } catch (err) {
         console.error('[NotifService] generateOverdueNotifications error:', err.message);
     }
+    return inserted > 0;
 };
 
 // ── 3. Lifecycle Stage Transitions ────────────────────────────────────────────
 
 const generateLifecycleNotifications = async () => {
+    let inserted = 0;
     try {
-        // Only active plantings that haven't been harvested/abandoned
         const [rows] = await db.query(
             `SELECT
                 pl.id                       AS planting_id,
@@ -258,65 +274,72 @@ const generateLifecycleNotifications = async () => {
             const plotLabel = [row.variety, row.field_name].filter(Boolean).join(' · ');
             const title = `Lifecycle Update: ${label}${plotLabel ? ` — ${plotLabel}` : ''}`;
 
-            await insertNotification(
+            const ok = await insertNotification(
                 'lifecycle_update',
                 title,
                 message,
                 row.planting_id
             );
+            if (ok) inserted += 1;
         }
 
-        if (rows.length > 0) {
-            console.log(`[NotifService] lifecycle_update: processed ${rows.length} active planting(s)`);
+        if (inserted > 0) {
+            console.log(`[NotifService] lifecycle_update: generated ${inserted} notification(s)`);
         }
     } catch (err) {
         console.error('[NotifService] generateLifecycleNotifications error:', err.message);
     }
+    return inserted > 0;
 };
 
 // ── 4. Weather Alerts ─────────────────────────────────────────────────────────
 
 const generateWeatherNotifications = async () => {
-    if (!API_KEY) {
+    if (!_rainStatusOverride && !API_KEY) {
         console.log('[NotifService] Weather alerts skipped — no OPENWEATHER_API_KEY configured.');
-        return;
+        return false;
     }
 
     try {
-        const [users] = await db.query(`SELECT farm_latitude, farm_longitude, farm_location_name FROM users WHERE role = 'admin' LIMIT 1`);
-        if (users.length === 0 || users[0].farm_latitude == null || users[0].farm_longitude == null) {
+        const admin = await getActiveAdmin();
+        if (!admin || admin.farm_latitude == null || admin.farm_longitude == null) {
             console.log('[NotifService] Weather alerts skipped — farm location not configured.');
-            return;
+            return false;
         }
 
-        const { farm_latitude: lat, farm_longitude: lon, farm_location_name: locationName } = users[0];
+        const { farm_latitude: lat, farm_longitude: lon, farm_location_name: locationName } = admin;
 
         const [activePlantings] = await db.query(`SELECT COUNT(*) as count FROM plantings WHERE status = 'active' AND deleted_at IS NULL`);
         if (activePlantings[0].count === 0) {
             console.log('[NotifService] Weather alerts skipped — no active plantings found.');
-            return;
+            return false;
         }
 
         const weather = await fetchRainStatus(lat, lon);
-        if (!weather || !weather.rainExpected) return;
+        if (!weather || !weather.rainExpected) return false;
 
-        await insertNotification(
+        const ok = await insertNotification(
             'weather_alert',
             `Rain Expected at ${locationName || 'Farm'}`,
             `Rain is forecast in the next 18 hours near ${locationName || 'your farm'}. Consider postponing pesticide applications, and check drainage in low-lying fields.`,
             null  // weather alerts have no single related_id; null groups them per day
         );
 
-        console.log(`[NotifService] weather_alert: generated for farm location`);
+        if (ok) {
+            console.log(`[NotifService] weather_alert: generated for farm location`);
+        }
+        return ok;
     } catch (err) {
         console.error('[NotifService] generateWeatherNotifications error:', err.message);
+        return false;
     }
 };
 
 // ── Batch runner ──────────────────────────────────────────────────────────────
 
 /**
- * Auto-delete notifications older than 24 hours.
+ * Auto-delete notifications older than 24 hours / obsolete activity+lifecycle rows.
+ * @returns {Promise<number>} rows pruned
  */
 const pruneNotifications = async () => {
     try {
@@ -357,30 +380,40 @@ const pruneNotifications = async () => {
         if (totalPruned > 0) {
             console.log(`[NotifService] Pruned ${totalPruned} obsolete/old notification(s).`);
         }
+        return totalPruned;
     } catch (err) {
         console.error('[NotifService] pruneNotifications error:', err.message);
+        return 0;
     }
 };
 
 /**
  * Run all activity + lifecycle generators (called every 6 hours).
+ * One broadcast after the batch when any DB notification state changed.
  */
 const runActivityCycle = async () => {
     console.log('[NotifService] Running activity/lifecycle notification cycle...');
-    await generateActivityNotifications();
-    await generateOverdueNotifications();
-    await generateLifecycleNotifications();
-    await pruneNotifications();
+    const due = await generateActivityNotifications();
+    const overdue = await generateOverdueNotifications();
+    const lifecycle = await generateLifecycleNotifications();
+    const pruned = await pruneNotifications();
+    if (due || overdue || lifecycle || pruned > 0) {
+        broadcastNotificationsChanged();
+    }
     console.log('[NotifService] Activity/lifecycle cycle complete.');
 };
 
 /**
  * Run weather generator (called every 12 hours).
+ * One broadcast after the batch when any DB notification state changed.
  */
 const runWeatherCycle = async () => {
     console.log('[NotifService] Running weather notification cycle...');
-    await generateWeatherNotifications();
-    await pruneNotifications();
+    const weather = await generateWeatherNotifications();
+    const pruned = await pruneNotifications();
+    if (weather || pruned > 0) {
+        broadcastNotificationsChanged();
+    }
     console.log('[NotifService] Weather cycle complete.');
 };
 
@@ -392,4 +425,7 @@ module.exports = {
     runActivityCycle,
     runWeatherCycle,
     pruneNotifications,
+    getAdminId,
+    insertNotification,
+    setRainStatusOverrideForTests,
 };

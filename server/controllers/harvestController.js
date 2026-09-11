@@ -4,6 +4,8 @@ const {
     isDuplicateKeyError,
     isRetryableTransactionError,
 } = require('../utils/transactionConflict');
+const { broadcastNotificationsChanged } = require('../utils/notificationHub');
+const { broadcastPlantingsChanged } = require('../utils/plantingHub');
 
 const HARVEST_EXISTS = { message: 'A harvest record already exists for this planting.' };
 const CREATE_HARVEST_ATTEMPTS = 3;
@@ -211,7 +213,7 @@ const createHarvest = async (req, res) => {
                 [planting_id]
             );
 
-            await connection.query(
+            const [notifResult] = await connection.query(
                 `DELETE FROM notifications
                  WHERE type IN ('activity_due', 'activity_overdue')
                    AND related_id IN (
@@ -221,6 +223,11 @@ const createHarvest = async (req, res) => {
             );
 
             await connection.commit();
+
+            broadcastPlantingsChanged();
+            if ((notifResult.affectedRows || 0) > 0) {
+                broadcastNotificationsChanged();
+            }
 
             await logActivity.fromRequest(req, {
                 action: 'CREATE_HARVEST',
@@ -391,6 +398,10 @@ const deleteHarvest = async (req, res) => {
         }
 
         await connection.commit();
+
+        if (otherHarvests.length === 0) {
+            broadcastPlantingsChanged();
+        }
 
         await logActivity.fromRequest(req, {
             action: 'DELETE_HARVEST',

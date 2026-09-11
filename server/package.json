@@ -12,7 +12,12 @@
     "test:phase7": "node --test tests/phase7-login-abuse.test.js",
     "test:phase8": "node --test tests/phase8-audit.test.js",
     "test:phase9": "node --test tests/phase9-e2e.test.js",
-    "test:setup-db": "node tests/setup-test-db.js"
+    "test:weather-admin": "node --test tests/weather-active-admin.test.js",
+    "test:weather-sse": "node --test tests/weather-sse.test.js",
+    "test:notification-sse": "node --test tests/notification-sse.test.js",
+    "test:planting-sse": "node --test tests/planting-sse.test.js",
+    "test:setup-db": "node tests/setup-test-db.js",
+    "setup:dev-db": "node setup-dev-db.js"
   },
   "keywords": [],
   "author": "",
