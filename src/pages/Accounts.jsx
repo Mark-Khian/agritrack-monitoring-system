@@ -300,7 +300,7 @@ const Accounts = () => {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-bold text-gray-900 wrap-break-word">{accountName(account)}</p>
-                    <p className="text-xs text-gray-500 break-all">@{account.username}</p>
+                    <p className="text-xs text-gray-500 break-all">{account.username}</p>
                   </div>
                   <Badge status={isActiveAccount(account) ? 'active' : 'inactive'} />
                 </div>
@@ -342,7 +342,7 @@ const Accounts = () => {
                   {accounts.map((account) => (
                     <tr key={account.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 font-bold text-gray-900">{accountName(account)}</td>
-                      <td className="px-6 py-4 text-sm text-gray-700">@{account.username}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{account.username}</td>
                       <td className="px-6 py-4 text-sm text-gray-700">{roleLabel(account.role)}</td>
                       <td className="px-6 py-4">
                         <Badge status={isActiveAccount(account) ? 'active' : 'inactive'} />

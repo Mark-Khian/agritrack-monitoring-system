@@ -20,6 +20,23 @@ const actorRoleLabel = (role) => {
   return String(role);
 };
 
+const actionLabel = (action) => {
+  if (!action) return '—';
+
+  const normalized = String(action).toUpperCase();
+
+  if (normalized === 'LOGIN_SUCCESS' || normalized === 'LOGIN_FAILED') {
+    return 'Login';
+  }
+
+  return normalized
+    .toLowerCase()
+    .split('_')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
 const formatTimestamp = (value) => {
   if (!value) return '—';
   const date = new Date(value);
@@ -78,7 +95,7 @@ const AuditLog = () => {
   const applyActionFilter = (event) => {
     event.preventDefault();
     setPage(1);
-    setAction(actionDraft.trim());
+    setAction(actionDraft.trim().replace(/\s+/g, '_').toUpperCase());
   };
 
   const hidePendingLog = () => {
@@ -127,7 +144,7 @@ const AuditLog = () => {
             type="text"
             value={actionDraft}
             onChange={(event) => setActionDraft(event.target.value)}
-            placeholder="e.g. LOGIN_SUCCESS"
+            placeholder="Search action"
             className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800"
           />
         </label>
@@ -180,7 +197,7 @@ const AuditLog = () => {
               <div key={log.id} className="rounded-2xl border border-gray-100 bg-white shadow-sm p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="font-bold text-gray-900 break-all">{log.action}</p>
+                    <p className="font-bold text-gray-900 break-all">{actionLabel(log.action)}</p>
                     <p className="text-xs text-gray-500">{formatTimestamp(log.created_at)}</p>
                   </div>
                   <Badge status={log.status} />
@@ -221,7 +238,7 @@ const AuditLog = () => {
                     <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className={`px-6 py-4 ${columns[0].cellClass}`}>{formatTimestamp(log.created_at)}</td>
                       <td className={`px-6 py-4 ${columns[1].cellClass}`}>{actorRoleLabel(log.actor_role)}</td>
-                      <td className={`px-6 py-4 ${columns[2].cellClass}`}>{log.action}</td>
+                      <td className={`px-6 py-4 ${columns[2].cellClass}`}>{actionLabel(log.action)}</td>
                       <td className={`px-6 py-4 ${columns[3].cellClass}`}>{log.entity || '—'}</td>
                       <td className={`px-6 py-4 ${columns[4].cellClass}`}>{log.entity_id ?? '—'}</td>
                       <td className={`px-6 py-4 ${columns[5].cellClass}`}>{log.ip_address || '—'}</td>
