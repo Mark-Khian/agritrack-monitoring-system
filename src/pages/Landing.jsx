@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth';
 import { getCurrentUser, loginUser, requestLoginChallenge } from '../services/api';
 import { Eye, EyeOff, AlertCircle, Loader2, ShieldCheck, X } from 'lucide-react';
@@ -28,7 +27,6 @@ const Landing = () => {
   // Snapshot of credentials captured at initial login; survives challenge modal remounts.
   const pendingCredentialsRef = useRef({ username: '', password: '' });
   const { login, notice, clearNotice } = useAuth();
-  const navigate = useNavigate();
 
   useEffect(() => {
     if (notice) {
@@ -150,18 +148,14 @@ const Landing = () => {
       clearPendingCredentials();
       passwordRef.current = '';
       setPassword('');
-      login(meResponse.data);
 
+      // Keep the Landing page mounted long enough to show the completed
+      // login flip/check animation before global auth state redirects the route.
       setAuthPhase('success');
-      const requiresPasswordChange =
-        meResponse.data?.must_change_password === true
-        || meResponse.data?.must_change_password === 1
-        || meResponse.data?.must_change_password === '1'
-        || meResponse.data?.mustChangePassword === true;
-      setTimeout(
-        () => navigate(requiresPasswordChange ? '/change-password' : '/dashboard'),
-        2000
-      );
+
+      setTimeout(() => {
+        login(meResponse.data);
+      }, 2000);
     } catch (error) {
       setAuthPhase('idle');
       setIsLoading(false);
