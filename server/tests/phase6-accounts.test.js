@@ -15,7 +15,7 @@ const request = require('supertest');
 
 const app = require('../app');
 const db = require('../config/db');
-const { BCRYPT_COST } = require('../utils/passwordHelper');
+const { BCRYPT_COST, validateUserSelectedPassword, generateTemporaryPassword } = require('../utils/passwordHelper');
 
 const ORIGIN = process.env.ALLOWED_ORIGIN;
 const PREFIX = `phase6_${Date.now()}_${process.pid}`;
@@ -225,16 +225,30 @@ describe('Phase 6 account administration and forced password change', () => {
         assert.ok(await activeSessionCount(secretary.id) >= 1);
     });
 
-    it('enforces strong policy, UTF-8 byte limit, and never trims passwords', async () => {
-        const invalid = [
-            'short',
-            'alllowercase!42',
-            'ALLUPPERCASE!42',
-            'NoNumberHere!',
-            'NoSymbolHere42',
-            `Aa1!${'é'.repeat(35)}`,
-        ];
-        for (const newPassword of invalid) {
+    it('validates user-selected passwords without composition rules', () => {
+        assert.equal(validateUserSelectedPassword('test1234'), null);
+        assert.equal(validateUserSelectedPassword('ricefarm'), null);
+        assert.equal(validateUserSelectedPassword('123456'), null);
+        assert.equal(validateUserSelectedPassword(''), 'Password is required.');
+        assert.equal(validateUserSelectedPassword(null), 'Password is required.');
+        assert.equal(validateUserSelectedPassword('x'.repeat(72)), null);
+        assert.equal(
+            validateUserSelectedPassword('x'.repeat(73)),
+            'Password must not exceed 72 UTF-8 bytes.'
+        );
+
+        const temporary = generateTemporaryPassword();
+        assert.equal(temporary.length, 24);
+        assert.match(temporary, /[a-z]/);
+        assert.match(temporary, /[A-Z]/);
+        assert.match(temporary, /[0-9]/);
+        assert.match(temporary, /[^A-Za-z0-9]/);
+    });
+
+    it('rejects empty, oversized, and same-as-current passwords and never trims', async () => {
+        const tooLong = `Aa1!${'é'.repeat(35)}`;
+        const rejected = ['', tooLong, secretary.temporaryPassword];
+        for (const newPassword of rejected) {
             await mutation(secretary.firstAgent, 'post', '/api/v1/auth/change-password')
                 .send({ currentPassword: secretary.temporaryPassword, newPassword })
                 .expect(400);
@@ -262,6 +276,40 @@ describe('Phase 6 account administration and forced password change', () => {
         await secretary.firstAgent.get('/api/v1/dashboard/lifecycle-monitoring').expect(200);
         await login({ username: secretary.username, password: FINAL_PASSWORD.trim() }, 401);
         await login({ username: secretary.username, password: FINAL_PASSWORD });
+    });
+
+    it('accepts simple user-selected passwords', async () => {
+        const created = await mutation(admin, 'post', '/api/v1/users')
+            .send({
+                name: 'Phase 6 Simple Password',
+                username: `${PREFIX}_simplepw`,
+                role: 'SECRETARY',
+            })
+            .expect(201);
+        const userId = created.body.user.id;
+        const username = created.body.user.username;
+        let currentPassword = created.body.temporaryPassword;
+        issuedSecrets.push(currentPassword);
+
+        try {
+            const samples = ['test1234', 'ricefarm', '123456'];
+            for (const chosen of samples) {
+                const { agent } = await login({ username, password: currentPassword });
+                await mutation(agent, 'post', '/api/v1/auth/change-password')
+                    .send({ currentPassword, newPassword: chosen })
+                    .expect(200);
+                const row = await userRow(userId);
+                assert.equal(row.must_change_password, 0);
+                assert.equal(await bcrypt.compare(chosen, row.password), true);
+                assert.equal(bcrypt.getRounds(row.password), BCRYPT_COST);
+                await login({ username, password: chosen });
+                currentPassword = chosen;
+            }
+        } finally {
+            await db.query('DELETE FROM sessions WHERE user_id = ?', [userId]);
+            await db.query('DELETE FROM activity_logs WHERE entity = ? AND entity_id = ?', ['users', userId]);
+            await db.query('DELETE FROM users WHERE id = ?', [userId]);
+        }
     });
 
     it('preserves only the exact cookie session used to change password', async () => {

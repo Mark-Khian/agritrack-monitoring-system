@@ -379,58 +379,58 @@ const Landing = () => {
           </div>
 
           {/* Login Card */}
-          <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-10 border border-white/20">
+          <div className="w-full max-w-md bg-black/40 backdrop-blur-xl rounded-2xl shadow-2xl p-6 sm:p-10 border border-white/20">
 
-            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1 sm:mb-2">Account Login</h2>
-            <p className="text-gray-600 text-sm mb-5 sm:mb-8">Enter your credentials to access the system</p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-white mb-1 sm:mb-2">Account Login</h2>
+            <p className="text-white/70 text-sm mb-5 sm:mb-8">Enter your credentials to access the system</p>
 
             {/* Login Form */}
             <form onSubmit={handleInitialLogin} className="space-y-4 sm:space-y-5">
 
               {/* Username Input */}
               <div>
-                <label htmlFor="username" className="block text-sm font-semibold text-gray-900 mb-2">
+                <label htmlFor="username" className="block text-sm font-semibold text-white/90 mb-2">
                   Username
                 </label>
                 <input
                   id="username"
                   type="text"
-                  placeholder="admin"
+                  placeholder="Enter your username"
                   value={username}
                   onChange={(e) => {
                     usernameRef.current = e.target.value;
                     setUsername(e.target.value);
                   }}
                   disabled={isLoading}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full px-4 py-3 rounded-lg border border-white/40 bg-white/15 backdrop-blur-md text-white placeholder:text-white/60 focus:outline-none focus:border-white/60 focus:ring-2 focus:ring-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   required
                 />
               </div>
 
               {/* Password Input */}
               <div>
-                <label htmlFor="password" className="block text-sm font-semibold text-gray-900 mb-2">
+                <label htmlFor="password" className="block text-sm font-semibold text-white/90 mb-2">
                   Password
                 </label>
                 <div className="relative">
                   <input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
-                    placeholder="••••••••"
+                    placeholder="Enter your password"
                     value={password}
                     onChange={(e) => {
                       passwordRef.current = e.target.value;
                       setPassword(e.target.value);
                     }}
                     disabled={isLoading}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-4 py-3 rounded-lg border border-white/40 bg-white/15 backdrop-blur-md text-white placeholder:text-white/60 focus:outline-none focus:border-white/60 focus:ring-2 focus:ring-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     required
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     disabled={isLoading}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
                     {showPassword ? (
@@ -461,8 +461,8 @@ const Landing = () => {
             </form>
 
             {/* Footer note */}
-            <div className="mt-5 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-200">
-              <p className="text-xs text-gray-600 text-center">
+            <div className="mt-5 sm:mt-8 pt-4 sm:pt-6 border-t border-white/20">
+              <p className="text-xs text-white/60 text-center">
                 This is a secure portal. Unauthorized access attempts are logged.
               </p>
             </div>

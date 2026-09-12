@@ -127,6 +127,7 @@ const Plantings = () => {
         return params.get('from') === 'dashboard';
     });
     const [plantings, setPlantings] = useState(plantingsCache || []);
+    const [plantingsReady, setPlantingsReady] = useState(Boolean(plantingsCache));
     const [loading, setLoading] = useState(!plantingsCache);
     const [isRetrying, setIsRetrying] = useState(false);
     const [error, setError] = useState(null);
@@ -207,6 +208,7 @@ const Plantings = () => {
             const data = pRes.data.data || [];
             setPlantings(data);
             plantingsCache = data;
+            setPlantingsReady(true);
         } catch (err) {
             if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
             setError('Failed to load plantings. Please try again.');
@@ -235,6 +237,7 @@ const Plantings = () => {
                 const data = pRes.data.data || [];
                 setPlantings(data);
                 plantingsCache = data;
+                setPlantingsReady(true);
             } catch (err) {
                 if (cancelled || err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
                 setError('Failed to load plantings. Please try again.');
@@ -273,6 +276,7 @@ const Plantings = () => {
                 setError(null);
                 setPlantings(data);
                 plantingsCache = data;
+                setPlantingsReady(true);
                 const after = plantingListFingerprint(data);
                 const suppressed = Date.now() < suppressRealtimeToastUntilRef.current;
                 if (!suppressed && before !== after) {
@@ -542,7 +546,6 @@ const Plantings = () => {
         });
     }, [plantings, statusFilter]);
 
-    const hasCompleted = useMemo(() => plantings.some(p => isCompletedPlanting(p)), [plantings]);
     const [downloadingRowId, setDownloadingRowId] = useState(null);
 
     // Bulk Export state
@@ -551,6 +554,7 @@ const Plantings = () => {
     const [bulkExporting, setBulkExporting] = useState(false);
 
     const completedPlantings = useMemo(() => (plantings || []).filter(p => isCompletedPlanting(p)), [plantings]);
+    const canExportCompletedCrops = plantingsReady && completedPlantings.length > 0;
     const [selectedPlantingIds, setSelectedPlantingIds] = useState([]);
 
     // Reset selection when drawer is closed
@@ -694,14 +698,18 @@ const Plantings = () => {
                             <button
                                 type="button"
                                 onClick={() => {
-                                    if (!hasCompleted) {
-                                        globalToast.info('No completed plantings available to export yet.');
-                                        return;
-                                    }
+                                    if (!canExportCompletedCrops) return;
                                     setIsExportDrawerOpen(true);
                                 }}
-                                className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 text-white shadow-sm outline-none focus:outline-none"
-                                title={hasCompleted ? 'Export bulk CSV/PDF report' : 'No completed plantings available for export'}
+                                disabled={!canExportCompletedCrops}
+                                className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 disabled:opacity-50 disabled:hover:bg-blue-700 disabled:active:bg-blue-700 disabled:cursor-not-allowed text-white shadow-sm outline-none focus:outline-none"
+                                title={
+                                    !plantingsReady
+                                        ? undefined
+                                        : canExportCompletedCrops
+                                            ? 'Export bulk CSV/PDF report'
+                                            : 'No completed crop records available to export.'
+                                }
                             >
                                 <FileDown size={16} /> Export Report
                             </button>

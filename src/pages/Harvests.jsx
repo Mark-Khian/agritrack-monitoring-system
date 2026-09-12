@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, Edit2, Trash2, Wheat, AlertTriangle, ChevronDown, FileDown, Printer, X, Check, Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useToast } from '../context/ToastContext';
@@ -13,11 +13,48 @@ import { formatDisplayDate } from '../utils/dateFormatter';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES } from '../security/permissions';
 
+/** Matches harvestController createHarvest: DATEDIFF(harvest_date, planting_date) >= 60. */
+const MIN_HARVEST_MATURITY_DAYS = 60;
+
+const toDateOnlyYmd = (value) => {
+    if (!value) return '';
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+        return value.slice(0, 10);
+    }
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const localTodayYmd = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+/** Calendar-day difference matching MySQL DATEDIFF(to, from). */
+const calendarDaysBetween = (fromValue, toValue) => {
+    const fromYmd = toDateOnlyYmd(fromValue);
+    const toYmd = toDateOnlyYmd(toValue);
+    if (!fromYmd || !toYmd) return null;
+    const [fromYear, fromMonth, fromDay] = fromYmd.split('-').map(Number);
+    const [toYear, toMonth, toDay] = toYmd.split('-').map(Number);
+    const fromDate = new Date(fromYear, fromMonth - 1, fromDay);
+    const toDate = new Date(toYear, toMonth - 1, toDay);
+    return Math.round((toDate.getTime() - fromDate.getTime()) / 86400000);
+};
+
 const Harvests = () => {
     const { can } = useAuth();
     const [harvests, setHarvests] = useState([]);
     const [activePlantings, setActivePlantings] = useState([]); // only active for dropdown
     const [loading, setLoading] = useState(true);
+    const [listsReady, setListsReady] = useState(false);
     const toast = useToast();
     const [downloadingRowId, setDownloadingRowId] = useState(null);
     const [isExportDrawerOpen, setIsExportDrawerOpen] = useState(false);
@@ -160,6 +197,7 @@ const Harvests = () => {
             ]);
             setHarvests(hRes.data.data || []);
             setActivePlantings(pRes.data.data || []);
+            setListsReady(true);
         } catch (err) {
             setError('Failed to load harvest records. Please try again.');
             console.error(err);
@@ -174,6 +212,26 @@ const Harvests = () => {
         return () => clearInterval(timer);
     }, [fetchData]);
 
+    const harvestedPlantingIds = useMemo(
+        () => new Set((harvests || []).map((h) => Number(h.planting_id)).filter((id) => Number.isInteger(id) && id > 0)),
+        [harvests]
+    );
+
+    const eligiblePlantings = useMemo(() => {
+        const today = localTodayYmd();
+        return (activePlantings || []).filter((planting) => {
+            const status = String(planting?.status || 'active').toLowerCase();
+            if (status !== 'active') return false;
+            if (harvestedPlantingIds.has(Number(planting.id))) return false;
+            const maturityDays = calendarDaysBetween(planting.planting_date, today);
+            if (maturityDays === null || maturityDays < MIN_HARVEST_MATURITY_DAYS) return false;
+            return true;
+        });
+    }, [activePlantings, harvestedPlantingIds]);
+
+    const canRecordHarvest = listsReady && eligiblePlantings.length > 0;
+    const canExportCompletedCrops = listsReady && harvests.length > 0;
+
     const handleOpenModal = (item = null) => {
         setFormError('');
         if (item) {
@@ -187,8 +245,9 @@ const Harvests = () => {
             });
             setEditingItem(item);
         } else {
+            if (!canRecordHarvest) return;
             setFormData({
-                planting_id: activePlantings[0]?.id || '',
+                planting_id: eligiblePlantings[0]?.id || '',
                 harvest_date: '', yield_kg: '',
                 quality_grade: 'A', remarks: '',
                 financial_value: ''
@@ -239,26 +298,33 @@ const Harvests = () => {
                     <p className="text-sm text-gray-500">Review yields and quality of completed crops</p>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-                    <button
-                        type="button"
-                        onClick={() => handleOpenModal()}
-                        disabled={activePlantings.length === 0}
-                        className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-green-700 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white outline-none focus:outline-none"
-                    >
-                        <Plus size={16} /> Record Harvest
-                    </button>
+                    {can(CAPABILITIES.HARVEST_CREATE) && (
+                        <button
+                            type="button"
+                            onClick={() => handleOpenModal()}
+                            disabled={!canRecordHarvest}
+                            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-green-700 hover:bg-green-600 disabled:opacity-50 disabled:hover:bg-green-700 disabled:active:bg-green-700 disabled:cursor-not-allowed text-white outline-none focus:outline-none"
+                            title={listsReady && !canRecordHarvest ? 'No eligible planting available for harvest.' : undefined}
+                        >
+                            <Plus size={16} /> Record Harvest
+                        </button>
+                    )}
                     {can(CAPABILITIES.HARVEST_EXPORT) && (
                         <button
                             type="button"
                             onClick={() => {
-                                if (harvests.length === 0) {
-                                    toast.info('No harvest records available to export yet.');
-                                    return;
-                                }
+                                if (!canExportCompletedCrops) return;
                                 setIsExportDrawerOpen(true);
                             }}
-                            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 text-white shadow-sm outline-none focus:outline-none"
-                            title={harvests.length > 0 ? 'Export bulk CSV/PDF report' : 'No harvests available for export'}
+                            disabled={!canExportCompletedCrops}
+                            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 disabled:opacity-50 disabled:hover:bg-blue-700 disabled:active:bg-blue-700 disabled:cursor-not-allowed text-white shadow-sm outline-none focus:outline-none"
+                            title={
+                                !listsReady
+                                    ? undefined
+                                    : canExportCompletedCrops
+                                        ? 'Export bulk CSV/PDF report'
+                                        : 'No completed crop records available to export.'
+                            }
                         >
                             <FileDown size={16} /> Export Report
                         </button>
@@ -448,7 +514,7 @@ const Harvests = () => {
                                 id="planting-id-select"
                                 value={formData.planting_id}
                                 onChange={e => setFormData({ ...formData, planting_id: e.target.value })}
-                                options={activePlantings.map(p => ({
+                                options={eligiblePlantings.map(p => ({
                                     value: p.id,
                                     label: `${p.variety} (${p.field_name})`
                                 }))}

@@ -2,33 +2,17 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
 const BCRYPT_COST = 12;
-const MIN_PASSWORD_CHARACTERS = 12;
 const MAX_PASSWORD_BYTES = 72;
 const TEMP_PASSWORD_LENGTH = 24;
 
 const utf8Length = (value) => Buffer.byteLength(value, 'utf8');
 
-const validateStrongPassword = (password) => {
-    if (typeof password !== 'string') {
+const validateUserSelectedPassword = (password) => {
+    if (typeof password !== 'string' || password.length === 0) {
         return 'Password is required.';
-    }
-    if (password.length < MIN_PASSWORD_CHARACTERS) {
-        return `Password must be at least ${MIN_PASSWORD_CHARACTERS} characters.`;
     }
     if (utf8Length(password) > MAX_PASSWORD_BYTES) {
         return `Password must not exceed ${MAX_PASSWORD_BYTES} UTF-8 bytes.`;
-    }
-    if (!/[a-z]/.test(password)) {
-        return 'Password must contain a lowercase letter.';
-    }
-    if (!/[A-Z]/.test(password)) {
-        return 'Password must contain an uppercase letter.';
-    }
-    if (!/[0-9]/.test(password)) {
-        return 'Password must contain a number.';
-    }
-    if (!/[^A-Za-z0-9]/.test(password)) {
-        return 'Password must contain a symbol.';
     }
     return null;
 };
@@ -69,7 +53,7 @@ const comparePassword = (password, hash) => bcrypt.compare(password, hash);
 module.exports = {
     BCRYPT_COST,
     MAX_PASSWORD_BYTES,
-    validateStrongPassword,
+    validateUserSelectedPassword,
     generateTemporaryPassword,
     hashPassword,
     comparePassword

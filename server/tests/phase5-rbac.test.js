@@ -232,6 +232,16 @@ describe('Phase 5 centralized RBAC', () => {
         assert.equal(normalizeRole(undefined), null);
         assert.equal(hasCapability('FARM_WORKER', CAPABILITIES.HARVEST_READ), false);
         assert.equal(hasCapability('SECRETARY', CAPABILITIES.HARVEST_READ), true);
+        assert.equal(hasCapability('ADMIN', CAPABILITIES.PLANTING_EXPORT), true);
+        assert.equal(hasCapability('ADMIN', CAPABILITIES.HARVEST_EXPORT), true);
+        assert.equal(hasCapability('SECRETARY', CAPABILITIES.PLANTING_EXPORT), true);
+        assert.equal(hasCapability('SECRETARY', CAPABILITIES.HARVEST_EXPORT), true);
+        assert.equal(hasCapability('FARM_WORKER', CAPABILITIES.PLANTING_EXPORT), false);
+        assert.equal(hasCapability('FARM_WORKER', CAPABILITIES.HARVEST_EXPORT), false);
+        assert.equal(hasCapability('SECRETARY', CAPABILITIES.ACCOUNT_MANAGE), false);
+        assert.equal(hasCapability('SECRETARY', CAPABILITIES.AUDIT_READ), false);
+        assert.equal(hasCapability('SECRETARY', CAPABILITIES.PLANTING_DELETE), false);
+        assert.equal(hasCapability('SECRETARY', CAPABILITIES.HARVEST_DELETE), false);
     });
 
     it('enforces authentication, unknown-role, and inactive-account boundaries', async () => {
@@ -284,6 +294,28 @@ describe('Phase 5 centralized RBAC', () => {
         assert.notEqual(weather.status, 403);
     });
 
+    it('allows Admin and Secretary completed-crop CSV/PDF export', async () => {
+        // CSV 200 is a full authorized export. PDF 400 (missing selection) proves
+        // the capability gate passed without launching Puppeteer.
+        await admin
+            .get(`/api/v1/plantings/export/csv?plantingIds=${harvestPlantingId}`)
+            .expect(200);
+        await admin.get('/api/v1/plantings/export/pdf').expect(400);
+        await admin
+            .get(`/api/v1/harvests/export/csv?harvestIds=${harvestId}`)
+            .expect(200);
+        await admin.get('/api/v1/harvests/export/pdf').expect(400);
+
+        await secretary
+            .get(`/api/v1/plantings/export/csv?plantingIds=${harvestPlantingId}`)
+            .expect(200);
+        await secretary.get('/api/v1/plantings/export/pdf').expect(400);
+        await secretary
+            .get(`/api/v1/harvests/export/csv?harvestIds=${harvestId}`)
+            .expect(200);
+        await secretary.get('/api/v1/harvests/export/pdf').expect(400);
+    });
+
     it('denies every Secretary privileged operation before mutation', async () => {
         const cases = [
             ['delete', `/api/v1/plantings/${secretaryPlantingId}`, 'plantings', secretaryPlantingId],
@@ -296,10 +328,8 @@ describe('Phase 5 centralized RBAC', () => {
             assert.deepEqual(await rowSnapshot(table, id), beforeRow, `${path} changed the database`);
         }
 
-        await secretary.get('/api/v1/plantings/export/csv').expect(403);
-        await secretary.get('/api/v1/plantings/export/pdf').expect(403);
-        await secretary.get(`/api/v1/plantings/${secretaryPlantingId}/export/pdf`).expect(403);
-        await secretary.get('/api/v1/harvests/export/csv').expect(403);
+        await secretary.get('/api/v1/users').expect(403);
+        await secretary.get('/api/v1/audit').expect(403);
         await secretary.get('/api/v1/backups').expect(403);
         await secretary.get('/api/v1/backups/download/fake.sql').expect(403);
         await mutation(secretary, 'post', '/api/v1/backups/run').expect(403);
@@ -411,6 +441,9 @@ describe('Phase 5 centralized RBAC', () => {
             ['put', `/api/v1/harvests/${harvestId}`, { role: 'ADMIN' }],
             ['delete', `/api/v1/harvests/${harvestId}`],
             ['get', '/api/v1/plantings/export/csv'],
+            ['get', '/api/v1/plantings/export/pdf'],
+            ['get', `/api/v1/plantings/${secretaryPlantingId}/export/pdf`],
+            ['get', '/api/v1/harvests/export/csv'],
             ['get', '/api/v1/harvests/export/pdf'],
             ['post', '/api/v1/notes', { title: 'forbidden' }],
             ['put', `/api/v1/notes/${secretaryNoteId}`, { title: 'forbidden' }],

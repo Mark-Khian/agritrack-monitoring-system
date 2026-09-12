@@ -1,5 +1,5 @@
 const { body, param, validationResult } = require('express-validator');
-const { validateStrongPassword } = require('../utils/passwordHelper');
+const { validateUserSelectedPassword } = require('../utils/passwordHelper');
 
 // Middleware to catch validation errors
 const handleValidation = (req, res, next) => {
@@ -106,7 +106,7 @@ const validateChangePassword = [
         .withMessage('Current password must not exceed 72 UTF-8 bytes.'),
     body('newPassword')
         .custom((value) => {
-            const error = validateStrongPassword(value);
+            const error = validateUserSelectedPassword(value);
             if (error) throw new Error(error);
             return true;
         }),
