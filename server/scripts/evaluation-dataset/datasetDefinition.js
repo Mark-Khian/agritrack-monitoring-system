@@ -293,7 +293,7 @@ const remarkForQualityGrade = (qualityGrade) => {
         return 'Grain quality acceptable after final field inspection.';
     }
     if (grade === 'c') {
-        return 'Lower grain quality noted after final crop assessment.';
+        return 'Lower grain quality observed after final field inspection.';
     }
     return 'Harvest completed under normal field conditions.';
 };

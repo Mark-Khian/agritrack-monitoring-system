@@ -190,10 +190,9 @@ const completePreHarvestHistory = async (connection, plantingId, plantingDate, h
         await connection.query(
             `UPDATE activities
              SET status = 'COMPLETED',
-                 actual_date = ?,
-                 notes = CONCAT(COALESCE(notes, ''), IF(notes IS NULL OR notes = '', '', '\\n'), ?)
+                 actual_date = ?
              WHERE id = ?`,
-            [actual, `${SYNTHETIC_MARKER}: completed for evaluation demo history.`, row.id]
+            [actual, row.id]
         );
     }
 };
