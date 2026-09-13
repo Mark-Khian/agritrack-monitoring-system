@@ -18,6 +18,7 @@
     "test:weather-alert-recipients": "node --test tests/weather-alert-recipients.test.js",
     "test:notification-fanout": "node --test tests/notification-fanout.test.js",
     "test:planting-sse": "node --test tests/planting-sse.test.js",
+    "test:growth-stage": "node --test tests/planting-growth-stage-presentation.test.js",
     "test:setup-db": "node tests/setup-test-db.js",
     "setup:dev-db": "node setup-dev-db.js"
   },

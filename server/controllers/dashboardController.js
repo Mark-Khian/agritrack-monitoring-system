@@ -20,6 +20,9 @@ const STAGE_ORDER = [
     'Vegetative Stage',
     'Reproductive Stage',
     'Ripening Stage',
+    'Ready for Harvest',
+    'Harvested',
+    // Legacy label retained for older rows / cached responses
     'Harvest Stage',
 ];
 

@@ -40,6 +40,7 @@ import {
 } from '../services/api';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES, ROLES, normalizeRole } from '../security/permissions';
+import { isCompletedPlanting, isCurrentActivePlanting } from '../utils/plantingCompletion';
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
 
@@ -136,12 +137,6 @@ const EmptyChart = ({ message = 'No data available yet.' }) => (
 );
 
 const normalize = (value) => String(value || '').toLowerCase();
-const isCompletedPlanting = (p) => {
-    const status = normalize(p?.status);
-    const stage = normalize(p?.growth_stage);
-    const lc = normalize(p?.lifecycle_state);
-    return status === 'completed' || stage === 'harvested' || lc === 'harvested';
-};
 
 let dashboardCache = null;
 
@@ -252,7 +247,7 @@ const Dashboard = () => {
                 }));
 
                 setStats({
-                    plantings: plantings.filter(p => !isCompletedPlanting(p)).length,
+                    plantings: plantings.filter(p => isCurrentActivePlanting(p)).length,
                     harvests: toNonNegativeNumber(harvestsRes.data.meta?.total),
                     activities: toNonNegativeNumber(activitiesRes.data.meta?.total),
                 });
@@ -260,7 +255,7 @@ const Dashboard = () => {
                 // Filter and sort activities to only show upcoming (pending/ongoing) ones
                 // for active (non-completed) plantings.
                 const activePlantingIds = new Set(
-                    plantings.filter(p => !isCompletedPlanting(p)).map(p => p.id)
+                    plantings.filter(p => isCurrentActivePlanting(p)).map(p => p.id)
                 );
 
                 const upcomingActivities = activities
@@ -290,7 +285,7 @@ const Dashboard = () => {
                 dashboardCache = {
                     role: user?.role,
                     stats: {
-                        plantings: plantings.filter(p => !isCompletedPlanting(p)).length,
+                        plantings: plantings.filter(p => isCurrentActivePlanting(p)).length,
                         harvests: toNonNegativeNumber(harvestsRes.data.meta?.total),
                         activities: toNonNegativeNumber(activitiesRes.data.meta?.total),
                     },
@@ -490,12 +485,15 @@ const Dashboard = () => {
         if (s.includes('vegetative')) return 1;
         if (s.includes('reproductive') || s.includes('booting') || s.includes('heading')) return 2;
         if (s.includes('ripening')) return 3;
-        if (s.includes('harvest') || normalize(lifecycleState) === 'harvested') return 4;
+        // Ready for Harvest is maturity without closeout; Harvested is completed.
+        if (s.includes('ready for harvest')) return 4;
+        if (s === 'harvested' || s === 'harvest stage' || s === 'harvest'
+            || normalize(lifecycleState) === 'harvested') return 4;
 
         // Fallback for legacy staging
         const ls = normalize(lifecycleState).replace(/_/g, ' ');
         if (ls === 'harvested' || ls === 'abandoned') return 4;
-        if (ls === 'ready for harvest') return 3;
+        if (ls === 'ready for harvest') return 4;
         if (ls === 'maturing') return 2;
         if (ls === 'active' || ls === 'planned') return 0;
 
@@ -518,7 +516,7 @@ const Dashboard = () => {
         .sort((a, b) => new Date(a.activity_date || 0) - new Date(b.activity_date || 0))
         .slice(0, 3);
 
-    const activePlantings = plantingsList.filter((p) => !isCompletedPlanting(p));
+    const activePlantings = plantingsList.filter((p) => isCurrentActivePlanting(p));
     const mostRecentPlanting = activePlantings
         .slice()
         .sort((a, b) => {
@@ -553,10 +551,10 @@ const Dashboard = () => {
         const exp = safeDate(p?.expected_harvest);
         if (!exp) return false;
         if (exp >= today) return false;
+        if (isCompletedPlanting(p)) return false;
         const ls = normalize(p?.lifecycle_state);
-        if (ls === 'harvested' || ls === 'abandoned') return false;
-        const gs = normalize(p?.growth_stage);
-        return gs !== 'harvested';
+        if (ls === 'abandoned') return false;
+        return true;
     }).length;
 
     const currentMonthKey = new Date().toLocaleString('default', { month: 'short', year: '2-digit' });
@@ -838,7 +836,7 @@ const Dashboard = () => {
             </div>
 
             {/* No plantings onboarding (avoid "system error" confusion) */}
-            {(!plantingsList || plantingsList.filter(p => !isCompletedPlanting(p)).length === 0) && (
+            {(!plantingsList || plantingsList.filter(p => isCurrentActivePlanting(p)).length === 0) && (
                 <div className="rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-5 shadow-sm">
                     <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-center lg:justify-between">
                         <div>

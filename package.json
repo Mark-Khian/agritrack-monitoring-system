@@ -15,6 +15,7 @@
     "test:phase8:browser": "node tests/phase8-browser.cjs",
     "test:phase9:browser": "node tests/phase9-browser.cjs",
     "test:phase9": "node tests/run-phase9.cjs",
+    "test:planting-actions": "node --test tests/planting-actions-classification.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

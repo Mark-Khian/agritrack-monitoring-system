@@ -1,35 +1,81 @@
 /**
  * Presentation layer: progress estimates and operational alerts.
- * Does NOT infer lifecycle authority from calendars — uses stored lifecycle_state + harvest existence.
+ * Does NOT infer lifecycle authority from calendars — uses stored status + harvest existence.
+ * Growth-stage labels are display-only; they must not imply a harvest was recorded.
  */
 
 const { calendarDaysBetween, utcTodayYmd } = require('../utils/plantingDates');
 
 const ATTENTION_OVERDUE_THRESHOLD = 3;
 
-const getGrowthStageForPlanting = (planting, harvestExists, progressEstimate) => {
-    if (planting.growth_stage_recorded) return planting.growth_stage_recorded;
-    if (planting.observed_stage) return planting.observed_stage;
-    if (harvestExists || planting.status === 'completed') return 'Harvest Stage';
-    if (planting.status === 'failed') return 'Abandoned';
-    
-    // Check if it's explicitly saved as expected_stage
-    if (planting.expected_stage) return planting.expected_stage;
+/** Completed / harvested display label (valid harvest closeout only). */
+const STAGE_HARVESTED = 'Harvested';
+/** Active planting at/past maturity without a recorded harvest. */
+const STAGE_READY_FOR_HARVEST = 'Ready for Harvest';
 
-    // Fallback to progress calculation
+const normalizeStageLabel = (value) =>
+    String(value || '')
+        .toLowerCase()
+        .replace(/_/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+/** Labels that imply harvest closeout — remapped on Active plantings. */
+const isHarvestCompletedLabel = (value) => {
+    const n = normalizeStageLabel(value);
+    return n === 'harvested' || n === 'harvest stage' || n === 'harvest';
+};
+
+/**
+ * True only when the planting is in a valid harvested/completed state.
+ * Active plantings (including post deleteHarvest) are never treated as harvested here.
+ */
+const isTrulyHarvested = (planting, harvestExists) => {
+    if (harvestExists) return true;
+    return String(planting?.status || '').toLowerCase() === 'completed';
+};
+
+const getGrowthStageForPlanting = (planting, harvestExists, progressEstimate) => {
+    if (isTrulyHarvested(planting, harvestExists)) {
+        return STAGE_HARVESTED;
+    }
+
+    if (planting.status === 'failed') return 'Abandoned';
+
+    // Active (or other non-completed) plantings must never display Harvested /
+    // Harvest Stage — remap recorded/observed/expected harvest-equivalent labels.
+    const recorded = planting.growth_stage_recorded;
+    if (recorded) {
+        if (isHarvestCompletedLabel(recorded)) return STAGE_READY_FOR_HARVEST;
+        return recorded;
+    }
+
+    const observed = planting.observed_stage;
+    if (observed) {
+        if (isHarvestCompletedLabel(observed)) return STAGE_READY_FOR_HARVEST;
+        return observed;
+    }
+
+    const expected = planting.expected_stage;
+    if (expected) {
+        if (isHarvestCompletedLabel(expected)) return STAGE_READY_FOR_HARVEST;
+        return expected;
+    }
 
     const progress = progressEstimate != null ? progressEstimate : 0;
     if (progress < 0.15) {
         return 'Seedling Stage';
-    } else if (progress < 0.50) {
-        return 'Vegetative Stage';
-    } else if (progress < 0.80) {
-        return 'Reproductive Stage';
-    } else if (progress < 1.00) {
-        return 'Ripening Stage';
-    } else {
-        return 'Harvest Stage';
     }
+    if (progress < 0.50) {
+        return 'Vegetative Stage';
+    }
+    if (progress < 0.80) {
+        return 'Reproductive Stage';
+    }
+    if (progress < 1.00) {
+        return 'Ripening Stage';
+    }
+    return STAGE_READY_FOR_HARVEST;
 };
 
 /**
@@ -44,7 +90,7 @@ const getPlantingPresentation = (
     { harvestExists = false, overdueActivityCount = 0, todayYmd = null }
 ) => {
     const today = todayYmd || utcTodayYmd();
-    const isCompleted = harvestExists || planting.status === 'completed';
+    const isCompleted = isTrulyHarvested(planting, harvestExists);
     const isFailed = planting.status === 'failed';
 
     let progressEstimate = null;
@@ -89,15 +135,14 @@ const getPlantingPresentation = (
 };
 
 const legacyGrowthStageForApi = (planting, harvestExists = false, progressEstimate = null) => {
-    if (planting.growth_stage_recorded) return planting.growth_stage_recorded;
-
     let pe = progressEstimate;
     if (pe == null) {
-        const isCompleted = harvestExists || planting.status === 'completed';
+        const isCompleted = isTrulyHarvested(planting, harvestExists);
         if (isCompleted) {
             pe = 1.0;
         } else {
-            const duration = Number(planting.expected_growth_days || 0) + Number(planting.adjustment_days || 0);
+            const duration =
+                Number(planting.expected_growth_days || 0) + Number(planting.adjustment_days || 0);
             const today = utcTodayYmd();
             const elapsed = Math.max(0, calendarDaysBetween(planting.planting_date, today));
             pe = duration > 0 ? Math.max(0, Math.min(1, elapsed / duration)) : 0;
@@ -146,7 +191,11 @@ const enrichPlantingRow = (planting, ctx, todayYmd = null) => {
         todayYmd,
     });
 
-    const legacyGrowthStage = legacyGrowthStageForApi(planting, harvestExists, presentation.progress_estimate);
+    const legacyGrowthStage = legacyGrowthStageForApi(
+        planting,
+        harvestExists,
+        presentation.progress_estimate
+    );
     const expected_stage = planting.expected_stage || legacyGrowthStage;
     const observed_stage = planting.observed_stage || null;
 
@@ -165,6 +214,11 @@ const enrichPlantingRow = (planting, ctx, todayYmd = null) => {
 
 module.exports = {
     ATTENTION_OVERDUE_THRESHOLD,
+    STAGE_HARVESTED,
+    STAGE_READY_FOR_HARVEST,
+    isTrulyHarvested,
+    isHarvestCompletedLabel,
+    getGrowthStageForPlanting,
     getPlantingPresentation,
     legacyGrowthStageForApi,
     loadPresentationContext,

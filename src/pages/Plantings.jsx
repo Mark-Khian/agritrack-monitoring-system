@@ -17,6 +17,7 @@ import { SkeletonTable } from '../components/Skeleton';
 import { formatDisplayDate } from '../utils/dateFormatter';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES } from '../security/permissions';
+import { isCompletedPlanting } from '../utils/plantingCompletion';
 
 /** Stable fingerprint of API planting rows (already RBAC-filtered) for realtime toast gating. */
 const plantingListFingerprint = (rows) => JSON.stringify(
@@ -506,13 +507,6 @@ const Plantings = () => {
             globalToast.success('Planting deleted successfully!');
         }
         catch (err) { console.error('Delete planting error:', err); }
-    };
-
-    const isCompletedPlanting = (p) => {
-        const status = String(p?.status || '').toLowerCase();
-        const stage = String(p?.growth_stage || '').toLowerCase();
-        const lc = String(p?.lifecycle_state || '').toLowerCase();
-        return status === 'completed' || stage === 'harvested' || lc === 'harvested';
     };
 
     useEffect(() => {

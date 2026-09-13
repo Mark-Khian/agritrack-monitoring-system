@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES } from '../security/permissions';
 import PlantingDetailsModal from './PlantingDetailsModal';
+import { isCurrentActivePlanting } from '../utils/plantingCompletion';
 
 const CLASSES = [
     'Irrigated / Lowland Varieties',
@@ -25,19 +26,13 @@ const STAGE_COLORS = [
 
 const normalize = (val) => (val || '').toLowerCase().trim();
 
-const isCompletedPlanting = (p) => {
-    const status = normalize(p?.status);
-    const stage = normalize(p?.growth_stage);
-    return status === 'completed' || status === 'failed' || stage === 'harvested';
-};
-
 const getLifecycleStageIndex = (growthStage) => {
     const s = normalize(growthStage);
     if (s.includes('seedling')) return 0;
     if (s.includes('vegetative')) return 1;
     if (s.includes('reproductive') || s.includes('booting') || s.includes('heading')) return 2;
     if (s.includes('ripening')) return 3;
-    if (s.includes('harvest')) return 4;
+    if (s.includes('ready for harvest') || s.includes('harvest')) return 4;
 
     if (s === 'land preparation' || s === 'seeding' || s === 'direct seeding' || s === 'transplanting') return 0;
     if (s === 'tillering') return 1;
@@ -131,7 +126,7 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
     today.setHours(0, 0, 0, 0);
 
     // Filter to active plantings only
-    const activePlantings = plantingsList.filter((p) => !isCompletedPlanting(p));
+    const activePlantings = plantingsList.filter((p) => isCurrentActivePlanting(p));
 
     // Group active plantings by variety class
     const groupedPlantings = {

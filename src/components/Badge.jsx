@@ -28,6 +28,7 @@ const Badge = ({ status }) => {
         'heading': 'bg-yellow-100 text-yellow-700',
         'ripening': 'bg-orange-100 text-orange-600',
         'harvested': 'bg-green-100 text-green-700',
+        'ready for harvest': 'bg-amber-100 text-amber-800 border border-amber-200',
         'seedling stage': 'bg-sky-100 text-sky-700 border border-sky-200',
         'vegetative stage': 'bg-teal-100 text-teal-700 border border-teal-200',
         'reproductive stage': 'bg-lime-100 text-lime-700 border border-lime-200',
