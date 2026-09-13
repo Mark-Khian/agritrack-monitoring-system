@@ -11,7 +11,7 @@ import Modal from '../components/Modal';
 import Select from '../components/Select';
 import Badge from '../components/Badge';
 import { formatActivityName } from '../utils/calendarUtils';
-import { getActivities, createActivity, updateActivity, updateActivityProgress, getPlantings } from '../services/api';
+import { getAllActivities, createActivity, updateActivity, updateActivityProgress, getPlantings } from '../services/api';
 import { formatDisplayDate } from '../utils/dateFormatter';
 import { SkeletonTable } from '../components/Skeleton';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -93,7 +93,7 @@ const Activities = () => {
 
     const fetchData = useCallback(async () => {
         try {
-            const aRes = await getActivities();
+            const aRes = await getAllActivities({ limit: 500 });
             setActivities(aRes.data.data || []);
             setActivitiesError(null);
         } catch (err) {

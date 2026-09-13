@@ -32,7 +32,9 @@ const deriveActivityStatus = (activity) => {
 const getAllActivities = async (req, res) => {
     try {
         const page  = Math.max(1, parseInt(req.query.page)  || 1);
-        const limit = Math.min(100, parseInt(req.query.limit) || 10);
+        // Soft cap: clients may request up to 1000 (Calendar previously asked for 500 but was clamped to 100).
+        const requested = parseInt(req.query.limit, 10);
+        const limit = Math.min(1000, Number.isFinite(requested) && requested > 0 ? requested : 100);
         const offset = (page - 1) * limit;
 
         // Optional filter by planting_id
@@ -59,6 +61,7 @@ const getAllActivities = async (req, res) => {
                 plantings.id      AS planting_id,
                 plantings.variety AS planting_variety,
                 plantings.field_name AS field_name,
+                plantings.status AS planting_status,
                 plantings.expected_stage AS expected_stage,
                 plantings.observed_stage AS observed_stage
              FROM activities

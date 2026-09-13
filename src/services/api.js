@@ -84,8 +84,45 @@ export const deletePlanting = (id) => API.delete(`/plantings/${id}`);
 export const getVarieties = (params = {}) => API.get('/varieties', { params });
 
 // ── Activities ────────────────────────────
-// params: { planting_id, limit }
+// params: { planting_id, limit, page, include_system_generated }
 export const getActivities = (params = {}) => API.get('/activities', { params: { limit: 100, ...params } });
+
+/**
+ * Walk activity pages until meta.total is covered (server soft-caps limit ≤ 1000).
+ * Use for Activities / Calendar / Dashboard so late planned_date rows are not truncated.
+ */
+export const getAllActivities = async (params = {}) => {
+    const pageSize = Math.min(Number(params.limit) || 500, 1000);
+    let page = 1;
+    let rows = [];
+    let meta = { page: 1, limit: pageSize, total: 0, pages: 1 };
+
+    for (;;) {
+        const res = await getActivities({ ...params, limit: pageSize, page });
+        const chunk = res.data?.data || [];
+        meta = res.data?.meta || meta;
+        rows = rows.concat(chunk);
+        const pages = Number(meta.pages) || 1;
+        if (page >= pages || chunk.length === 0) break;
+        page += 1;
+        if (page > 50) break; // hard safety
+    }
+
+    return {
+        data: {
+            data: rows,
+            meta: {
+                ...meta,
+                page: 1,
+                limit: rows.length,
+                total: Number(meta.total) || rows.length,
+                pages: 1,
+                fetched_pages: page,
+            },
+        },
+    };
+};
+
 export const getActivityById = (id) => API.get(`/activities/${id}`);
 export const createActivity = (data) => API.post('/activities', data);
 export const updateActivity = (id, data) => API.put(`/activities/${id}`, data);

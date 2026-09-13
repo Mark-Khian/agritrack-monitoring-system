@@ -1,6 +1,6 @@
 'use strict';
 
-const { SYNTHETIC_MARKER, REFERENCE_DATE, SEED_DATASET_ID } = require('./constants');
+const { REFERENCE_DATE } = require('./constants');
 
 /**
  * Preferred catalog names (class + name). Resolver substitutes if missing in DB.
@@ -277,12 +277,45 @@ const ALL_CROPS = Object.freeze([ACTIVE_CROP, ...HARVESTED_CROPS]);
 
 const FIELD_REGISTRY = Object.freeze(ALL_CROPS.map((c) => c.field_name));
 
-const harvestRemarks = (key) => `${SYNTHETIC_MARKER} [${SEED_DATASET_ID}:${key}]`;
+/**
+ * Farm-facing harvest remarks only — must match quality_grade semantics.
+ * Never include seed ownership tokens, dataset IDs, or crop keys.
+ */
+const remarkForQualityGrade = (qualityGrade) => {
+    const grade = String(qualityGrade || '').toLowerCase();
+    if (grade === 'rejected') {
+        return 'Grain quality rejected after final inspection due to visible defects.';
+    }
+    if (grade === 'a') {
+        return 'Grain quality rated high after final field inspection.';
+    }
+    if (grade === 'b') {
+        return 'Grain quality acceptable after final field inspection.';
+    }
+    if (grade === 'c') {
+        return 'Lower grain quality noted after final crop assessment.';
+    }
+    return 'Harvest completed under normal field conditions.';
+};
+
+const HARVEST_REMARK_BY_KEY = Object.freeze(
+    Object.fromEntries(
+        HARVESTED_CROPS.map((crop) => [crop.key, remarkForQualityGrade(crop.quality_grade)])
+    )
+);
+
+const harvestRemarks = (key) => {
+    const crop = HARVESTED_CROPS.find((c) => c.key === key);
+    if (crop) return remarkForQualityGrade(crop.quality_grade);
+    return HARVEST_REMARK_BY_KEY[key] || 'Harvest completed under normal field conditions.';
+};
 
 module.exports = {
     ACTIVE_CROP,
     HARVESTED_CROPS,
     ALL_CROPS,
     FIELD_REGISTRY,
+    remarkForQualityGrade,
+    HARVEST_REMARK_BY_KEY,
     harvestRemarks,
 };

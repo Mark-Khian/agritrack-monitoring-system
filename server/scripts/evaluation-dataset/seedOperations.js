@@ -5,6 +5,7 @@ const { expectedHarvestFromPlan, calendarDaysBetween } = require('../../utils/pl
 const { SYNTHETIC_MARKER, SEED_DATASET_ID } = require('./constants');
 const { FIELD_REGISTRY, harvestRemarks, ACTIVE_CROP } = require('./datasetDefinition');
 const { toYmd } = require('./dateNormalize');
+const { isSeedOwnershipProven } = require('./seedOwnership');
 
 const clampGrowthDays = (requested, varietyMeta) => {
     let days = Number(requested) || varietyMeta.default_expected_growth_days || 120;
@@ -32,17 +33,10 @@ const findFieldCollisions = async (connection) => {
          ORDER BY p.field_name ASC, p.id ASC`,
         [FIELD_REGISTRY]
     );
-    return rows.map((row) => {
-        const reason = String(row.lifecycle_state_reason || '');
-        const remarks = String(row.harvest_remarks || '');
-        const seedOwned = (
-            reason.includes(SEED_DATASET_ID)
-            || reason.includes(SYNTHETIC_MARKER)
-            || remarks.includes(SEED_DATASET_ID)
-            || remarks.includes(SYNTHETIC_MARKER)
-        );
-        return { ...row, seed_owned: seedOwned };
-    });
+    return rows.map((row) => ({
+        ...row,
+        seed_owned: isSeedOwnershipProven(row.lifecycle_state_reason, row.harvest_remarks),
+    }));
 };
 
 const classifyCollisions = (collisions) => {
@@ -419,8 +413,9 @@ const rollbackFromManifest = async (connection, manifest) => {
                 + `(db="${row.field_name}" expected="${expected.field_name}") — aborting.`
             );
         }
-        const blob = `${row.lifecycle_state_reason || ''}\n${row.harvest_remarks || ''}`;
-        if (!blob.includes(SEED_DATASET_ID) && !blob.includes(SYNTHETIC_MARKER)) {
+        // Ownership: manifest ID + field_name + lifecycle_state_reason marker
+        // (harvest remarks are user-facing and must not be required).
+        if (!isSeedOwnershipProven(row.lifecycle_state_reason, row.harvest_remarks)) {
             throw new Error(
                 `Manifest planting #${plantingId} failed synthetic marker verification — aborting.`
             );

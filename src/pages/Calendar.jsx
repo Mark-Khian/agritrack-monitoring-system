@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { getActivities, getNotes } from '../services/api';
+import { getAllActivities, getNotes } from '../services/api';
 import { groupActivitiesByDate, formatDateKey } from '../utils/calendarUtils';
 
 import CalendarHeader from '../components/calendar/CalendarHeader';
@@ -57,7 +57,7 @@ const Calendar = () => {
 
     try {
       const [actRes, notesRes] = await Promise.all([
-        getActivities({ limit: 500, include_system_generated: 1 }),
+        getAllActivities({ limit: 500, include_system_generated: 1 }),
         getNotes()
       ]);
       const list = actRes.data?.data || [];

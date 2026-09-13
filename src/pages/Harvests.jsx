@@ -633,9 +633,9 @@ const Harvests = () => {
                             </div>
 
                             {/* Form */}
-                            <form onSubmit={handleBulkExport} className="flex-1 overflow-y-auto p-6 space-y-5">
+                            <form onSubmit={handleBulkExport} className="flex-1 min-h-0 flex flex-col overflow-hidden p-6 gap-5">
                                 {/* Format Selector Toggle */}
-                                <div>
+                                <div className="shrink-0">
                                     <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-2 dark:text-slate-400">Export Format</label>
                                     <div className="grid grid-cols-2 gap-2 bg-gray-50 p-1 rounded-xl border border-gray-200 dark:bg-slate-800/50 dark:border-slate-700">
                                         <button
@@ -662,10 +662,10 @@ const Harvests = () => {
                                 </div>
 
                                 {/* List of Completed Records for quick export */}
-                                <div className="border-t border-gray-100 pt-4 space-y-3 dark:border-slate-800">
-                                    <div className="flex justify-between items-center">
+                                <div className="border-t border-gray-100 pt-4 flex flex-col flex-1 min-h-0 gap-3 dark:border-slate-800">
+                                    <div className="flex justify-between items-center shrink-0">
                                         <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block dark:text-slate-400">
-                                            Select Harvest Record ({harvests.length})
+                                            Select Harvest Record{harvests.length === 1 ? '' : 's'} ({harvests.length})
                                         </label>
                                         {harvests.length > 0 && (
                                             <button
@@ -683,7 +683,7 @@ const Harvests = () => {
                                             </button>
                                         )}
                                     </div>
-                                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                                    <div className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
                                         {harvests.length === 0 ? (
                                             <p className="text-xs text-gray-400 italic">No records found.</p>
                                         ) : (
@@ -744,7 +744,7 @@ const Harvests = () => {
                             </form>
 
                             {/* Footer Submit */}
-                            <div className="p-6 border-t border-gray-100 bg-gray-50 flex flex-col gap-2 dark:border-slate-800 dark:bg-slate-900/50">
+                            <div className="shrink-0 p-6 border-t border-gray-100 bg-gray-50 flex flex-col gap-2 dark:border-slate-800 dark:bg-slate-900/50">
                                 <button
                                     onClick={handleBulkExport}
                                     disabled={bulkExporting || selectedHarvestIds.length === 0}

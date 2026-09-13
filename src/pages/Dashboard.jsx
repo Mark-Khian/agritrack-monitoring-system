@@ -36,6 +36,7 @@ import {
     getPlantings,
     getHarvests,
     getActivities,
+    getAllActivities,
     getWeather
 } from '../services/api';
 import useAuth from '../context/useAuth';
@@ -236,7 +237,7 @@ const Dashboard = () => {
                     canReadHarvests
                         ? getHarvests({ limit: 100 })
                         : Promise.resolve({ data: { data: [], meta: { total: 0 } } }),
-                    getActivities({ limit: 100 })
+                    getAllActivities({ limit: 500 })
                 ]);
 
                 const plantings = plantingsRes.data.data || [];

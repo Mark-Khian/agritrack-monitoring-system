@@ -23,6 +23,11 @@ import {
 import { QualityGradeBadge } from '../components/QualityGradeBadge';
 import { formatDisplayDate } from '../utils/dateFormatter';
 import { getActivities, getHarvests, getPlantings } from '../services/api';
+import {
+    harvestByPeriod,
+    fillTimelineForRange,
+    timelineSubtitleForRange,
+} from '../utils/analyticsTimeline';
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
 
@@ -32,105 +37,6 @@ const PLANTING_VARIETY_CLASS_FILTERS = [
     { value: 'Rainfed / Dry-Seeded Varieties (DSR)', label: 'Rainfed / DSR' },
     { value: 'Upland Varieties', label: 'Upland' },
 ];
-
-const harvestByMonth = (items, plantings) => {
-    const months = {};
-    const plantingById = new Map((plantings || []).map((p) => [p.id, p]));
-
-    items.forEach((h) => {
-        const d = h?.harvest_date ? new Date(h.harvest_date) : null;
-        if (!d || Number.isNaN(d.getTime())) return;
-        const key = d.toLocaleString('default', { month: 'short', year: '2-digit' });
-        if (!months[key]) {
-            months[key] = {
-                yield_kg: 0,
-                harvestsList: []
-            };
-        }
-        months[key].yield_kg += Number(h.yield_kg || 0);
-
-        const p = plantingById.get(h?.planting_id);
-        const variety = p?.variety || p?.rice_variety || p?.variety_name || 'Unknown Variety';
-        const field_name = p?.field_name || 'No Field';
-
-        months[key].harvestsList.push({
-            ...h,
-            variety,
-            field_name
-        });
-    });
-
-    // Sort by actual date (not by string).
-    const entries = Object.entries(months).map(([month, data]) => {
-        const [mon, yr] = month.split(' ');
-        const year = `20${yr}`;
-        const dt = new Date(`${mon} 1, ${year}`);
-        return {
-            month,
-            yield_kg: Number(data.yield_kg.toFixed(0)),
-            harvestsList: data.harvestsList,
-            _dt: dt
-        };
-    });
-
-    return entries
-        .sort((a, b) => a._dt - b._dt)
-        .map(({ month, yield_kg, harvestsList }) => ({ month, yield_kg, harvestsList }));
-};
-
-const getPlaceholderMonths = () => {
-    const data = [];
-    const now = new Date();
-    for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        data.push({
-            month: d.toLocaleString('default', { month: 'short', year: '2-digit' }),
-            yield_kg: 0,
-            harvestsList: []
-        });
-    }
-    return data;
-};
-
-const fillTimelineData = (data) => {
-    if (!data || data.length === 0) return getPlaceholderMonths();
-    const timeline = getPlaceholderMonths();
-    const yieldMap = {};
-    data.forEach(item => {
-        yieldMap[item.month] = {
-            yield_kg: item.yield_kg,
-            harvestsList: item.harvestsList
-        };
-    });
-
-    let merged = timeline.map(t => {
-        if (yieldMap[t.month] !== undefined) {
-            const entry = yieldMap[t.month];
-            delete yieldMap[t.month];
-            return { ...t, yield_kg: entry.yield_kg, harvestsList: entry.harvestsList };
-        }
-        return { ...t, harvestsList: [] };
-    });
-
-    const extraEntries = Object.entries(yieldMap).map(([month, entry]) => {
-        return { month, yield_kg: entry.yield_kg, harvestsList: entry.harvestsList };
-    });
-
-    if (extraEntries.length > 0) {
-        merged = [...merged, ...extraEntries];
-    }
-
-    const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    merged.sort((a, b) => {
-        const [monA, yrA] = a.month.split(' ');
-        const [monB, yrB] = b.month.split(' ');
-        const dateA = new Date(`20${yrA}`, monthsShort.indexOf(monA), 1);
-        const dateB = new Date(`20${yrB}`, monthsShort.indexOf(monB), 1);
-        return dateA - dateB;
-    });
-
-    return merged;
-};
 
 const getSuccessRate = (harvests) => {
     if (!harvests || harvests.length === 0) return 0;
@@ -369,8 +275,8 @@ const Analytics = () => {
     }, [filteredHarvests, plantings]);
 
     const harvestYieldOverTime = useMemo(
-        () => harvestByMonth(filteredHarvests, plantings),
-        [filteredHarvests, plantings]
+        () => harvestByPeriod(filteredHarvests, plantings, dateRange),
+        [filteredHarvests, plantings, dateRange]
     );
 
     const harvestQualityDistribution = useMemo(() => {
@@ -813,12 +719,12 @@ const Analytics = () => {
             <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
                 <div className="mb-4">
                     <h2 className="text-lg font-bold text-gray-800">Harvest Yield Over Time</h2>
-                    <p className="text-xs text-gray-400 mt-1">Monthly yield in kilograms</p>
+                    <p className="text-xs text-gray-400 mt-1">{timelineSubtitleForRange(dateRange)}</p>
                 </div>
 
                 {showHarvestSkeleton ? <SkeletonChartBars /> : harvestsError ? <ErrorChart message="Unable to load harvest data." /> : (() => {
-                    const isPlaceholder = harvestYieldOverTime.length === 0;
-                    const chartData = isPlaceholder ? getPlaceholderMonths() : fillTimelineData(harvestYieldOverTime);
+                    const chartData = fillTimelineForRange(harvestYieldOverTime, dateRange);
+                    const isPlaceholder = !chartData.some((row) => Number(row.yield_kg) > 0);
                     return (
                         <div className="h-[220px] relative">
                             <ResponsiveContainer width="100%" height={220}>
