@@ -12,7 +12,9 @@ const ConfirmDialog = ({
     confirmColor = 'bg-red-600 hover:bg-red-700 shadow-red-600/30 text-white',
     iconBg = 'bg-red-100 text-red-600',
     icon = <AlertTriangle size={32} />,
-    hideCloseButton = false
+    hideCloseButton = false,
+    children = null,
+    confirmDisabled = false,
 }) => {
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={title} hideCloseButton={hideCloseButton}>
@@ -20,8 +22,15 @@ const ConfirmDialog = ({
                 <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-6 ${iconBg}`}>
                     {icon}
                 </div>
-                <p className="text-gray-600 mb-8">{message}</p>
-                
+                <p className="text-gray-600 mb-6">{message}</p>
+                {children ? (
+                    <div className="w-full text-left mb-6">
+                        {children}
+                    </div>
+                ) : (
+                    <div className="mb-2" />
+                )}
+
                 <div className="flex gap-4 w-full">
                     <button
                         onClick={onClose}
@@ -34,7 +43,8 @@ const ConfirmDialog = ({
                             onConfirm();
                             onClose();
                         }}
-                        className={`flex-1 px-4 py-2.5 rounded-xl font-medium shadow-md transition-all ${confirmColor}`}
+                        disabled={confirmDisabled}
+                        className={`flex-1 px-4 py-2.5 rounded-xl font-medium shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed ${confirmColor}`}
                     >
                         {confirmText}
                     </button>

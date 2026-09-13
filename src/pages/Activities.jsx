@@ -78,6 +78,8 @@ const Activities = () => {
     const [selectedPlotActivities, setSelectedPlotActivities] = useState(null);
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [activityToComplete, setActivityToComplete] = useState(null);
+    const [completeActualDate, setCompleteActualDate] = useState(() => new Date().toISOString().slice(0, 10));
+    const [completeNotes, setCompleteNotes] = useState('');
     const toast = useToast();
 
     const [formData, setFormData] = useState({
@@ -195,20 +197,27 @@ const Activities = () => {
         const currentStatus = String(act?.status || '').toLowerCase();
         // One-way completion from checkbox UI: completed activities cannot be unchecked back.
         if (!checked || currentStatus === 'completed') return;
-        
+
         setActivityToComplete(act);
+        setCompleteActualDate(new Date().toISOString().slice(0, 10));
+        setCompleteNotes('');
         setIsConfirmOpen(true);
     };
 
     const confirmCompleteActivity = async () => {
         if (!activityToComplete) return;
         const nextStatus = 'COMPLETED';
+        const trimmedNotes = String(completeNotes || '').trim();
         try {
             setStatusUpdatingId(activityToComplete.id);
-            await updateActivityProgress(activityToComplete.id, {
-                actual_date: new Date().toISOString().slice(0, 10),
-                status: nextStatus
-            });
+            const payload = {
+                actual_date: completeActualDate,
+                status: nextStatus,
+            };
+            if (trimmedNotes) {
+                payload.notes = trimmedNotes;
+            }
+            await updateActivityProgress(activityToComplete.id, payload);
             await fetchData();
             toast.success('Activity marked as completed successfully!');
             window.dispatchEvent(new CustomEvent('refresh-notifications'));
@@ -218,6 +227,7 @@ const Activities = () => {
         } finally {
             setStatusUpdatingId(null);
             setActivityToComplete(null);
+            setCompleteNotes('');
         }
     };
 
@@ -572,15 +582,41 @@ const Activities = () => {
                 onClose={() => {
                     setIsConfirmOpen(false);
                     setActivityToComplete(null);
+                    setCompleteNotes('');
                 }}
                 onConfirm={confirmCompleteActivity}
                 title="Complete Activity"
-                message={`Are you sure you want to mark "${activityToComplete?.activity_type?.replaceAll('_', ' ')}" as completed? This action is locked and cannot be undone.`}
+                message={`Mark "${activityToComplete?.activity_type?.replaceAll('_', ' ')}" as completed? This action is locked and cannot be undone.`}
                 confirmText="Confirm"
                 confirmColor="bg-green-700 hover:bg-green-600 shadow-green-700/30 text-white"
                 iconBg="bg-green-100 text-green-700"
                 icon={<CheckCircle size={32} />}
-            />
+                confirmDisabled={!completeActualDate}
+            >
+                <div className="space-y-3">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Actual Date</label>
+                        <input
+                            type="date"
+                            value={completeActualDate}
+                            onChange={(e) => setCompleteActualDate(e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Note / Observation</label>
+                        <textarea
+                            rows={3}
+                            maxLength={1000}
+                            value={completeNotes}
+                            onChange={(e) => setCompleteNotes(e.target.value)}
+                            placeholder="Add a short field observation (optional)"
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none resize-none"
+                        />
+                    </div>
+                </div>
+            </ConfirmDialog>
         </div>
     );
 };

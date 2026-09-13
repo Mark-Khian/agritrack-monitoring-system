@@ -290,7 +290,7 @@ const validateActivityUpdate = [
 
 const validateActivityProgress = [
     (req, res, next) => {
-        const allowedFields = new Set(['status', 'actual_date']);
+        const allowedFields = new Set(['status', 'actual_date', 'notes']);
         const unexpectedFields = Object.keys(req.body || {})
             .filter((field) => !allowedFields.has(field));
 
@@ -313,6 +313,19 @@ const validateActivityProgress = [
         .exists().withMessage('Actual date is required when completing an activity.')
         .notEmpty().withMessage('Actual date is required when completing an activity.')
         .isDate().withMessage('Actual date must be a valid date.'),
+    body('notes')
+        .optional({ nullable: true })
+        .customSanitizer((value) => {
+            if (value === undefined || value === null) return value;
+            return String(value).trim();
+        })
+        .custom((value) => {
+            if (value === undefined || value === null || value === '') return true;
+            if (String(value).length > 1000) {
+                throw new Error('Notes cannot exceed 1000 characters.');
+            }
+            return true;
+        }),
     handleValidation
 ];
 

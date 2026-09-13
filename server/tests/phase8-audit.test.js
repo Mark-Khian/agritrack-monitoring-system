@@ -547,11 +547,18 @@ describe('Phase 8 — Audit & Accountability', () => {
         assert.equal(harvestCsvLog.entity, 'harvests');
         assert.equal(harvestCsvLog.status, 'success');
 
+        const pdfCountBefore = await logCount('WHERE action = ?', ['EXPORT_PLANTINGS_PDF']);
         await admin.get(`/api/v1/plantings/export/pdf?plantingIds=${harvestPlantingId}`).expect(200);
         const plantingPdfLog = await latestLog('EXPORT_PLANTINGS_PDF');
         assert.equal(plantingPdfLog.user_id, ids.admin);
         assert.equal(plantingPdfLog.actor_role, 'ADMIN');
         assert.equal(plantingPdfLog.status, 'success');
+        assert.equal(await logCount('WHERE action = ?', ['EXPORT_PLANTINGS_PDF']), pdfCountBefore + 1);
+
+        const pdfFailCountBefore = await logCount("WHERE action LIKE 'EXPORT_%'");
+        await admin.get('/api/v1/plantings/export/pdf').expect(400);
+        assert.equal(await logCount("WHERE action LIKE 'EXPORT_%'"), pdfFailCountBefore);
+        assert.equal(await logCount('WHERE action = ?', ['EXPORT_PLANTINGS_PDF']), pdfCountBefore + 1);
     });
 
     it('audits Admin-triggered backups at the request layer and never attributes cron jobs', async () => {

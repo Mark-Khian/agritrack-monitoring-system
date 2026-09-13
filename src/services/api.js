@@ -6,6 +6,7 @@ const API = axios.create({
 });
 
 let unauthorizedHandler = null;
+let logoutTransitionActive = false;
 
 export const setUnauthorizedHandler = (handler) => {
     unauthorizedHandler = typeof handler === 'function' ? handler : null;
@@ -16,6 +17,13 @@ export const setUnauthorizedHandler = (handler) => {
         }
     };
 };
+
+/** Hold global 401 → unauth wipe while logout FlipOverlay completes (mirrors login hold). */
+export const setLogoutTransitionActive = (active) => {
+    logoutTransitionActive = Boolean(active);
+};
+
+export const isLogoutTransitionActive = () => logoutTransitionActive;
 
 const GLOBAL_401_EXCLUSIONS = new Set([
     '/auth/login',
@@ -31,6 +39,7 @@ API.interceptors.response.use(
         if (
             error.response?.status === 401
             && !GLOBAL_401_EXCLUSIONS.has(requestPath)
+            && !logoutTransitionActive
         ) {
             unauthorizedHandler?.();
         }

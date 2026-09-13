@@ -288,6 +288,14 @@ const updateActivity = async (req, res) => {
 
 const updateActivityProgress = async (req, res) => {
     const { actual_date } = req.body;
+    const notesProvided = Object.prototype.hasOwnProperty.call(req.body, 'notes');
+    let notesValue;
+    if (notesProvided) {
+        const raw = req.body.notes;
+        notesValue = (raw === undefined || raw === null || String(raw).trim() === '')
+            ? null
+            : String(raw).trim();
+    }
 
     try {
         const [current] = await db.query(
@@ -311,12 +319,21 @@ const updateActivityProgress = async (req, res) => {
             });
         }
 
-        await db.query(
-            `UPDATE activities
-             SET status = 'COMPLETED', actual_date = ?
-             WHERE id = ? AND deleted_at IS NULL`,
-            [actual_date, req.params.id]
-        );
+        if (notesProvided) {
+            await db.query(
+                `UPDATE activities
+                 SET status = 'COMPLETED', actual_date = ?, notes = ?
+                 WHERE id = ? AND deleted_at IS NULL`,
+                [actual_date, notesValue, req.params.id]
+            );
+        } else {
+            await db.query(
+                `UPDATE activities
+                 SET status = 'COMPLETED', actual_date = ?
+                 WHERE id = ? AND deleted_at IS NULL`,
+                [actual_date, req.params.id]
+            );
+        }
 
         const [notifResult] = await db.query(
             `DELETE FROM notifications

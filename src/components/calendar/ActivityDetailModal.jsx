@@ -27,6 +27,10 @@ const ActivityDetailModal = ({
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [progressActualDate, setProgressActualDate] = useState(
+    () => new Date().toISOString().slice(0, 10)
+  );
+  const [progressNotes, setProgressNotes] = useState('');
 
     const statusStr = activity.status ? String(activity.status).toLowerCase() : 'pending';
     const [formData, setFormData] = useState({
@@ -56,11 +60,21 @@ const ActivityDetailModal = ({
     setError(null);
     try {
       const actId = activity.id || activity.activity_id;
-      const res = await updateActivityProgress(actId, {
+      const trimmedNotes = String(progressNotes || '').trim();
+      const payload = {
         status: 'COMPLETED',
-        actual_date: new Date().toISOString().slice(0, 10)
+        actual_date: progressActualDate,
+      };
+      if (trimmedNotes) {
+        payload.notes = trimmedNotes;
+      }
+      const res = await updateActivityProgress(actId, payload);
+      onActivityUpdated(res.data?.data || {
+        ...activity,
+        status: 'completed',
+        actual_date: progressActualDate,
+        ...(trimmedNotes ? { notes: trimmedNotes } : {}),
       });
-      onActivityUpdated(res.data?.data || { ...activity, status: 'completed' });
       onClose();
     } catch (err) {
       setError(extractError(err, 'Failed to complete activity'));
@@ -278,6 +292,32 @@ const ActivityDetailModal = ({
                 </div>
               )}
 
+              {!isTerminal && canComplete && (
+                <div className="p-4 bg-emerald-50/60 border border-emerald-100 dark:bg-emerald-950/20 dark:border-emerald-900/40 rounded-2xl space-y-3 text-xs">
+                  <div>
+                    <label className="block font-semibold text-gray-700 dark:text-slate-400 mb-1">Actual Date</label>
+                    <input
+                      type="date"
+                      value={progressActualDate}
+                      onChange={(e) => setProgressActualDate(e.target.value)}
+                      className="w-full bg-white border border-gray-200 dark:bg-slate-800 dark:border-slate-700 text-gray-900 dark:text-white rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-gray-700 dark:text-slate-400 mb-1">Note / Observation</label>
+                    <textarea
+                      rows={3}
+                      maxLength={1000}
+                      value={progressNotes}
+                      onChange={(e) => setProgressNotes(e.target.value)}
+                      placeholder="Add a short field observation (optional)"
+                      className="w-full bg-white border border-gray-200 dark:bg-slate-800 dark:border-slate-700 text-gray-900 dark:text-white rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 resize-none"
+                    />
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
 
@@ -311,7 +351,7 @@ const ActivityDetailModal = ({
                   {canComplete && (
                     <button
                       onClick={handleComplete}
-                      disabled={loading}
+                      disabled={loading || !progressActualDate}
                       className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
                     >
                       {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}

@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import FlipOverlay from './FlipOverlay';
 import crmLogo from '../assets/CRM-logo.png';
 import { NavLink, useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth';
-import { logoutUser } from '../services/api';
+import { logoutUser, setLogoutTransitionActive } from '../services/api';
 import { CAPABILITIES } from '../security/permissions';
 import {
     LogOut,
@@ -18,46 +18,89 @@ import {
     ScrollText
 } from 'lucide-react';
 
+const LOGOUT_SUCCESS_HOLD_MS = 2000;
+const LOGOUT_MIN_LOADING_MS = 800;
+
 const Sidebar = ({ onNavClick }) => {
     const { user, logout, can } = useAuth();
     const navigate = useNavigate();
     const [showConfirm, setShowConfirm] = useState(false);
     const [isLoggingOut, setIsLoggingOut] = useState(false);
     const [logoutPhase, setLogoutPhase] = useState('idle');
+    const finishTimeoutRef = useRef(null);
+    const ownsLogoutTransitionRef = useRef(false);
 
-    const handleLogoutClick = () => setShowConfirm(true);
+    useEffect(() => () => {
+        if (finishTimeoutRef.current) {
+            window.clearTimeout(finishTimeoutRef.current);
+            finishTimeoutRef.current = null;
+        }
+        // Only the Sidebar that started logout may clear the suppress flag.
+        if (ownsLogoutTransitionRef.current) {
+            ownsLogoutTransitionRef.current = false;
+            setLogoutTransitionActive(false);
+        }
+    }, []);
+
+    const finishLogoutTransition = () => {
+        if (finishTimeoutRef.current) {
+            window.clearTimeout(finishTimeoutRef.current);
+        }
+        finishTimeoutRef.current = window.setTimeout(() => {
+            finishTimeoutRef.current = null;
+            ownsLogoutTransitionRef.current = false;
+            logout();
+            setLogoutTransitionActive(false);
+            navigate('/');
+        }, LOGOUT_SUCCESS_HOLD_MS);
+    };
+
+    const handleLogoutClick = () => {
+        if (isLoggingOut || logoutPhase !== 'idle') return;
+        setShowConfirm(true);
+    };
 
     const handleConfirmLogout = async () => {
+        if (isLoggingOut || logoutPhase !== 'idle') return;
+
         setLogoutPhase('loading');
         setIsLoggingOut(true);
         setShowConfirm(false);
+        // Keep Layout mounted while FlipOverlay runs: ignore post-cookie 401 polls.
+        ownsLogoutTransitionRef.current = true;
+        setLogoutTransitionActive(true);
 
         try {
-            const delay = new Promise(resolve => setTimeout(resolve, 800));
+            const delay = new Promise((resolve) => setTimeout(resolve, LOGOUT_MIN_LOADING_MS));
             await Promise.all([
                 logoutUser(),
-                delay
+                delay,
             ]);
             setLogoutPhase('success');
             setIsLoggingOut(false);
-            setTimeout(() => {
-                logout();
-                navigate('/');
-            }, 2000);
+            finishLogoutTransition();
         } catch (err) {
             console.error('Logout error:', err.message);
+            // Already-unauthenticated / expired session: still show clean success UX.
+            if (err.response?.status === 401) {
+                setLogoutPhase('success');
+                setIsLoggingOut(false);
+                finishLogoutTransition();
+                return;
+            }
+
+            // Network/5xx does not prove the HttpOnly session was revoked — allow retry.
+            ownsLogoutTransitionRef.current = false;
+            setLogoutTransitionActive(false);
             setLogoutPhase('idle');
             setIsLoggingOut(false);
-            // A network/5xx failure does not prove the HttpOnly server session was
-            // revoked. Keep the authenticated UI so the user can retry logout.
-            if (err.response?.status === 401) {
-                logout();
-                navigate('/');
-            }
         }
     };
 
-    const handleCancelLogout = () => setShowConfirm(false);
+    const handleCancelLogout = () => {
+        if (isLoggingOut || logoutPhase !== 'idle') return;
+        setShowConfirm(false);
+    };
 
     const navLinks = [
         { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, capability: CAPABILITIES.DASHBOARD_READ },

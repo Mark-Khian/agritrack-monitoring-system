@@ -457,11 +457,21 @@ describe('Phase 9 full E2E, regression, and security validation', () => {
             .send({ status: 'SKIPPED', actual_date: '2026-08-11' })
             .expect(400);
         await mutation(workerAgent, 'patch', `/api/v1/activities/${progress.body.activityId}/progress`)
-            .send({ status: 'COMPLETED', actual_date: '2026-08-11', notes: 'nope' })
+            .send({ status: 'COMPLETED', actual_date: '2026-08-11', planned_date: '2030-01-01' })
             .expect(400);
         await mutation(workerAgent, 'patch', `/api/v1/activities/${progress.body.activityId}/progress`)
-            .send({ status: 'COMPLETED', actual_date: '2026-08-11' })
+            .send({
+                status: 'COMPLETED',
+                actual_date: '2026-08-11',
+                notes: 'No significant pest damage observed.',
+            })
             .expect(200);
+        const [[progressRow]] = await db.query(
+            'SELECT status, notes FROM activities WHERE id = ?',
+            [progress.body.activityId]
+        );
+        assert.equal(progressRow.status, 'COMPLETED');
+        assert.equal(progressRow.notes, 'No significant pest damage observed.');
 
         await workerAgent.post('/api/v1/notes')
             .set('Origin', ORIGIN)

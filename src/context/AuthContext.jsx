@@ -1,5 +1,5 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getCurrentUser, logoutUser, setUnauthorizedHandler } from '../services/api';
+import { getCurrentUser, logoutUser, setUnauthorizedHandler, isLogoutTransitionActive } from '../services/api';
 import { hasCapability, normalizeRole } from '../security/permissions';
 
 const AuthContext = createContext();
@@ -146,6 +146,8 @@ export const AuthProvider = ({ children }) => {
     }, [checkSession]);
 
     useEffect(() => setUnauthorizedHandler(() => {
+        // Sidebar owns logout FlipOverlay; do not tear down auth mid-transition.
+        if (isLogoutTransitionActive()) return;
         sessionCheckId.current += 1;
         setAuthState({ user: null, status: 'unauthenticated', notice: null });
     }), []);

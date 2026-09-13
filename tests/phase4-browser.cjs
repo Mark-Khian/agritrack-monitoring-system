@@ -11,9 +11,15 @@ dotenv.config({
     quiet: true,
 });
 
-const APP_URL = 'http://localhost:5173';
-const TEST_DB = 'crop_management_rearch_test';
+const APP_URL = process.env.PHASE4_APP_URL || 'http://localhost:5173';
+// Align session harness DB with the API the browser actually hits (server/.env DB_NAME).
+const HARNESS_DB = process.env.PHASE4_BROWSER_DB || process.env.DB_NAME || 'crop_management_dev';
 const AUTH_COOKIE = 'agritrack_session';
+// Same configurable convention as phase9-browser; localhost fixture defaults to admin/test1234.
+const ADMIN = {
+    username: process.env.TEST_ADMIN_USERNAME || process.env.DEV_ADMIN_USERNAME || 'admin',
+    password: process.env.TEST_ADMIN_PASSWORD || process.env.DEV_ADMIN_PASSWORD || 'test1234',
+};
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const executablePath = [
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -37,27 +43,47 @@ const clickButton = async (page, label) => {
 };
 
 const login = async (page) => {
-    await page.waitForSelector('#username');
-    await page.evaluate(() => {
-        const setValue = Object.getOwnPropertyDescriptor(
-            HTMLInputElement.prototype,
-            'value'
-        ).set;
-        const username = document.querySelector('#username');
-        const password = document.querySelector('#password');
-        setValue.call(username, 'superadmin');
-        username.dispatchEvent(new Event('input', { bubbles: true }));
-        setValue.call(password, 'admin1234');
-        password.dispatchEvent(new Event('input', { bubbles: true }));
-        window.setTimeout(() => username.closest('form').requestSubmit(), 0);
-    });
-    await page.waitForFunction(() => window.location.pathname === '/dashboard', {
-        timeout: 15_000,
-    });
-    await page.waitForFunction(() => (
-        [...document.querySelectorAll('a')]
-            .some((candidate) => candidate.textContent.includes('Plantings'))
-    ));
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        await page.waitForSelector('#username');
+        await page.evaluate(({ username: loginUsername, password: loginPassword }) => {
+            const setValue = Object.getOwnPropertyDescriptor(
+                HTMLInputElement.prototype,
+                'value'
+            ).set;
+            const username = document.querySelector('#username');
+            const password = document.querySelector('#password');
+            setValue.call(username, loginUsername);
+            username.dispatchEvent(new Event('input', { bubbles: true }));
+            setValue.call(password, loginPassword);
+            password.dispatchEvent(new Event('input', { bubbles: true }));
+            window.setTimeout(() => username.closest('form').requestSubmit(), 0);
+        }, ADMIN);
+
+        try {
+            await page.waitForFunction(() => window.location.pathname === '/dashboard', {
+                timeout: 15_000,
+            });
+            await page.waitForFunction(() => (
+                [...document.querySelectorAll('a')]
+                    .some((candidate) => candidate.textContent.includes('Plantings'))
+            ));
+            return;
+        } catch (error) {
+            const stillOnLogin = await page.evaluate(() => (
+                window.location.pathname === '/'
+                && Boolean(document.querySelector('#username'))
+            ));
+            const rateLimited = await page.evaluate(() => (
+                /too many login attempts/i.test(document.body?.innerText || '')
+            ));
+            if ((!stillOnLogin && !rateLimited) || attempt === maxAttempts) {
+                throw error;
+            }
+            // Localhost loginLimiter is 5/min; wait out the window without changing app auth.
+            await new Promise((resolve) => setTimeout(resolve, 65_000));
+        }
+    }
 };
 
 (async () => {
@@ -65,11 +91,11 @@ const login = async (page) => {
         host: process.env.DB_HOST || 'localhost',
         port: Number(process.env.DB_PORT) || 3306,
         user: process.env.DB_USER || 'root',
-        password: process.env.DB_PASS || '',
-        database: TEST_DB,
+        password: process.env.DB_PASS || process.env.DB_PASSWORD || '',
+        database: HARNESS_DB,
     });
     const [[dbName]] = await db.query('SELECT DATABASE() AS name');
-    assert.equal(dbName.name, TEST_DB);
+    assert.equal(dbName.name, HARNESS_DB);
 
     const browser = await puppeteer.launch({
         headless: true,
@@ -119,7 +145,7 @@ const login = async (page) => {
     });
 
     try {
-        await page.goto(APP_URL, { waitUntil: 'networkidle0' });
+        await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('#username');
 
         await page.evaluate(() => {
@@ -130,7 +156,9 @@ const login = async (page) => {
             localStorage.setItem('theme', 'light');
             localStorage.setItem('agritrack_quick_tasks', '[{"id":1,"text":"keep"}]');
         });
-        await page.reload({ waitUntil: 'networkidle0' });
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('#username');
+        await page.waitForFunction(() => localStorage.getItem('token') == null);
 
         await test('initial 401 shows login and removes only legacy auth keys', async () => {
             const storage = await page.evaluate(() => ({
@@ -170,7 +198,7 @@ const login = async (page) => {
         });
 
         await test('browser refresh restores the protected route through /auth/me', async () => {
-            await page.reload({ waitUntil: 'networkidle0' });
+            await page.reload({ waitUntil: 'domcontentloaded' });
             assert.equal(new URL(page.url()).pathname, '/dashboard');
             await page.waitForSelector('aside');
         });
@@ -281,7 +309,7 @@ const login = async (page) => {
 
         await test('/auth/me 503 preserves unknown state and never shows login', async () => {
             meFailure = '503';
-            await page.reload({ waitUntil: 'networkidle0' });
+            await page.reload({ waitUntil: 'domcontentloaded' });
             await page.waitForFunction(() => document.body.textContent.includes('temporarily unavailable'));
             assert.equal(await page.$('#username'), null);
             meFailure = null;
@@ -295,7 +323,7 @@ const login = async (page) => {
 
         await test('/auth/me network failure preserves unknown state', async () => {
             meFailure = 'network';
-            await page.reload({ waitUntil: 'networkidle0' });
+            await page.reload({ waitUntil: 'domcontentloaded' });
             await page.waitForFunction(() => document.body.textContent.includes('temporarily unavailable'));
             assert.equal(await page.$('#username'), null);
             meFailure = null;
@@ -320,11 +348,53 @@ const login = async (page) => {
         await test('successful logout clears frontend state and server cookie', async () => {
             await clickButton(page, 'Logout');
             await clickButton(page, 'Log out');
+            await page.waitForFunction(
+                () => document.body.textContent.includes('Logged out successfully'),
+                { timeout: 10_000 }
+            );
+            assert.ok(
+                await page.evaluate(() => document.body.textContent.includes('Logged out successfully'))
+            );
             await page.waitForFunction(() => window.location.pathname === '/', {
                 timeout: 10_000,
             });
             await page.waitForSelector('#username');
             assert.ok(!(await page.cookies()).some((cookie) => cookie.name === AUTH_COOKIE));
+        });
+
+        await login(page);
+        await test('logout success survives post-cookie protected 401 during transition', async () => {
+            await page.evaluate(() => {
+                // Simulate long-session poll traffic after the session cookie is cleared.
+                window.__agriTrackLogoutProbe = setInterval(() => {
+                    fetch('/api/v1/plantings?limit=1', { credentials: 'include' }).catch(() => {});
+                }, 250);
+            });
+            await clickButton(page, 'Logout');
+            await clickButton(page, 'Log out');
+            await page.waitForFunction(
+                () => document.body.textContent.includes('Logged out successfully'),
+                { timeout: 10_000 }
+            );
+            const sawSuccessWhileStillAppShell = await page.evaluate(() => (
+                document.body.textContent.includes('Logged out successfully')
+                && window.location.pathname === '/dashboard'
+            ));
+            assert.equal(sawSuccessWhileStillAppShell, true);
+            await page.waitForFunction(() => window.location.pathname === '/', {
+                timeout: 10_000,
+            });
+            await page.evaluate(() => {
+                clearInterval(window.__agriTrackLogoutProbe);
+                delete window.__agriTrackLogoutProbe;
+            });
+            await page.waitForSelector('#username');
+            assert.ok(!(await page.cookies()).some((cookie) => cookie.name === AUTH_COOKIE));
+            const me = await page.evaluate(async () => {
+                const response = await fetch('/api/v1/auth/me', { credentials: 'include' });
+                return response.status;
+            });
+            assert.equal(me, 401);
         });
 
         await login(page);
@@ -349,7 +419,7 @@ const login = async (page) => {
                 'UPDATE sessions SET expires_at = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE token_hash = ?',
                 [sha256(cookie.value)]
             );
-            await page.goto(`${APP_URL}/dashboard`, { waitUntil: 'networkidle0' });
+            await page.goto(`${APP_URL}/dashboard`, { waitUntil: 'domcontentloaded' });
             await page.waitForSelector('#username');
             assert.equal(new URL(page.url()).pathname, '/');
         });
@@ -363,7 +433,7 @@ const login = async (page) => {
                 path: '/',
                 httpOnly: true,
             });
-            await page.goto(`${APP_URL}/dashboard`, { waitUntil: 'networkidle0' });
+            await page.goto(`${APP_URL}/dashboard`, { waitUntil: 'domcontentloaded' });
             await page.waitForSelector('#username');
             assert.equal(new URL(page.url()).pathname, '/');
         });
@@ -371,22 +441,31 @@ const login = async (page) => {
         await test('desktop and mobile route structure remains responsive', async () => {
             await login(page);
             await page.setViewport({ width: 1440, height: 900 });
-            await page.reload({ waitUntil: 'networkidle0' });
+            await page.reload({ waitUntil: 'domcontentloaded' });
+            await page.waitForSelector('aside.hidden.lg\\:flex');
             assert.ok(await page.$('aside.hidden.lg\\:flex'));
 
             await page.setViewport({ width: 390, height: 844 });
-            await page.reload({ waitUntil: 'networkidle0' });
+            await page.reload({ waitUntil: 'domcontentloaded' });
+            await page.waitForFunction(() => window.location.pathname === '/dashboard');
+            await page.waitForSelector('nav');
             assert.ok(await page.$('nav'));
             assert.ok(await page.$('aside.hidden.lg\\:flex'));
             assert.equal(new URL(page.url()).pathname, '/dashboard');
         });
 
         console.log(`PASS all requests used browser origin ${APP_URL}`);
-        console.log(`PASS target database ${TEST_DB}`);
+        console.log(`PASS harness database ${HARNESS_DB}`);
+        console.log(`PASS admin fixture ${ADMIN.username}`);
     } finally {
         await browser.close();
         await db.query(
-            "DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = 'superadmin')"
+            `DELETE FROM sessions
+             WHERE user_id IN (
+                SELECT id FROM users
+                WHERE username = ? OR email = ?
+             )`,
+            [ADMIN.username, ADMIN.username]
         );
         await db.query('DELETE FROM token_blacklist');
         await db.end();
