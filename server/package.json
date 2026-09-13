@@ -21,6 +21,7 @@
     "test:planting-sse": "node --test tests/planting-sse.test.js",
     "test:growth-stage": "node --test tests/planting-growth-stage-presentation.test.js",
     "test:eval-active-validation": "node --test tests/evaluation-active-crop-validation.test.js",
+    "test:activity-pagination": "node --test tests/activity-pagination-cap.test.js",
     "test:setup-db": "node tests/setup-test-db.js",
     "setup:dev-db": "node setup-dev-db.js"
   },
