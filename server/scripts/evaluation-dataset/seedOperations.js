@@ -4,6 +4,7 @@ const { ensureAllSystemTemplates } = require('../../utils/activityScheduler');
 const { expectedHarvestFromPlan, calendarDaysBetween } = require('../../utils/plantingDates');
 const { SYNTHETIC_MARKER, SEED_DATASET_ID } = require('./constants');
 const { FIELD_REGISTRY, harvestRemarks, ACTIVE_CROP } = require('./datasetDefinition');
+const { toYmd } = require('./dateNormalize');
 
 const clampGrowthDays = (requested, varietyMeta) => {
     let days = Number(requested) || varietyMeta.default_expected_growth_days || 120;
@@ -183,7 +184,7 @@ const completePreHarvestHistory = async (connection, plantingId, plantingDate, h
 
     for (const row of rows) {
         let actual = row.planned_date
-            ? String(row.planned_date).slice(0, 10)
+            ? toYmd(row.planned_date)
             : plantingDate;
         if (actual < plantingDate) actual = plantingDate;
         if (actual > harvestDate) {

@@ -4,8 +4,23 @@ const { REFERENCE_DATE } = require('./constants');
 const { ACTIVE_CROP } = require('./datasetDefinition');
 const { calendarDaysBetween } = require('../../utils/plantingDates');
 const { getPlantingPresentation, legacyGrowthStageForApi } = require('../../services/plantingPresentationService');
+const { toYmd, isBeforeYmd, isSameYmd, isAfterYmd } = require('./dateNormalize');
 
-const ymd = (value) => String(value).slice(0, 10);
+/**
+ * Normalize a planting row from mysql2 so presentation helpers receive YYYY-MM-DD strings.
+ */
+const normalizePlantingRowForPresentation = (planting) => ({
+    ...planting,
+    planting_date: toYmd(planting.planting_date),
+    expected_harvest: planting.expected_harvest != null ? toYmd(planting.expected_harvest) : null,
+    expected_growth_days: Number(planting.expected_growth_days),
+    adjustment_days: Number(planting.adjustment_days || 0),
+    status: planting.status,
+    lifecycle_state: planting.lifecycle_state,
+    growth_stage_recorded: planting.growth_stage_recorded ?? null,
+    observed_stage: planting.observed_stage ?? null,
+    expected_stage: planting.expected_stage ?? null,
+});
 
 /**
  * Validate designed ACTIVE_01 activity plan (no DB required).
@@ -21,25 +36,24 @@ const validateActiveCropDesign = () => {
     if (completedTypes.has(plan.due_today.activity_type)) {
         issues.push('due-today activity type also listed as completed');
     }
-    if (plan.overdue.planned_date >= REFERENCE_DATE) {
+    if (!isBeforeYmd(plan.overdue.planned_date, REFERENCE_DATE)) {
         issues.push(`overdue planned_date ${plan.overdue.planned_date} is not before ${REFERENCE_DATE}`);
     }
-    if (plan.due_today.planned_date !== REFERENCE_DATE) {
+    if (!isSameYmd(plan.due_today.planned_date, REFERENCE_DATE)) {
         issues.push(`due-today planned_date must be ${REFERENCE_DATE}`);
     }
     for (const item of plan.complete) {
-        if (item.actual_date > REFERENCE_DATE) {
+        if (isAfterYmd(item.actual_date, REFERENCE_DATE)) {
             issues.push(`completed ${item.activity_type} actual_date is in the future relative to reference`);
         }
-        if (item.actual_date < ACTIVE_CROP.planting_date) {
+        if (isBeforeYmd(item.actual_date, ACTIVE_CROP.planting_date)) {
             issues.push(`completed ${item.activity_type} actual_date before planting_date`);
         }
     }
 
     const egd = ACTIVE_CROP.expected_growth_days;
     const elapsed = calendarDaysBetween(ACTIVE_CROP.planting_date, REFERENCE_DATE);
-    const progress = Math.max(0, Math.min(1, elapsed / egd));
-    const plantingStub = {
+    const plantingStub = normalizePlantingRowForPresentation({
         planting_date: ACTIVE_CROP.planting_date,
         expected_growth_days: egd,
         adjustment_days: 0,
@@ -49,7 +63,7 @@ const validateActiveCropDesign = () => {
         growth_stage_recorded: null,
         observed_stage: null,
         expected_stage: null,
-    };
+    });
     const presentation = getPlantingPresentation(plantingStub, {
         harvestExists: false,
         overdueActivityCount: 1,
@@ -111,8 +125,9 @@ const validateActiveCropInDb = async (connection, plantingId) => {
             continue;
         }
         if (row.status !== 'COMPLETED') issues.push(`${item.activity_type} status=${row.status}`);
-        if (ymd(row.actual_date) !== item.actual_date) {
-            issues.push(`${item.activity_type} actual_date=${ymd(row.actual_date)}`);
+        const actualYmd = toYmd(row.actual_date);
+        if (actualYmd !== item.actual_date) {
+            issues.push(`${item.activity_type} actual_date=${actualYmd}`);
         }
     }
 
@@ -120,10 +135,11 @@ const validateActiveCropInDb = async (connection, plantingId) => {
     if (!overdue) issues.push('missing overdue second_fertilizing');
     else {
         if (overdue.status !== 'PENDING') issues.push(`overdue status=${overdue.status}`);
-        if (ymd(overdue.planned_date) !== plan.overdue.planned_date) {
-            issues.push(`overdue planned_date=${ymd(overdue.planned_date)}`);
+        const overdueYmd = toYmd(overdue.planned_date);
+        if (overdueYmd !== plan.overdue.planned_date) {
+            issues.push(`overdue planned_date=${overdueYmd}`);
         }
-        if (ymd(overdue.planned_date) >= REFERENCE_DATE) {
+        if (!isBeforeYmd(overdue.planned_date, REFERENCE_DATE)) {
             issues.push('overdue planned_date is not before reference date');
         }
     }
@@ -132,29 +148,56 @@ const validateActiveCropInDb = async (connection, plantingId) => {
     if (!dueToday) issues.push('missing due-today crop_monitoring');
     else {
         if (dueToday.status !== 'PENDING') issues.push(`due-today status=${dueToday.status}`);
-        if (ymd(dueToday.planned_date) !== REFERENCE_DATE) {
-            issues.push(`due-today planned_date=${ymd(dueToday.planned_date)}`);
+        if (!isSameYmd(dueToday.planned_date, REFERENCE_DATE)) {
+            issues.push(`due-today planned_date=${toYmd(dueToday.planned_date)}`);
         }
     }
 
     const futurePending = activities.filter((a) => (
         a.status === 'PENDING'
-        && ymd(a.planned_date) > REFERENCE_DATE
+        && isAfterYmd(a.planned_date, REFERENCE_DATE)
     ));
     if (!futurePending.length) issues.push('no upcoming PENDING activities after reference date');
 
-    const presentation = getPlantingPresentation(planting, {
+    const plantingNorm = normalizePlantingRowForPresentation(planting);
+    const overdueCount = activities.filter((a) => (
+        a.status === 'PENDING' && isBeforeYmd(a.planned_date, REFERENCE_DATE)
+    )).length;
+
+    const presentation = getPlantingPresentation(plantingNorm, {
         harvestExists: false,
-        overdueActivityCount: activities.filter((a) => (
-            a.status === 'PENDING' && ymd(a.planned_date) < REFERENCE_DATE
-        )).length,
+        overdueActivityCount: overdueCount,
         todayYmd: REFERENCE_DATE,
     });
     const growthStage = legacyGrowthStageForApi(
-        planting,
+        plantingNorm,
         false,
         presentation.progress_estimate
     );
+
+    // Strict progress / stage expectations for ACTIVE_01 at REFERENCE_DATE
+    const expectedElapsed = calendarDaysBetween(
+        toYmd(planting.planting_date),
+        REFERENCE_DATE
+    );
+    const duration =
+        Number(plantingNorm.expected_growth_days || 0) + Number(plantingNorm.adjustment_days || 0);
+    const expectedProgress = duration > 0
+        ? Math.max(0, Math.min(1, expectedElapsed / duration))
+        : 0;
+
+    if (presentation.progress_estimate == null
+        || Number.isNaN(presentation.progress_estimate)) {
+        issues.push('progress_estimate is null/NaN');
+    } else if (Math.abs(presentation.progress_estimate - expectedProgress) > 0.0001) {
+        issues.push(
+            `progress_estimate=${presentation.progress_estimate}, expected ≈ ${expectedProgress}`
+        );
+    }
+
+    if (growthStage !== 'Reproductive Stage') {
+        issues.push(`growth_stage=${growthStage}, expected Reproductive Stage`);
+    }
 
     return {
         ok: issues.length === 0,
@@ -162,6 +205,9 @@ const validateActiveCropInDb = async (connection, plantingId) => {
         planting_id: plantingId,
         status: planting.status,
         lifecycle_state: planting.lifecycle_state,
+        planting_date: plantingNorm.planting_date,
+        expected_harvest: plantingNorm.expected_harvest,
+        elapsed_days: expectedElapsed,
         progress_estimate: presentation.progress_estimate,
         growth_stage: growthStage,
         activity_counts: {
@@ -176,4 +222,6 @@ const validateActiveCropInDb = async (connection, plantingId) => {
 module.exports = {
     validateActiveCropDesign,
     validateActiveCropInDb,
+    normalizePlantingRowForPresentation,
+    toYmd,
 };
