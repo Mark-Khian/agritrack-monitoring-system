@@ -2,7 +2,6 @@ const db = require('../config/db');
 const logActivity = require('../middleware/logger');
 const { getClientIp } = require('../utils/clientIp');
 const {
-    generateTemporaryPassword,
     hashPassword
 } = require('../utils/passwordHelper');
 const { invalidateAllSessions } = require('../utils/sessionHelper');
@@ -21,7 +20,7 @@ const setSecretResponseHeaders = (res) => {
 
 const getLockedSubordinate = async (connection, userId) => {
     const [users] = await connection.query(
-        `SELECT id, name, username, email, role, is_active
+        `SELECT id, name, username, email, role, is_active, archived_at
          FROM users
          WHERE id = ? AND role IN ('SECRETARY', 'FARM_WORKER')
          FOR UPDATE`,
@@ -29,6 +28,8 @@ const getLockedSubordinate = async (connection, userId) => {
     );
     return users[0] || null;
 };
+
+const isArchived = (user) => Boolean(user?.archived_at);
 
 const audit = (req, action, targetId, connection) => logActivity({
     user_id: req.user.id,
@@ -57,14 +58,15 @@ const listUsers = async (req, res) => {
                     disabled_at
              FROM users
              WHERE role IN ('SECRETARY', 'FARM_WORKER')
+               AND archived_at IS NULL
              ORDER BY created_at DESC, id DESC`
         );
 
         return res.status(200).json({
             users: users.map((user) => ({
                 ...user,
-                is_active: Boolean(user.is_active),
-                must_change_password: Boolean(user.must_change_password)
+                is_active: Number(user.is_active) === 1,
+                must_change_password: Number(user.must_change_password) === 1
             }))
         });
     } catch (err) {
@@ -85,8 +87,7 @@ const createUser = async (req, res) => {
     const name = req.body.name.trim();
     const username = req.body.username.trim();
     const role = req.body.role;
-    const temporaryPassword = generateTemporaryPassword();
-    const passwordHash = await hashPassword(temporaryPassword);
+    const passwordHash = await hashPassword(req.body.password);
     let lastError;
 
     for (let attempt = 1; attempt <= CREATE_USER_ATTEMPTS; attempt += 1) {
@@ -109,7 +110,7 @@ const createUser = async (req, res) => {
                     (name, full_name, email, username, password, password_hash, role,
                      is_active, status, must_change_password, password_changed_at,
                      created_by, failed_attempts, failed_login_attempts)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'ACTIVE', 1, NULL, ?, 0, 0)`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'ACTIVE', 0, NOW(), ?, 0, 0)`,
                 [
                     name,
                     name,
@@ -133,9 +134,8 @@ const createUser = async (req, res) => {
                     username,
                     role,
                     is_active: true,
-                    must_change_password: true
-                },
-                temporaryPassword
+                    must_change_password: false
+                }
             });
         } catch (err) {
             if (connection) {
@@ -164,8 +164,7 @@ const createUser = async (req, res) => {
 };
 
 const resetPassword = async (req, res) => {
-    const temporaryPassword = generateTemporaryPassword();
-    const passwordHash = await hashPassword(temporaryPassword);
+    const passwordHash = await hashPassword(req.body.password);
     let connection;
 
     try {
@@ -176,6 +175,10 @@ const resetPassword = async (req, res) => {
             await connection.rollback();
             return res.status(404).json({ message: 'Subordinate account not found.' });
         }
+        if (isArchived(target)) {
+            await connection.rollback();
+            return res.status(409).json({ message: 'Archived accounts cannot be reset.' });
+        }
         if (!target.is_active) {
             await connection.rollback();
             return res.status(409).json({ message: 'Disabled accounts must be reactivated.' });
@@ -185,8 +188,8 @@ const resetPassword = async (req, res) => {
             `UPDATE users
              SET password = ?,
                  password_hash = ?,
-                 must_change_password = 1,
-                 password_changed_at = NULL,
+                 must_change_password = 0,
+                 password_changed_at = NOW(),
                  failed_attempts = 0,
                  failed_login_attempts = 0,
                  last_failed_login_at = NULL,
@@ -202,8 +205,7 @@ const resetPassword = async (req, res) => {
         setSecretResponseHeaders(res);
         return res.status(200).json({
             message: 'Password reset successfully.',
-            user: { id: target.id, username: target.username || target.email },
-            temporaryPassword
+            user: { id: target.id, username: target.username || target.email }
         });
     } catch (err) {
         if (connection) await connection.rollback();
@@ -223,6 +225,10 @@ const disableUser = async (req, res) => {
         if (!target) {
             await connection.rollback();
             return res.status(404).json({ message: 'Subordinate account not found.' });
+        }
+        if (isArchived(target)) {
+            await connection.rollback();
+            return res.status(409).json({ message: 'Archived accounts cannot be disabled.' });
         }
         if (!target.is_active) {
             await connection.rollback();
@@ -253,8 +259,7 @@ const disableUser = async (req, res) => {
 };
 
 const reactivateUser = async (req, res) => {
-    const temporaryPassword = generateTemporaryPassword();
-    const passwordHash = await hashPassword(temporaryPassword);
+    const passwordHash = await hashPassword(req.body.password);
     let connection;
 
     try {
@@ -264,6 +269,10 @@ const reactivateUser = async (req, res) => {
         if (!target) {
             await connection.rollback();
             return res.status(404).json({ message: 'Subordinate account not found.' });
+        }
+        if (isArchived(target)) {
+            await connection.rollback();
+            return res.status(409).json({ message: 'Archived accounts cannot be reactivated.' });
         }
         if (target.is_active) {
             await connection.rollback();
@@ -276,8 +285,8 @@ const reactivateUser = async (req, res) => {
                  status = 'ACTIVE',
                  password = ?,
                  password_hash = ?,
-                 must_change_password = 1,
-                 password_changed_at = NULL,
+                 must_change_password = 0,
+                 password_changed_at = NOW(),
                  disabled_at = NULL,
                  disabled_by = NULL,
                  failed_attempts = 0,
@@ -295,8 +304,7 @@ const reactivateUser = async (req, res) => {
         setSecretResponseHeaders(res);
         return res.status(200).json({
             message: 'Account reactivated successfully.',
-            user: { id: target.id, username: target.username || target.email },
-            temporaryPassword
+            user: { id: target.id, username: target.username || target.email }
         });
     } catch (err) {
         if (connection) await connection.rollback();
@@ -317,6 +325,10 @@ const revokeSessions = async (req, res) => {
             await connection.rollback();
             return res.status(404).json({ message: 'Subordinate account not found.' });
         }
+        if (isArchived(target)) {
+            await connection.rollback();
+            return res.status(409).json({ message: 'Archived accounts cannot be managed.' });
+        }
 
         await invalidateAllSessions(target.id, connection);
         await audit(req, 'REVOKE_USER_SESSIONS', target.id, connection);
@@ -332,11 +344,53 @@ const revokeSessions = async (req, res) => {
     }
 };
 
+const archiveUser = async (req, res) => {
+    let connection;
+    try {
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        const target = await getLockedSubordinate(connection, req.params.id);
+        if (!target) {
+            await connection.rollback();
+            return res.status(404).json({ message: 'Subordinate account not found.' });
+        }
+        if (isArchived(target)) {
+            await connection.rollback();
+            return res.status(409).json({ message: 'Account is already archived.' });
+        }
+        if (target.is_active) {
+            await connection.rollback();
+            return res.status(409).json({ message: 'Only disabled accounts can be archived.' });
+        }
+
+        await connection.query(
+            `UPDATE users
+             SET is_active = 0,
+                 status = 'INACTIVE',
+                 archived_at = NOW()
+             WHERE id = ?`,
+            [target.id]
+        );
+        await invalidateAllSessions(target.id, connection);
+        await audit(req, 'ACCOUNT_ARCHIVED', target.id, connection);
+        await connection.commit();
+
+        return res.status(200).json({ message: 'Account deleted successfully.' });
+    } catch (err) {
+        if (connection) await connection.rollback();
+        console.error('Archive user error:', err.message);
+        return res.status(500).json({ message: 'Server error.' });
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
 module.exports = {
     listUsers,
     createUser,
     resetPassword,
     disableUser,
     reactivateUser,
-    revokeSessions
+    revokeSessions,
+    archiveUser
 };

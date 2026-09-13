@@ -2,7 +2,7 @@
  * Local-development-only initializer for crop_management_dev.
  *
  * Creates the dedicated manual-dev database from schema.sql plus accepted
- * migrations 007–011, seeds the NSIC variety catalog, and upserts the three
+ * migrations 007–012, seeds the NSIC variety catalog, and upserts the three
  * development role accounts. Never targets crop_management_rearch_test.
  *
  * Run from server/:  npm run setup:dev-db
@@ -152,7 +152,8 @@ const localAccountPassword = (envKey) => {
         '008_add_v2_auth_foundation.sql',
         '009_relax_legacy_activity_date.sql',
         '010_add_login_challenges.sql',
-        '011_add_activity_logs_indexes.sql'
+        '011_add_activity_logs_indexes.sql',
+        '012_add_users_archived_at.sql'
     ]) {
         await applySqlFile(file);
     }

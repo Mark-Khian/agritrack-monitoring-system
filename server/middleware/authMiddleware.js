@@ -33,7 +33,7 @@ const authenticate = ({ allowPasswordChangeRequired = false } = {}) => async (re
         const userId = session[0].user_id;
 
         const [users] = await db.query(
-            `SELECT id, is_active, role, must_change_password
+            `SELECT id, is_active, role, must_change_password, archived_at
              FROM users
              WHERE id = ?`,
             [userId]
@@ -41,7 +41,7 @@ const authenticate = ({ allowPasswordChangeRequired = false } = {}) => async (re
         if (users.length === 0) {
             return res.status(401).json({ message: 'Account no longer exists.' });
         }
-        if (!users[0].is_active) {
+        if (!users[0].is_active || users[0].archived_at) {
             return res.status(403).json({ message: 'Your account has been disabled.' });
         }
 

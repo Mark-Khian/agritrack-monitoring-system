@@ -90,7 +90,7 @@ const login = async (req, res) => {
             user ? user.password : dummyHash
         );
 
-        if (!user || !isMatch || !user.is_active) {
+        if (!user || !isMatch || !user.is_active || user.archived_at) {
             if (user) {
                 await incrementUserFailures(user.id);
                 await logActivity({

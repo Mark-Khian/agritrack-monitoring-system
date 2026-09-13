@@ -3,6 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sprout, MapPin, Loader2, Calendar } from 'lucide-react';
 import { getPlantings } from '../services/api';
 import { useNavigate } from 'react-router-dom';
+import useAuth from '../context/useAuth';
+import { CAPABILITIES } from '../security/permissions';
+import PlantingDetailsModal from './PlantingDetailsModal';
 
 const CLASSES = [
     'Irrigated / Lowland Varieties',
@@ -55,9 +58,18 @@ let activePlantingsCache = null;
 
 const ActivePlantingsModal = ({ isOpen, onClose }) => {
     const navigate = useNavigate();
+    const { can } = useAuth();
+    const canEditPlantings = can(CAPABILITIES.PLANTING_UPDATE);
     const [plantingsList, setPlantingsList] = useState(activePlantingsCache || []);
     const [loading, setLoading] = useState(isOpen && !activePlantingsCache);
     const [error, setError] = useState(null);
+    const [detailsPlanting, setDetailsPlanting] = useState(null);
+
+    useEffect(() => {
+        if (!isOpen) {
+            setDetailsPlanting(null);
+        }
+    }, [isOpen]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -86,7 +98,12 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
     // Handle Escape key closure and lock background scroll
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (e.key === 'Escape') onClose();
+            if (e.key !== 'Escape') return;
+            if (detailsPlanting) {
+                setDetailsPlanting(null);
+                return;
+            }
+            onClose();
         };
 
         if (isOpen) {
@@ -106,7 +123,7 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
                 body.style.overflow = originalBodyOverflow;
             };
         }
-    }, [isOpen, onClose]);
+    }, [isOpen, onClose, detailsPlanting]);
 
     if (!isOpen) return null;
 
@@ -234,8 +251,12 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
                                                     <div
                                                         key={p.id}
                                                         onClick={() => {
-                                                            onClose();
-                                                            navigate(`/plantings?id=${p.id}&from=dashboard`);
+                                                            if (canEditPlantings) {
+                                                                onClose();
+                                                                navigate(`/plantings?id=${p.id}&from=dashboard`);
+                                                                return;
+                                                            }
+                                                            setDetailsPlanting(p);
                                                         }}
                                                         className="group p-4 bg-gray-50 hover:bg-gray-100/70 dark:bg-slate-800 dark:hover:bg-slate-800/80 border border-gray-200 dark:border-slate-700 hover:border-emerald-500/30 dark:hover:border-emerald-500/30 rounded-xl transition-all duration-200 cursor-pointer flex flex-col"
                                                     >
@@ -297,6 +318,12 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
                     </div>
                 </motion.div>
             </div>
+            <PlantingDetailsModal
+                isOpen={!!detailsPlanting}
+                planting={detailsPlanting}
+                onClose={() => setDetailsPlanting(null)}
+                overlayClassName="z-[60]"
+            />
         </AnimatePresence>
     );
 };

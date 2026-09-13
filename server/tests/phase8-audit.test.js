@@ -15,6 +15,14 @@ const path = require('node:path');
 const bcrypt = require('bcryptjs');
 const request = require('supertest');
 
+if (!process.env.PUPPETEER_EXECUTABLE_PATH) {
+    const localChrome = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    ].find((candidate) => fs.existsSync(candidate));
+    if (localChrome) process.env.PUPPETEER_EXECUTABLE_PATH = localChrome;
+}
+
 const app = require('../app');
 const db = require('../config/db');
 const { CAPABILITIES, hasCapability, normalizeRole } = require('../security/rbac');
@@ -31,6 +39,7 @@ const LIFECYCLE_ACTIONS = [
     'DISABLE_USER',
     'REACTIVATE_USER',
     'REVOKE_USER_SESSIONS',
+    'ACCOUNT_ARCHIVED',
 ];
 
 const mutation = (agent, method, urlPath) => agent[method](urlPath).set('Origin', ORIGIN);
@@ -316,19 +325,25 @@ describe('Phase 8 — Audit & Accountability', () => {
 
     it('keeps Phase 6 lifecycle action names and couples them to the same transaction', async () => {
         const created = await mutation(admin, 'post', '/api/v1/users')
-            .send({ name: 'Phase 8 Created', username: `${PREFIX}_created`, role: 'SECRETARY' })
+            .send({
+                name: 'Phase 8 Created',
+                username: `${PREFIX}_created`,
+                role: 'SECRETARY',
+                password: PASSWORD,
+                confirmPassword: PASSWORD,
+            })
             .expect(201);
         createdUser = created.body.user;
-        issuedSecrets.push(created.body.temporaryPassword);
+        assert.equal(created.body.temporaryPassword, undefined);
         const createLog = await latestLog('CREATE_USER', 'AND entity_id = ?', [createdUser.id]);
         assert.equal(createLog.user_id, ids.admin);
         assert.equal(createLog.actor_role, 'ADMIN');
         assert.equal(createLog.action, 'CREATE_USER');
 
         const reset = await mutation(admin, 'post', `/api/v1/users/${createdUser.id}/reset-password`)
-            .send({})
+            .send({ password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
             .expect(200);
-        issuedSecrets.push(reset.body.temporaryPassword);
+        assert.equal(reset.body.temporaryPassword, undefined);
         assert.equal((await latestLog('RESET_USER_PASSWORD', 'AND entity_id = ?', [createdUser.id])).action, 'RESET_USER_PASSWORD');
 
         await mutation(admin, 'post', `/api/v1/users/${createdUser.id}/revoke-sessions`).send({}).expect(200);
@@ -358,8 +373,20 @@ describe('Phase 8 — Audit & Accountability', () => {
         }
 
         for (const action of LIFECYCLE_ACTIONS) {
-            assert.equal(action.includes('USER') || action === 'CHANGE_PASSWORD', true);
+            assert.equal(
+                action.includes('USER') || action === 'CHANGE_PASSWORD' || action === 'ACCOUNT_ARCHIVED',
+                true
+            );
         }
+
+        await mutation(admin, 'patch', `/api/v1/users/${createdUser.id}/disable`).send({}).expect(200);
+        await mutation(admin, 'patch', `/api/v1/users/${createdUser.id}/archive`).send({}).expect(200);
+        const archiveLog = await latestLog('ACCOUNT_ARCHIVED', 'AND entity_id = ?', [createdUser.id]);
+        assert.equal(archiveLog.action, 'ACCOUNT_ARCHIVED');
+        assert.equal(archiveLog.user_id, ids.admin);
+        assert.equal(archiveLog.entity_id, createdUser.id);
+        assert.equal(archiveLog.status, 'success');
+        assert.equal(await logCount('WHERE action = ? AND entity_id = ?', ['ACCOUNT_ARCHIVED', createdUser.id]), 1);
     });
 
     it('rolls back a successful password change when the coupled audit insert fails', async () => {
@@ -449,7 +476,7 @@ describe('Phase 8 — Audit & Accountability', () => {
         );
     });
 
-    it('attributes note C/U/D and keeps crop mutation behavior unchanged', async () => {
+    it('attributes note C/U/D and keeps crop mutation behavior unchanged', { timeout: 120000 }, async () => {
         const created = await mutation(secretary, 'post', '/api/v1/notes')
             .send({
                 title: 'Phase 8 note',
@@ -507,6 +534,24 @@ describe('Phase 8 — Audit & Accountability', () => {
         assert.equal(exportLog.user_id, ids.admin);
         assert.equal(exportLog.actor_role, 'ADMIN');
         assert.equal(exportLog.entity, 'plantings');
+        assert.equal(exportLog.status, 'success');
+
+        const exportCountBeforeFailure = await logCount("WHERE action LIKE 'EXPORT_%'");
+        await admin.get('/api/v1/plantings/export/csv').expect(400);
+        assert.equal(await logCount("WHERE action LIKE 'EXPORT_%'"), exportCountBeforeFailure);
+
+        await admin.get(`/api/v1/harvests/export/csv?harvestIds=${harvest.body.harvestId}`).expect(200);
+        const harvestCsvLog = await latestLog('EXPORT_HARVESTS_CSV');
+        assert.equal(harvestCsvLog.user_id, ids.admin);
+        assert.equal(harvestCsvLog.actor_role, 'ADMIN');
+        assert.equal(harvestCsvLog.entity, 'harvests');
+        assert.equal(harvestCsvLog.status, 'success');
+
+        await admin.get(`/api/v1/plantings/export/pdf?plantingIds=${harvestPlantingId}`).expect(200);
+        const plantingPdfLog = await latestLog('EXPORT_PLANTINGS_PDF');
+        assert.equal(plantingPdfLog.user_id, ids.admin);
+        assert.equal(plantingPdfLog.actor_role, 'ADMIN');
+        assert.equal(plantingPdfLog.status, 'success');
     });
 
     it('audits Admin-triggered backups at the request layer and never attributes cron jobs', async () => {

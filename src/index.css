@@ -391,3 +391,43 @@ html.dark .group:hover .calendar-cell-scroll::-webkit-scrollbar-thumb:hover {
 .flip-back {
   transform: rotateY(180deg);
 }
+
+/* Login username autofill: keep the transparent border-defined field.
+   Chrome paints a light/beige wash; delay its background paint and use
+   the lightest inset cover that still hides beige so the card shows through. */
+input.agritrack-login-username {
+  color-scheme: dark;
+}
+
+input.agritrack-login-username:autofill,
+input.agritrack-login-username:autofill:hover,
+input.agritrack-login-username:autofill:focus,
+input.agritrack-login-username:autofill:active,
+input.agritrack-login-username:-webkit-autofill,
+input.agritrack-login-username:-webkit-autofill:hover,
+input.agritrack-login-username:-webkit-autofill:focus,
+input.agritrack-login-username:-webkit-autofill:active {
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.95) !important;
+  caret-color: #ffffff;
+  color: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  background-clip: padding-box !important;
+  /* ~card black/40 — enough to kill beige, still reads as see-through to the card */
+  box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.4) inset !important;
+  -webkit-box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.4) inset !important;
+  transition: background-color 99999s ease-out 0s, background-image 99999s ease-out 0s;
+  filter: none;
+}
+
+input.agritrack-login-username:autofill:focus,
+input.agritrack-login-username:-webkit-autofill:focus {
+  border-color: rgba(255, 255, 255, 0.6) !important;
+  box-shadow:
+    0 0 0 1000px rgba(0, 0, 0, 0.4) inset,
+    0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+  -webkit-box-shadow:
+    0 0 0 1000px rgba(0, 0, 0, 0.4) inset,
+    0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+}

@@ -1,7 +1,6 @@
 process.env.NODE_ENV = 'test';
 process.env.DB_NAME = 'crop_management_rearch_test';
 process.env.COOKIE_SECURE = 'false';
-process.env.ALLOWED_ORIGIN = 'http://127.0.0.1:5176';
 
 if (process.env.DB_NAME !== 'crop_management_rearch_test') {
     throw new Error('Refusing to run Phase 6 browser tests outside crop_management_rearch_test');
@@ -10,6 +9,7 @@ if (process.env.DB_NAME !== 'crop_management_rearch_test') {
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
 const mysql = require('../server/node_modules/mysql2/promise');
 const puppeteer = require('../server/node_modules/puppeteer');
@@ -18,7 +18,14 @@ const ROOT = path.join(__dirname, '..');
 const TEST_DB = 'crop_management_rearch_test';
 const API_PORT = 5106;
 const UI_PORT = 5176;
-const APP_URL = `http://127.0.0.1:${UI_PORT}`;
+const APP_ORIGIN = `http://127.0.0.1:${UI_PORT}`;
+const APP_URL = APP_ORIGIN;
+
+const pinBrowserTestOrigin = () => {
+    process.env.ALLOWED_ORIGIN = APP_ORIGIN;
+    process.env.ALLOWED_ORIGINS = APP_ORIGIN;
+};
+pinBrowserTestOrigin();
 const PREFIX = `phase6_browser_${Date.now()}_${process.pid}`;
 const ADMIN = { username: 'superadmin', password: 'admin1234' };
 const FINAL_PASSWORD = 'Phase6-Browser-Final!42';
@@ -41,16 +48,49 @@ const waitForHttp = async (url) => {
     throw lastError || new Error(`Timed out waiting for ${url}`);
 };
 
+const fillField = async (page, selector, value) => {
+    await page.waitForSelector(selector, { visible: true });
+    await page.focus(selector);
+    await page.$eval(selector, (el, next) => {
+        const proto = el instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        const tracker = el._valueTracker;
+        if (tracker) tracker.setValue('');
+        if (setter) setter.call(el, next);
+        else el.value = next;
+        el.dispatchEvent(new InputEvent('input', {
+            bubbles: true,
+            composed: true,
+            data: next,
+            inputType: 'insertFromPaste',
+        }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, value);
+    await page.waitForFunction(
+        (sel, expected) => document.querySelector(sel)?.value === expected,
+        {},
+        selector,
+        value
+    );
+};
+
 const loginUi = async (page, account, destination) => {
-    await page.goto(APP_URL, { waitUntil: 'networkidle0' });
-    await page.waitForSelector('#username');
-    await page.type('#username', account.username);
-    await page.type('#password', account.password);
-    await page.evaluate(() => {
-        [...document.querySelectorAll('button')]
-            .find((button) => button.textContent.trim() === 'Login')
-            .click();
-    });
+    await page.evaluate(() => window.__closeAgriTrackEventSources?.()).catch(() => {});
+    await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+    await fillField(page, '#username', account.username);
+    await fillField(page, '#password', account.password);
+    await page.waitForFunction(
+        (user, pass) => (
+            document.querySelector('#username')?.value === user
+            && document.querySelector('#password')?.value === pass
+        ),
+        {},
+        account.username,
+        account.password
+    );
+    await clickMatching(page, 'form button[type="submit"]', 'Login', { exact: true });
     await page.waitForFunction(
         (pathname) => window.location.pathname === pathname,
         { timeout: 20_000 },
@@ -63,12 +103,27 @@ const storageSnapshot = (page) => page.evaluate(() => ({
     session: Object.fromEntries(Object.entries(sessionStorage)),
 }));
 
-const clickText = (page, text) => page.evaluate((expected) => {
-    const element = [...document.querySelectorAll('button, a')]
-        .find((candidate) => candidate.textContent.replace(/\s+/g, ' ').trim().includes(expected));
-    if (!element) throw new Error(`Could not find clickable text: ${expected}`);
-    element.click();
-}, text);
+const clickText = async (page, text) => {
+    const handle = await page.waitForFunction((expected) => (
+        [...document.querySelectorAll('button, a')]
+            .find((candidate) => candidate.textContent.replace(/\s+/g, ' ').trim().includes(expected)) || null
+    ), {}, text);
+    const element = handle.asElement();
+    if (!element) throw new Error(`Could not find clickable text: ${text}`);
+    await element.click();
+};
+
+const clickMatching = async (page, selector, match, { exact = false } = {}) => {
+    const handle = await page.waitForFunction((sel, expected, exactMatch) => (
+        [...document.querySelectorAll(sel)].find((candidate) => {
+            const label = candidate.textContent.replace(/\s+/g, ' ').trim();
+            return exactMatch ? label === expected : label.includes(expected);
+        }) || null
+    ), {}, selector, match, exact);
+    const element = handle.asElement();
+    if (!element) throw new Error(`Could not find ${selector} matching ${match}`);
+    await element.click();
+};
 
 const waitForText = (page, text) => page.waitForFunction(
     (expected) => document.body.textContent.includes(expected),
@@ -76,42 +131,86 @@ const waitForText = (page, text) => page.waitForFunction(
     text
 );
 
-const createAccountUi = async (page, { name, username, role }) => {
-    await clickText(page, 'Create Account');
-    await page.waitForSelector('#account-name', { visible: true });
+const openSuitePage = async (context) => {
+    const page = await context.newPage();
+    await page.setViewport({ width: 1440, height: 900 });
+    await page.evaluateOnNewDocument(() => {
+        const Original = window.EventSource;
+        const registry = [];
+        window.EventSource = class extends Original {
+            constructor(url, configuration) {
+                super(url, configuration);
+                registry.push(this);
+            }
+        };
+        window.__closeAgriTrackEventSources = () => {
+            for (const source of registry.splice(0, registry.length)) {
+                try { source.close(); } catch { /* already closed */ }
+            }
+        };
+    });
+    return page;
+};
+
+const gotoPath = async (page, target, expectedPath) => {
+    const url = target.startsWith('http') ? target : `${APP_URL}${target}`;
+    const targetPath = new URL(url).pathname;
+    const expected = expectedPath || targetPath;
+    let usedNav = false;
+    if (page.url().startsWith(APP_ORIGIN) && targetPath === expected && !url.includes('?')) {
+        const handle = await page.evaluateHandle((path) => (
+            [...document.querySelectorAll('nav a')].find((anchor) => {
+                try {
+                    return new URL(anchor.getAttribute('href'), location.origin).pathname === path;
+                } catch {
+                    return false;
+                }
+            }) || null
+        ), targetPath);
+        const navLink = handle.asElement();
+        if (navLink) {
+            await navLink.click();
+            usedNav = true;
+        }
+    }
+    if (!usedNav) {
+        await page.evaluate(() => window.__closeAgriTrackEventSources?.()).catch(() => {});
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+    }
+    await page.waitForFunction(
+        (pathname) => window.location.pathname === pathname,
+        { timeout: 20_000 },
+        expected
+    );
+    assert.equal(new URL(page.url()).pathname, expected);
+};
+
+const createAccountUi = async (page, { name, username, role, password }) => {
+    const chosenPassword = password || `p6_${username.slice(-12)}_ok`;
+    await clickMatching(page, 'button[type="button"]', 'Create Account');
+    const nameInput = await page.waitForSelector('#account-name', { visible: true });
+    assert.ok(nameInput, 'Create Account modal did not expose #account-name');
+    const box = await nameInput.boundingBox();
+    assert.ok(box && box.width > 0 && box.height > 0, '#account-name is not visible');
     await page.waitForSelector('form [aria-haspopup="listbox"]', { visible: true });
     await page.click('form [aria-haspopup="listbox"]');
     const roleLabel = role === 'FARM_WORKER' ? 'Farm Worker' : 'Secretary';
-    await page.waitForSelector('[role="listbox"]');
-    await page.evaluate((expected) => {
-        const option = [...document.querySelectorAll('[role="option"]')]
-            .find((candidate) => candidate.textContent.trim() === expected);
-        if (!option) throw new Error(`Could not find role option: ${expected}`);
-        option.click();
-    }, roleLabel);
-    await page.type('#account-name', name);
-    await page.type('#account-username', username);
-    await page.evaluate(() => document.querySelector('#account-name').closest('form').requestSubmit());
-    await page.waitForFunction(() => (
-        [...document.querySelectorAll('h2, h3')]
-            .some((element) => element.textContent.trim() === 'One-Time Credentials')
-    ));
-    const codes = await page.$$eval('code', (elements) => elements.map((element) => element.textContent));
-    assert.equal(codes[0], username);
-    assert.equal(typeof codes[1], 'string');
-    assert.ok(codes[1].length >= 12);
-    const temporaryPassword = codes[1];
-    const serializedStorage = JSON.stringify(await storageSnapshot(page));
-    assert.equal(serializedStorage.includes(temporaryPassword), false);
-    await clickText(page, 'I have saved these credentials');
-    await page.waitForFunction(
-        (secret) => !document.body.textContent.includes(secret),
-        {},
-        temporaryPassword
-    );
+    await clickMatching(page, '[role="option"]', roleLabel, { exact: true });
+    await fillField(page, '#account-name', name);
+    await fillField(page, '#account-username', username);
+    await fillField(page, '#account-create-password', chosenPassword);
+    await fillField(page, '#account-create-confirm', chosenPassword);
+    await page.click('form:has(#account-name) button[type="submit"]');
     await page.waitForSelector('#account-name', { hidden: true });
-    assert.equal(JSON.stringify(await storageSnapshot(page)).includes(temporaryPassword), false);
-    return temporaryPassword;
+    await waitForText(page, username);
+    const serializedStorage = JSON.stringify(await storageSnapshot(page));
+    assert.equal(serializedStorage.includes(chosenPassword), false);
+    assert.equal(
+        [...await page.$$eval('h2, h3', (elements) => elements.map((element) => element.textContent.trim()))]
+            .includes('One-Time Credentials'),
+        false
+    );
+    return chosenPassword;
 };
 
 (async () => {
@@ -138,6 +237,7 @@ const createAccountUi = async (page, { name, username, role }) => {
         );
         assert.equal(adminRows.length, 1, 'test admin missing; run the test DB setup first');
 
+        pinBrowserTestOrigin();
         const app = require('../server/app');
         apiServer = http.createServer(app);
         await new Promise((resolve, reject) => {
@@ -153,18 +253,24 @@ const createAccountUi = async (page, { name, username, role }) => {
             server: { host: '127.0.0.1', port: UI_PORT, strictPort: true },
         });
         await vite.listen();
+        pinBrowserTestOrigin();
         await waitForHttp(APP_URL);
 
+        const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agritrack-p6-'));
         browser = await puppeteer.launch({
             headless: true,
             executablePath,
-            args: ['--no-sandbox'],
+            userDataDir,
+            args: [
+                '--no-sandbox',
+                '--disable-save-password-bubble',
+                '--disable-features=PasswordGeneration,PasswordManagerOnboarding,AutofillServerCommunication',
+            ],
         });
 
         const adminContext = await browser.createBrowserContext();
         contexts.push(adminContext);
-        const adminPage = await adminContext.newPage();
-        await adminPage.setViewport({ width: 1440, height: 900 });
+        const adminPage = await openSuitePage(adminContext);
         await loginUi(adminPage, ADMIN, '/dashboard');
         await adminPage.waitForSelector('nav');
         const adminLinks = await adminPage.$$eval(
@@ -188,13 +294,23 @@ const createAccountUi = async (page, { name, username, role }) => {
                 role: 'FARM_WORKER',
             },
         };
-        fixtures.secretary.password = await createAccountUi(adminPage, fixtures.secretary);
+        fixtures.secretary.password = await createAccountUi(adminPage, {
+            ...fixtures.secretary,
+            password: FINAL_PASSWORD,
+        });
+        fixtures.worker.password = `p6_${PREFIX.slice(-8)}_wrk`;
         const workerCreation = await adminPage.evaluate(async (fixture) => {
             const response = await fetch('/api/v1/users', {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(fixture),
+                body: JSON.stringify({
+                    name: fixture.name,
+                    username: fixture.username,
+                    role: fixture.role,
+                    password: fixture.password,
+                    confirmPassword: fixture.password,
+                }),
             });
             return {
                 status: response.status,
@@ -204,15 +320,12 @@ const createAccountUi = async (page, { name, username, role }) => {
         }, fixtures.worker);
         assert.equal(workerCreation.status, 201);
         assert.match(workerCreation.cacheControl || '', /no-store/i);
-        fixtures.worker.password = workerCreation.body.temporaryPassword;
+        assert.equal(workerCreation.body.temporaryPassword, undefined);
         assert.equal(
             JSON.stringify(await storageSnapshot(adminPage)).includes(fixtures.worker.password),
             false
         );
-        await adminPage.goto(`${APP_URL}/accounts?refresh=${Date.now()}`, {
-            waitUntil: 'networkidle0',
-        });
-        assert.equal(new URL(adminPage.url()).pathname, '/accounts');
+        await gotoPath(adminPage, `/accounts?refresh=${Date.now()}`, '/accounts');
         await waitForText(adminPage, fixtures.worker.username);
 
         const [created] = await db.query(
@@ -226,22 +339,19 @@ const createAccountUi = async (page, { name, username, role }) => {
             const fixture = fixtures[roleName];
             const context = await browser.createBrowserContext();
             contexts.push(context);
-            const page = await context.newPage();
-            await page.setViewport({ width: 1440, height: 900 });
-            await loginUi(page, fixture, '/change-password');
-            await waitForText(page, 'Secure your account');
+            const page = await openSuitePage(context);
+            await loginUi(page, fixture, '/dashboard');
 
-            await page.goto(`${APP_URL}/accounts`, { waitUntil: 'networkidle0' });
-            assert.equal(new URL(page.url()).pathname, '/change-password');
-            const forcedBoundary = await page.evaluate(async () => {
+            await gotoPath(page, '/accounts', '/dashboard');
+            const forbiddenBoundary = await page.evaluate(async () => {
                 const response = await fetch('/api/v1/users', {
                     credentials: 'include',
                     headers: { 'X-Role': 'ADMIN' },
                 });
                 return { status: response.status, body: await response.json() };
             });
-            assert.equal(forcedBoundary.status, 403);
-            assert.equal(forcedBoundary.body.code, 'PASSWORD_CHANGE_REQUIRED');
+            assert.equal(forbiddenBoundary.status, 403);
+            assert.notEqual(forbiddenBoundary.body.code, 'PASSWORD_CHANGE_REQUIRED');
 
             const stored = JSON.stringify(await storageSnapshot(page));
             assert.equal(stored.includes(fixture.password), false);
@@ -250,14 +360,6 @@ const createAccountUi = async (page, { name, username, role }) => {
                 assert.equal((await storageSnapshot(page)).session[key], undefined);
             }
 
-            await page.type('#current-password', fixture.password);
-            await page.type('#new-password', FINAL_PASSWORD);
-            await page.type('#confirm-password', FINAL_PASSWORD);
-            await clickText(page, 'Change password');
-            await page.waitForFunction(
-                () => window.location.pathname === '/dashboard',
-                { timeout: 15_000 }
-            );
             const retention = await page.evaluate(async () => {
                 const forbidden = await fetch('/api/v1/users?role=ADMIN&user_id=1', {
                     credentials: 'include',
@@ -275,8 +377,7 @@ const createAccountUi = async (page, { name, username, role }) => {
                 me: 200,
                 role: fixture.role,
             });
-            await page.goto(`${APP_URL}/accounts`, { waitUntil: 'networkidle0' });
-            assert.equal(new URL(page.url()).pathname, '/dashboard');
+            await gotoPath(page, '/accounts', '/dashboard');
             const links = await page.$$eval(
                 'nav a',
                 (items) => items.map((item) => item.textContent.trim())
@@ -284,10 +385,57 @@ const createAccountUi = async (page, { name, username, role }) => {
             assert.equal(links.includes('Accounts'), false);
         }
 
+        await gotoPath(adminPage, '/accounts');
+        await waitForText(adminPage, fixtures.worker.username);
+        const workerDisable = await adminPage.evaluate(async (username) => {
+            const list = await fetch('/api/v1/users', { credentials: 'include' });
+            const body = await list.json();
+            const target = (body.users || []).find((user) => user.username === username);
+            if (!target) return { status: 404 };
+            const response = await fetch(`/api/v1/users/${target.id}/disable`, {
+                method: 'PATCH',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+            });
+            return { status: response.status };
+        }, fixtures.worker.username);
+        assert.equal(workerDisable.status, 200);
+        await gotoPath(adminPage, `/accounts?refresh=${Date.now()}`, '/accounts');
+        await waitForText(adminPage, fixtures.worker.username);
+        await waitForText(adminPage, 'Reactivate');
+        const deleteClicked = await adminPage.evaluate((username) => {
+            const button = [...document.querySelectorAll('button')].find((candidate) => (
+                candidate.getAttribute('aria-label') === `Delete ${username}`
+                || candidate.getAttribute('title') === 'Delete account'
+            ));
+            if (!button) return false;
+            button.click();
+            return true;
+        }, fixtures.worker.username);
+        assert.equal(deleteClicked, true, 'Delete action was not available for disabled account');
+        await adminPage.waitForFunction(() => (
+            [...document.querySelectorAll('button')]
+                .some((button) => button.textContent.trim() === 'Delete Account')
+        ));
+        await clickMatching(adminPage, 'button', 'Delete Account', { exact: true });
+        await adminPage.waitForFunction(
+            (username) => !document.body.textContent.includes(username),
+            { timeout: 20_000 },
+            fixtures.worker.username
+        );
+        const [[archivedRow]] = await db.query(
+            'SELECT archived_at, is_active FROM users WHERE username = ?',
+            [fixtures.worker.username]
+        );
+        assert.ok(archivedRow.archived_at);
+        assert.equal(archivedRow.is_active, 0);
+
         console.log('PASS Admin Accounts navigation and API-backed account creation');
-        console.log('PASS one-time credential modal stays out of browser storage');
-        console.log('PASS Secretary/Worker forced-change and direct Accounts guards');
-        console.log('PASS successful forced change and 403 session retention');
+        console.log('PASS Admin-chosen passwords stay out of browser storage');
+        console.log('PASS Secretary/Worker login immediately without forced password change');
+        console.log('PASS subordinate Accounts guards remain 403');
+        console.log('PASS disabled account Delete soft-archives and leaves the list');
     } finally {
         for (const context of contexts.reverse()) {
             await context.close().catch(() => {});

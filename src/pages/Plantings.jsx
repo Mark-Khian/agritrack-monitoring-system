@@ -3,6 +3,7 @@ import { Plus, Edit2, Trash2, Sprout, AlertTriangle, ChevronDown, FileDown, Load
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal';
+import PlantingDetailsModal from '../components/PlantingDetailsModal';
 import { useToast } from '../context/ToastContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Badge from '../components/Badge';
@@ -148,6 +149,7 @@ const Plantings = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
+    const [detailsPlanting, setDetailsPlanting] = useState(null);
     const [deletingId, setDeletingId] = useState(null);
     const [formError, setFormError] = useState('');
     const [statusFilter, setStatusFilter] = useState('active');
@@ -372,23 +374,13 @@ const Plantings = () => {
         }
     };
 
-    useEffect(() => {
-        const highlightId = searchParams.get('id');
-        const fromDashboard = searchParams.get('from') === 'dashboard';
-        if (highlightId && plantings.length > 0) {
-            const item = plantings.find(p => String(p.id) === String(highlightId));
-            if (item) {
-                handleOpenModal(item);
-                if (fromDashboard) {
-                    setCameFromDashboard(true);
-                }
-                const newParams = new URLSearchParams(searchParams);
-                newParams.delete('id');
-                newParams.delete('from');
-                setSearchParams(newParams, { replace: true });
-            }
+    const handleCloseDetailsModal = () => {
+        setDetailsPlanting(null);
+        if (cameFromDashboard) {
+            setCameFromDashboard(false);
+            navigate('/dashboard?activePlantings=true');
         }
-    }, [plantings, searchParams, setSearchParams]);
+    };
 
     const handleSave = async (e) => {
         e.preventDefault();
@@ -522,6 +514,32 @@ const Plantings = () => {
         const lc = String(p?.lifecycle_state || '').toLowerCase();
         return status === 'completed' || stage === 'harvested' || lc === 'harvested';
     };
+
+    useEffect(() => {
+        const highlightId = searchParams.get('id');
+        const fromDashboard = searchParams.get('from') === 'dashboard';
+        if (highlightId && plantings.length > 0) {
+            const item = plantings.find(p => String(p.id) === String(highlightId));
+            if (item) {
+                if (can(CAPABILITIES.PLANTING_UPDATE)) {
+                    handleOpenModal(item);
+                } else if (isCompletedPlanting(item)) {
+                    // Workers keep the existing completed "View Planting Details" form.
+                    handleOpenModal(item);
+                } else {
+                    // Active plantings: Farm Worker gets read-only Planting Details, not Edit Planting.
+                    setDetailsPlanting(item);
+                }
+                if (fromDashboard) {
+                    setCameFromDashboard(true);
+                }
+                const newParams = new URLSearchParams(searchParams);
+                newParams.delete('id');
+                newParams.delete('from');
+                setSearchParams(newParams, { replace: true });
+            }
+        }
+    }, [plantings, searchParams, setSearchParams, can]);
 
     const handleVarietyPick = (e) => {
         const name = e.target.value;
@@ -966,6 +984,12 @@ const Plantings = () => {
                     </div>
                 </>
             )}
+
+            <PlantingDetailsModal
+                isOpen={!!detailsPlanting}
+                planting={detailsPlanting}
+                onClose={handleCloseDetailsModal}
+            />
 
             <Modal
                 isOpen={isModalOpen}

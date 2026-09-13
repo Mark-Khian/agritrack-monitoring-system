@@ -22,6 +22,13 @@ const PREFIX = `phase6_${Date.now()}_${process.pid}`;
 const ADMIN = { username: 'superadmin', password: 'admin1234' };
 const FINAL_PASSWORD = ' Phase6-Final!42 ';
 const SECOND_PASSWORD = 'Phase6-Second!84';
+const SECRETARY_PASSWORD = 'phase6_sec_ok';
+const WORKER_PASSWORD = 'phase6_wrk_ok';
+const RESET_PASSWORD = 'phase6_reset_ok';
+const REACTIVATE_PASSWORD = 'phase6_reac_ok';
+const SIMPLE_START_PASSWORD = 'phase6_simple';
+const FAKE_ROLE_PASSWORD = 'phase6_fake_ok';
+const withPassword = (body, password) => ({ ...body, password, confirmPassword: password });
 const COOKIE_NAME = 'agritrack_session';
 const DOMAIN_TABLES = ['plantings', 'activities', 'harvests', 'notes', 'notifications'];
 
@@ -88,7 +95,7 @@ const expectUnchanged = async (id, action) => {
     assert.deepEqual(await sessionRows(id), beforeSessions);
 };
 
-describe('Phase 6 account administration and forced password change', () => {
+describe('Phase 6 account administration and Admin-managed passwords', () => {
     let admin;
     let adminId;
     let secretary;
@@ -130,20 +137,21 @@ describe('Phase 6 account administration and forced password change', () => {
         await db.end();
     });
 
-    it('creates Secretary and Worker with exact dual writes and one-time secrets', async () => {
+    it('creates Secretary and Worker with Admin-chosen passwords and no forced change', async () => {
         const fixtures = [
-            { name: 'Phase 6 Secretary', username: `${PREFIX}_secretary`, role: 'SECRETARY' },
-            { name: 'Phase 6 Worker', username: `${PREFIX}_worker`, role: 'FARM_WORKER' },
+            { name: 'Phase 6 Secretary', username: `${PREFIX}_secretary`, role: 'SECRETARY', password: SECRETARY_PASSWORD },
+            { name: 'Phase 6 Worker', username: `${PREFIX}_worker`, role: 'FARM_WORKER', password: WORKER_PASSWORD },
         ];
 
         for (const fixture of fixtures) {
+            const { password, ...identity } = fixture;
             const response = await mutation(admin, 'post', '/api/v1/users')
-                .send(fixture)
+                .send(withPassword(identity, password))
                 .expect(201);
             assert.match(response.headers['cache-control'] || '', /no-store/i);
             assert.match(response.headers.pragma || '', /no-cache/i);
-            assert.equal(typeof response.body.temporaryPassword, 'string');
-            issuedSecrets.push(response.body.temporaryPassword);
+            assertNoSecretKeys(response.body);
+            issuedSecrets.push(password);
 
             const row = await userRow(response.body.user.id);
             assert.equal(row.name, fixture.name);
@@ -154,12 +162,12 @@ describe('Phase 6 account administration and forced password change', () => {
             assert.equal(row.is_active, 1);
             assert.equal(row.status, 'ACTIVE');
             assert.equal(row.created_by, adminId);
-            assert.equal(row.must_change_password, 1);
+            assert.equal(row.must_change_password, 0);
             assert.equal(bcrypt.getRounds(row.password), BCRYPT_COST);
-            assert.equal(await bcrypt.compare(response.body.temporaryPassword, row.password), true);
-            assert.notEqual(row.password, response.body.temporaryPassword);
+            assert.equal(await bcrypt.compare(password, row.password), true);
+            assert.notEqual(row.password, password);
 
-            const state = { id: row.id, ...fixture, temporaryPassword: response.body.temporaryPassword };
+            const state = { id: row.id, ...identity, password };
             if (fixture.role === 'SECRETARY') secretary = state;
             else worker = state;
         }
@@ -168,11 +176,13 @@ describe('Phase 6 account administration and forced password change', () => {
     it('rejects duplicate, ADMIN, fake role, and field injection without inserts', async () => {
         const before = await accountCount();
         const attacks = [
-            { name: 'Duplicate', username: secretary.username, role: 'SECRETARY', status: 409 },
+            { name: 'Duplicate', username: secretary.username, role: 'SECRETARY', password: SECRETARY_PASSWORD, confirmPassword: SECRETARY_PASSWORD, status: 409 },
             { name: 'Admin', username: `${PREFIX}_admin`, role: 'ADMIN', status: 400 },
             { name: 'Fake', username: `${PREFIX}_fake`, role: 'SUPERVISOR', status: 400 },
             { name: 'Injected', username: `${PREFIX}_inject_role`, role: 'SECRETARY', user_id: adminId, status: 400 },
             { name: 'Injected', username: `${PREFIX}_inject_password`, role: 'FARM_WORKER', password: 'chosen', status: 400 },
+            { name: 'Mismatch', username: `${PREFIX}_mismatch`, role: 'SECRETARY', password: 'abc', confirmPassword: 'xyz', status: 400 },
+            { name: 'Oversized', username: `${PREFIX}_toolong`, role: 'SECRETARY', password: 'x'.repeat(73), confirmPassword: 'x'.repeat(73), status: 400 },
             { name: 'Injected', username: `${PREFIX}_inject_active`, role: 'FARM_WORKER', is_active: false, status: 400 },
             { name: 'Injected', username: `${PREFIX}_inject_privilege`, role: 'FARM_WORKER', created_by: adminId, status: 400 },
         ];
@@ -185,39 +195,22 @@ describe('Phase 6 account administration and forced password change', () => {
         }
     });
 
-    it('allows forced /me, denies ordinary routes with code, and retains the session', async () => {
+    it('lets newly created subordinates login immediately without Change Password', async () => {
         const first = await login({
             username: secretary.username,
-            password: secretary.temporaryPassword,
+            password: secretary.password,
         });
         secretary.firstAgent = first.agent;
         secretary.firstCookie = cookieValue(first.response);
 
         const me = await first.agent.get('/api/v1/auth/me').expect(200);
-        assert.equal(me.body.must_change_password, true);
-        const forbiddenGets = [
-            '/api/v1/dashboard/lifecycle-monitoring',
-            '/api/v1/plantings',
-            '/api/v1/activities',
-            '/api/v1/notes',
-            '/api/v1/weather',
-            '/api/v1/auth/sessions',
-            '/api/v1/users',
-        ];
-        for (const path of forbiddenGets) {
-            const denied = await first.agent.get(path).expect(403);
-            assert.equal(denied.body.code, 'PASSWORD_CHANGE_REQUIRED', path);
-            await first.agent.get('/api/v1/auth/me').expect(200);
-        }
-        const logoutAllDenied = await mutation(first.agent, 'post', '/api/v1/auth/logout-all')
-            .send({})
-            .expect(403);
-        assert.equal(logoutAllDenied.body.code, 'PASSWORD_CHANGE_REQUIRED');
-        await first.agent.get('/api/v1/auth/me').expect(200);
+        assert.equal(me.body.must_change_password, false);
+        await first.agent.get('/api/v1/plantings').expect(200);
+        await first.agent.get('/api/v1/users').expect(403);
 
         const logoutProbe = await login({
             username: secretary.username,
-            password: secretary.temporaryPassword,
+            password: secretary.password,
         });
         await mutation(logoutProbe.agent, 'post', '/api/v1/auth/logout')
             .send({})
@@ -247,25 +240,25 @@ describe('Phase 6 account administration and forced password change', () => {
 
     it('rejects empty, oversized, and same-as-current passwords and never trims', async () => {
         const tooLong = `Aa1!${'é'.repeat(35)}`;
-        const rejected = ['', tooLong, secretary.temporaryPassword];
+        const rejected = ['', tooLong, secretary.password];
         for (const newPassword of rejected) {
             await mutation(secretary.firstAgent, 'post', '/api/v1/auth/change-password')
-                .send({ currentPassword: secretary.temporaryPassword, newPassword })
+                .send({ currentPassword: secretary.password, newPassword })
                 .expect(400);
-            assert.equal((await userRow(secretary.id)).must_change_password, 1);
+            assert.equal((await userRow(secretary.id)).must_change_password, 0);
         }
 
         await mutation(secretary.firstAgent, 'post', '/api/v1/auth/change-password')
-            .send({ currentPassword: ` ${secretary.temporaryPassword} `, newPassword: FINAL_PASSWORD })
+            .send({ currentPassword: ` ${secretary.password} `, newPassword: FINAL_PASSWORD })
             .expect(400);
 
         secretary.sibling = await login({
             username: secretary.username,
-            password: secretary.temporaryPassword,
+            password: secretary.password,
         });
         secretary.sessionsAtChange = (await sessionRows(secretary.id)).map((session) => session.id);
         await mutation(secretary.firstAgent, 'post', '/api/v1/auth/change-password')
-            .send({ currentPassword: secretary.temporaryPassword, newPassword: FINAL_PASSWORD })
+            .send({ currentPassword: secretary.password, newPassword: FINAL_PASSWORD })
             .expect(200);
         const row = await userRow(secretary.id);
         assert.equal(row.must_change_password, 0);
@@ -280,15 +273,15 @@ describe('Phase 6 account administration and forced password change', () => {
 
     it('accepts simple user-selected passwords', async () => {
         const created = await mutation(admin, 'post', '/api/v1/users')
-            .send({
+            .send(withPassword({
                 name: 'Phase 6 Simple Password',
                 username: `${PREFIX}_simplepw`,
                 role: 'SECRETARY',
-            })
+            }, SIMPLE_START_PASSWORD))
             .expect(201);
         const userId = created.body.user.id;
         const username = created.body.user.username;
-        let currentPassword = created.body.temporaryPassword;
+        let currentPassword = SIMPLE_START_PASSWORD;
         issuedSecrets.push(currentPassword);
 
         try {
@@ -329,10 +322,11 @@ describe('Phase 6 account administration and forced password change', () => {
         const targetBefore = await userRow(worker.id);
         const calls = [
             ['get', '/api/v1/users'],
-            ['post', '/api/v1/users', { name: 'Escalation', username: `${PREFIX}_escalate`, role: 'SECRETARY' }],
-            ['post', `/api/v1/users/${worker.id}/reset-password`, {}],
+            ['post', '/api/v1/users', withPassword({ name: 'Escalation', username: `${PREFIX}_escalate`, role: 'SECRETARY' }, 'escalate_ok')],
+            ['post', `/api/v1/users/${worker.id}/reset-password`, withPassword({}, RESET_PASSWORD)],
             ['patch', `/api/v1/users/${worker.id}/disable`, {}],
-            ['patch', `/api/v1/users/${worker.id}/reactivate`, {}],
+            ['patch', `/api/v1/users/${worker.id}/reactivate`, withPassword({}, REACTIVATE_PASSWORD)],
+            ['patch', `/api/v1/users/${worker.id}/archive`, {}],
             ['post', `/api/v1/users/${worker.id}/revoke-sessions`, {}],
         ];
         for (const [method, path, body] of calls) {
@@ -347,17 +341,17 @@ describe('Phase 6 account administration and forced password change', () => {
         assert.equal(await accountCount(), 2);
 
         const fakeResponse = await mutation(admin, 'post', '/api/v1/users')
-            .send({ name: 'Phase 6 Fake Role', username: `${PREFIX}_unknown`, role: 'FARM_WORKER' })
+            .send(withPassword({ name: 'Phase 6 Fake Role', username: `${PREFIX}_unknown`, role: 'FARM_WORKER' }, FAKE_ROLE_PASSWORD))
             .expect(201);
         fakeRole = {
             id: fakeResponse.body.user.id,
             username: `${PREFIX}_unknown`,
-            temporaryPassword: fakeResponse.body.temporaryPassword,
+            password: FAKE_ROLE_PASSWORD,
         };
-        issuedSecrets.push(fakeRole.temporaryPassword);
+        issuedSecrets.push(fakeRole.password);
         const fakeLogin = await login({
             username: fakeRole.username,
-            password: fakeRole.temporaryPassword,
+            password: fakeRole.password,
         });
         const connection = await db.getConnection();
         try {
@@ -370,35 +364,35 @@ describe('Phase 6 account administration and forced password change', () => {
         await fakeLogin.agent.get('/api/v1/users').set('X-Role', 'ADMIN').expect(403);
     });
 
-    it('reset revokes old sessions, rotates the password, and forces change', async () => {
+    it('reset revokes old sessions and applies the Admin-chosen password immediately', async () => {
         const old = await login({ username: secretary.username, password: FINAL_PASSWORD });
         const beforeHash = (await userRow(secretary.id)).password;
         const reset = await mutation(admin, 'post', `/api/v1/users/${secretary.id}/reset-password`)
-            .send({})
+            .send(withPassword({}, RESET_PASSWORD))
             .expect(200);
         assert.match(reset.headers['cache-control'] || '', /no-store/i);
-        const temporaryPassword = reset.body.temporaryPassword;
-        issuedSecrets.push(temporaryPassword);
+        assertNoSecretKeys(reset.body);
+        issuedSecrets.push(RESET_PASSWORD);
         assert.notEqual((await userRow(secretary.id)).password, beforeHash);
-        assert.equal((await userRow(secretary.id)).must_change_password, 1);
+        assert.equal((await userRow(secretary.id)).must_change_password, 0);
+        assert.equal(await bcrypt.compare(RESET_PASSWORD, (await userRow(secretary.id)).password), true);
         assert.equal(await activeSessionCount(secretary.id), 0);
         await old.agent.get('/api/v1/auth/me').expect(401);
         await login({ username: secretary.username, password: FINAL_PASSWORD }, 401);
-        const fresh = await login({ username: secretary.username, password: temporaryPassword });
-        const denied = await fresh.agent.get('/api/v1/plantings').expect(403);
-        assert.equal(denied.body.code, 'PASSWORD_CHANGE_REQUIRED');
-        secretary.resetPassword = temporaryPassword;
+        const fresh = await login({ username: secretary.username, password: RESET_PASSWORD });
+        await fresh.agent.get('/api/v1/plantings').expect(200);
+        secretary.password = RESET_PASSWORD;
     });
 
     it('disable records metadata, revokes sessions, and rejects login and stale cookies', async () => {
         const active = await login({
             username: worker.username,
-            password: worker.temporaryPassword,
+            password: worker.password,
         });
         const activeBefore = await userRow(worker.id);
         const activeSessionsBefore = await sessionRows(worker.id);
         await mutation(admin, 'patch', `/api/v1/users/${worker.id}/reactivate`)
-            .send({})
+            .send(withPassword({}, REACTIVATE_PASSWORD))
             .expect(409);
         assert.deepEqual(await userRow(worker.id), activeBefore);
         assert.deepEqual(await sessionRows(worker.id), activeSessionsBefore);
@@ -414,11 +408,11 @@ describe('Phase 6 account administration and forced password change', () => {
         assert.equal(row.disabled_by, adminId);
         assert.equal(await activeSessionCount(worker.id), 0);
         await active.agent.get('/api/v1/auth/me').expect(401);
-        await login({ username: worker.username, password: worker.temporaryPassword }, 401);
+        await login({ username: worker.username, password: worker.password }, 401);
 
         const disabledBefore = await userRow(worker.id);
         await mutation(admin, 'post', `/api/v1/users/${worker.id}/reset-password`)
-            .send({})
+            .send(withPassword({}, RESET_PASSWORD))
             .expect(409);
         assert.deepEqual(await userRow(worker.id), disabledBefore);
         assert.equal(await activeSessionCount(worker.id), 0);
@@ -434,12 +428,15 @@ describe('Phase 6 account administration and forced password change', () => {
             ['post', `/api/v1/users/${adminId}/reset-password`],
             ['patch', `/api/v1/users/${adminId}/disable`],
             ['patch', `/api/v1/users/${adminId}/reactivate`],
+            ['patch', `/api/v1/users/${adminId}/archive`],
             ['post', `/api/v1/users/${adminId}/revoke-sessions`],
         ];
         for (const [method, path] of paths) {
             await expectUnchanged(adminId, () => mutation(admin, method, `${path}?role=ADMIN&user_id=${adminId}`)
                 .set('X-Role', 'ADMIN')
-                .send({})
+                .send(path.includes('reset-password') || path.includes('reactivate')
+                    ? withPassword({}, RESET_PASSWORD)
+                    : {})
                 .expect(404));
         }
         await expectUnchanged(adminId, () => mutation(admin, 'patch', `/api/v1/users/${adminId}`)
@@ -452,32 +449,31 @@ describe('Phase 6 account administration and forced password change', () => {
         await admin.get('/api/v1/auth/me').expect(200);
     });
 
-    it('reactivates securely with a fresh temp password and dead old sessions', async () => {
+    it('reactivates with an Admin-chosen password and dead old sessions', async () => {
         const oldHash = (await userRow(worker.id)).password;
         const response = await mutation(admin, 'patch', `/api/v1/users/${worker.id}/reactivate`)
-            .send({})
+            .send(withPassword({}, REACTIVATE_PASSWORD))
             .expect(200);
         assert.match(response.headers['cache-control'] || '', /no-store/i);
-        const freshPassword = response.body.temporaryPassword;
-        issuedSecrets.push(freshPassword);
+        assertNoSecretKeys(response.body);
+        issuedSecrets.push(REACTIVATE_PASSWORD);
         const row = await userRow(worker.id);
         assert.equal(row.is_active, 1);
         assert.equal(row.status, 'ACTIVE');
         assert.equal(row.disabled_at, null);
         assert.equal(row.disabled_by, null);
-        assert.equal(row.must_change_password, 1);
+        assert.equal(row.must_change_password, 0);
         assert.notEqual(row.password, oldHash);
-        assert.equal(await bcrypt.compare(freshPassword, row.password), true);
+        assert.equal(await bcrypt.compare(REACTIVATE_PASSWORD, row.password), true);
         assert.equal(await activeSessionCount(worker.id), 0);
-        await login({ username: worker.username, password: worker.temporaryPassword }, 401);
-        const fresh = await login({ username: worker.username, password: freshPassword });
+        await login({ username: worker.username, password: worker.password }, 401);
+        const fresh = await login({ username: worker.username, password: REACTIVATE_PASSWORD });
         await fresh.agent.get('/api/v1/auth/me').expect(200);
-        const denied = await fresh.agent.get('/api/v1/dashboard/lifecycle-monitoring').expect(403);
-        assert.equal(denied.body.code, 'PASSWORD_CHANGE_REQUIRED');
+        await fresh.agent.get('/api/v1/dashboard/lifecycle-monitoring').expect(200);
 
-        const sibling = await login({ username: worker.username, password: freshPassword });
+        const sibling = await login({ username: worker.username, password: REACTIVATE_PASSWORD });
         await mutation(fresh.agent, 'post', '/api/v1/auth/change-password')
-            .send({ currentPassword: freshPassword, newPassword: SECOND_PASSWORD })
+            .send({ currentPassword: REACTIVATE_PASSWORD, newPassword: SECOND_PASSWORD })
             .expect(200);
         await fresh.agent.get('/api/v1/auth/me').expect(200);
         await sibling.agent.get('/api/v1/auth/me').expect(401);
@@ -589,6 +585,118 @@ describe('Phase 6 account administration and forced password change', () => {
         for (const secret of issuedSecrets) {
             assert.equal(persisted.includes(secret), false, 'raw temporary password was persisted');
         }
+    });
+
+    it('soft-archives only disabled subordinates and keeps history intact', async () => {
+        const ARCHIVE_SEC_PASSWORD = 'phase6_arch_sec';
+        const ARCHIVE_WRK_PASSWORD = 'phase6_arch_wrk';
+        const fixtures = [
+            { name: 'Phase 6 Archive Sec', username: `${PREFIX}_arch_sec`, role: 'SECRETARY', password: ARCHIVE_SEC_PASSWORD },
+            { name: 'Phase 6 Archive Wrk', username: `${PREFIX}_arch_wrk`, role: 'FARM_WORKER', password: ARCHIVE_WRK_PASSWORD },
+        ];
+        const created = [];
+        for (const fixture of fixtures) {
+            const { password, ...identity } = fixture;
+            const response = await mutation(admin, 'post', '/api/v1/users')
+                .send(withPassword(identity, password))
+                .expect(201);
+            issuedSecrets.push(password);
+            created.push({ id: response.body.user.id, ...identity, password });
+        }
+        const [archiveSec, archiveWrk] = created;
+
+        for (const account of created) {
+            await mutation(admin, 'patch', `/api/v1/users/${account.id}/archive`)
+                .send({})
+                .expect(409);
+            assert.equal((await userRow(account.id)).archived_at, null);
+        }
+
+        for (const account of created) {
+            const loggedIn = await login({ username: account.username, password: account.password });
+            account.agent = loggedIn.agent;
+            account.cookie = cookieValue(loggedIn.response);
+            await mutation(admin, 'patch', `/api/v1/users/${account.id}/disable`)
+                .send({})
+                .expect(200);
+            assert.equal(await activeSessionCount(account.id), 0);
+        }
+
+        const domainBefore = await domainCounts();
+        const [[auditBefore]] = await db.query(
+            `SELECT COUNT(*) AS count FROM activity_logs
+             WHERE entity = 'users' AND entity_id IN (?, ?) AND action = 'ACCOUNT_ARCHIVED'`,
+            [archiveSec.id, archiveWrk.id]
+        );
+
+        for (const account of created) {
+            const archived = await mutation(admin, 'patch', `/api/v1/users/${account.id}/archive`)
+                .send({})
+                .expect(200);
+            assert.equal(archived.body.message, 'Account deleted successfully.');
+            const row = await userRow(account.id);
+            assert.ok(row, 'user row must remain after archive');
+            assert.ok(row.archived_at);
+            assert.equal(row.is_active, 0);
+            assert.equal(row.status, 'INACTIVE');
+            assert.equal(row.username, account.username);
+            assert.equal(await activeSessionCount(account.id), 0);
+            await login({ username: account.username, password: account.password }, 401);
+            await mutation(admin, 'patch', `/api/v1/users/${account.id}/reactivate`)
+                .send(withPassword({}, REACTIVATE_PASSWORD))
+                .expect(409);
+            await mutation(admin, 'post', `/api/v1/users/${account.id}/reset-password`)
+                .send(withPassword({}, RESET_PASSWORD))
+                .expect(409);
+            await mutation(admin, 'patch', `/api/v1/users/${account.id}/archive`)
+                .send({})
+                .expect(409);
+            await mutation(admin, 'post', '/api/v1/users')
+                .send(withPassword({
+                    name: 'Reuse Archived',
+                    username: account.username,
+                    role: account.role,
+                }, 'reuse_archived_ok'))
+                .expect(409);
+        }
+
+        const list = await admin.get('/api/v1/users').expect(200);
+        assert.equal(list.body.users.some((user) => user.id === archiveSec.id), false);
+        assert.equal(list.body.users.some((user) => user.id === archiveWrk.id), false);
+        assert.ok(list.body.users.some((user) => user.id === secretary.id));
+        assert.ok(list.body.users.some((user) => user.id === worker.id));
+
+        const [archiveLogs] = await db.query(
+            `SELECT *
+             FROM activity_logs
+             WHERE entity = 'users' AND entity_id IN (?, ?) AND action = 'ACCOUNT_ARCHIVED'
+             ORDER BY id`,
+            [archiveSec.id, archiveWrk.id]
+        );
+        assert.equal(archiveLogs.length, Number(auditBefore.count) + 2);
+        for (const account of created) {
+            const matches = archiveLogs.filter((log) => log.entity_id === account.id);
+            assert.equal(matches.length, 1);
+            assert.equal(matches[0].user_id, adminId);
+            assert.equal(matches[0].status, 'success');
+        }
+
+        const subordinate = await login({
+            username: secretary.username,
+            password: secretary.password,
+        });
+        await mutation(subordinate.agent, 'patch', `/api/v1/users/${archiveSec.id}/archive`)
+            .set('X-Role', 'ADMIN')
+            .send({})
+            .expect(403);
+
+        assert.deepEqual(await domainCounts(), domainBefore);
+        const [priorLogs] = await db.query(
+            `SELECT COUNT(*) AS count FROM activity_logs
+             WHERE entity = 'users' AND entity_id IN (?, ?, ?)`,
+            [secretary.id, worker.id, fakeRole.id]
+        );
+        assert.ok(Number(priorLogs[0].count) > 0);
     });
 
     it('preserves all historical domain rows', async () => {

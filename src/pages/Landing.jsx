@@ -402,7 +402,8 @@ const Landing = () => {
                     setUsername(e.target.value);
                   }}
                   disabled={isLoading}
-                  className="w-full px-4 py-3 rounded-lg border border-white/40 bg-white/15 backdrop-blur-md text-white placeholder:text-white/60 focus:outline-none focus:border-white/60 focus:ring-2 focus:ring-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  autoComplete="username"
+                  className="agritrack-login-username w-full px-4 py-3 rounded-lg border border-white/40 bg-transparent backdrop-blur-sm text-white placeholder:text-white/60 focus:outline-none focus:border-white/60 focus:ring-2 focus:ring-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   required
                 />
               </div>
@@ -423,7 +424,7 @@ const Landing = () => {
                       setPassword(e.target.value);
                     }}
                     disabled={isLoading}
-                    className="w-full px-4 py-3 rounded-lg border border-white/40 bg-white/15 backdrop-blur-md text-white placeholder:text-white/60 focus:outline-none focus:border-white/60 focus:ring-2 focus:ring-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-4 py-3 rounded-lg border border-white/40 bg-transparent backdrop-blur-sm text-white placeholder:text-white/60 focus:outline-none focus:border-white/60 focus:ring-2 focus:ring-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     required
                   />
                   <button

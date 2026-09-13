@@ -24,6 +24,15 @@ const actionLabel = (action) => {
   if (!action) return '—';
 
   const normalized = String(action).toUpperCase();
+  const exportLabels = {
+    EXPORT_PLANTINGS_CSV: 'Exported completed crop records as CSV',
+    EXPORT_PLANTINGS_PDF: 'Exported completed crop records as PDF',
+    EXPORT_PLANTING_PDF: 'Exported planting record as PDF',
+    EXPORT_HARVESTS_CSV: 'Exported harvest records as CSV',
+    EXPORT_HARVESTS_PDF: 'Exported harvest records as PDF',
+    ACCOUNT_ARCHIVED: 'Archived staff account',
+  };
+  if (exportLabels[normalized]) return exportLabels[normalized];
 
   if (normalized === 'LOGIN_SUCCESS' || normalized === 'LOGIN_FAILED') {
     return 'Login';
@@ -108,13 +117,11 @@ const AuditLog = () => {
   };
 
   const columns = [
-    { key: 'timestamp', label: 'Timestamp', headerClass: 'w-[16%]', cellClass: 'text-xs text-gray-600 whitespace-nowrap' },
-    { key: 'role', label: 'Role', headerClass: 'w-[11%]', cellClass: 'text-sm text-gray-700' },
-    { key: 'action', label: 'Action', headerClass: 'w-[18%]', cellClass: 'text-sm font-medium text-gray-900 break-all' },
-    { key: 'entity', label: 'Entity', headerClass: 'w-[12%]', cellClass: 'text-sm text-gray-700' },
-    { key: 'entityId', label: 'Entity ID', headerClass: 'w-[9%]', cellClass: 'text-sm text-gray-700' },
-    { key: 'ip', label: 'IP', headerClass: 'w-[12%]', cellClass: 'text-xs text-gray-600' },
-    { key: 'status', label: 'Status', headerClass: 'w-[10%]', cellClass: '' },
+    { key: 'timestamp', label: 'Timestamp', headerClass: 'w-[20%]', cellClass: 'text-xs text-gray-600 whitespace-nowrap' },
+    { key: 'role', label: 'Role', headerClass: 'w-[14%]', cellClass: 'text-sm text-gray-700' },
+    { key: 'action', label: 'Action', headerClass: 'w-[28%]', cellClass: 'text-sm font-medium text-gray-900 break-all' },
+    { key: 'entity', label: 'Entity', headerClass: 'w-[14%]', cellClass: 'text-sm text-gray-700' },
+    { key: 'status', label: 'Status', headerClass: 'w-[12%]', cellClass: '' },
     { key: 'actions', label: '', headerClass: 'w-[12%]', cellClass: 'text-right' },
   ];
 
@@ -182,7 +189,7 @@ const AuditLog = () => {
             {Array.from({ length: 4 }).map((_, index) => <SkeletonCard key={index} lines={4} />)}
           </div>
           <div className="hidden md:block">
-            <SkeletonTable rows={6} cols={8} columnHeaders={columns.map((column) => column.label)} />
+            <SkeletonTable rows={6} cols={6} columnHeaders={columns.map((column) => column.label)} />
           </div>
         </>
       ) : logs.length === 0 ? (
@@ -209,11 +216,7 @@ const AuditLog = () => {
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-xs text-gray-500">Entity</span>
-                    <span className="text-gray-800">{log.entity || '—'}{log.entity_id != null ? ` #${log.entity_id}` : ''}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-xs text-gray-500">IP</span>
-                    <span className="text-xs text-gray-700">{log.ip_address || '—'}</span>
+                    <span className="text-gray-800">{log.entity || '—'}</span>
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-gray-100 flex justify-end">
@@ -240,10 +243,8 @@ const AuditLog = () => {
                       <td className={`px-6 py-4 ${columns[1].cellClass}`}>{actorRoleLabel(log.actor_role)}</td>
                       <td className={`px-6 py-4 ${columns[2].cellClass}`}>{actionLabel(log.action)}</td>
                       <td className={`px-6 py-4 ${columns[3].cellClass}`}>{log.entity || '—'}</td>
-                      <td className={`px-6 py-4 ${columns[4].cellClass}`}>{log.entity_id ?? '—'}</td>
-                      <td className={`px-6 py-4 ${columns[5].cellClass}`}>{log.ip_address || '—'}</td>
-                      <td className={`px-6 py-4 ${columns[6].cellClass}`}><Badge status={log.status} /></td>
-                      <td className={`px-6 py-4 ${columns[7].cellClass}`}>
+                      <td className={`px-6 py-4 ${columns[4].cellClass}`}><Badge status={log.status} /></td>
+                      <td className={`px-6 py-4 ${columns[5].cellClass}`}>
                         <RemoveButton log={log} />
                       </td>
                     </tr>

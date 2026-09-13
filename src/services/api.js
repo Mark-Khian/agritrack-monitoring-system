@@ -56,9 +56,10 @@ export const deleteFarmLocation = () => API.delete('/auth/farm-location');
 // ── Accounts ──────────────────────────────
 export const getUsers = () => API.get('/users');
 export const createUser = (data) => API.post('/users', data);
-export const resetUserPassword = (id) => API.post(`/users/${id}/reset-password`);
+export const resetUserPassword = (id, data = {}) => API.post(`/users/${id}/reset-password`, data);
 export const disableUser = (id) => API.patch(`/users/${id}/disable`);
-export const reactivateUser = (id) => API.patch(`/users/${id}/reactivate`);
+export const reactivateUser = (id, data = {}) => API.patch(`/users/${id}/reactivate`, data);
+export const archiveUser = (id) => API.patch(`/users/${id}/archive`);
 export const revokeUserSessions = (id) => API.post(`/users/${id}/revoke-sessions`);
 export const getAuditLogs = (params = {}) => API.get('/audit', { params });
 

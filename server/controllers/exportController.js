@@ -425,10 +425,14 @@ const generateCompletedCropsPDFBuffer = async (rows) => {
 </html>
 `;
 
-    const browser = await puppeteer.launch({
+    const launchOptions = {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    };
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+    const browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
     await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
     const pdfBuffer = await page.pdf({

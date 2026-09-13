@@ -93,14 +93,15 @@ const snapshotRow = async (table, id) => {
 
 const createSubordinate = async (adminAgent, role, suffix) => {
     const username = `${PREFIX}${STAMP}_${suffix}`;
+    const password = `p9_${suffix}_ok`;
     const response = await mutation(adminAgent, 'post', '/api/v1/users')
-        .send({ name: `Phase 9 ${suffix}`, username, role })
+        .send({ name: `Phase 9 ${suffix}`, username, role, password, confirmPassword: password })
         .expect(201);
     return {
         id: response.body.user.id,
         username,
         role,
-        temporaryPassword: response.body.temporaryPassword,
+        password,
     };
 };
 
@@ -256,33 +257,29 @@ describe('Phase 9 full E2E, regression, and security validation', () => {
     it('completes the full subordinate lifecycle in one chain', async () => {
         lifecycle = await createSubordinate(admin, 'SECRETARY', 'life');
         createdUserIds.push(lifecycle.id);
-        assert.equal((await userRow(lifecycle.id)).must_change_password, 1);
+        assert.equal((await userRow(lifecycle.id)).must_change_password, 0);
 
         const first = await login({
             username: lifecycle.username,
-            password: lifecycle.temporaryPassword,
+            password: lifecycle.password,
         });
-        const blocked = await first.agent.get('/api/v1/plantings').expect(403);
-        assert.equal(blocked.body.code, 'PASSWORD_CHANGE_REQUIRED');
-        await changePassword(first.agent, lifecycle.temporaryPassword, FINAL_PASSWORD);
+        await first.agent.get('/api/v1/plantings').expect(200);
+        await changePassword(first.agent, lifecycle.password, FINAL_PASSWORD);
         await first.agent.get('/api/v1/auth/me').expect(200);
         await first.agent.get('/api/v1/plantings').expect(200);
-        await login({ username: lifecycle.username, password: lifecycle.temporaryPassword }, 401);
+        await login({ username: lifecycle.username, password: lifecycle.password }, 401);
         const activeNormal = await login({ username: lifecycle.username, password: FINAL_PASSWORD });
         await activeNormal.agent.get('/api/v1/plantings').expect(200);
 
         const reset = await mutation(admin, 'post', `/api/v1/users/${lifecycle.id}/reset-password`)
-            .send({})
+            .send({ password: SECOND_PASSWORD, confirmPassword: SECOND_PASSWORD })
             .expect(200);
-        const resetPasswordValue = reset.body.temporaryPassword;
+        assert.equal(reset.body.temporaryPassword, undefined);
         await login({ username: lifecycle.username, password: FINAL_PASSWORD }, 401);
         await activeNormal.agent.get('/api/v1/auth/me').expect(401);
-        const forced = await login({ username: lifecycle.username, password: resetPasswordValue });
-        const forcedDenied = await forced.agent.get('/api/v1/plantings').expect(403);
-        assert.equal(forcedDenied.body.code, 'PASSWORD_CHANGE_REQUIRED');
-        await changePassword(forced.agent, resetPasswordValue, SECOND_PASSWORD);
-        const activeAgain = await login({ username: lifecycle.username, password: SECOND_PASSWORD });
-        await activeAgain.agent.get('/api/v1/plantings').expect(200);
+        const afterReset = await login({ username: lifecycle.username, password: SECOND_PASSWORD });
+        await afterReset.agent.get('/api/v1/plantings').expect(200);
+        const activeAgain = afterReset;
 
         await mutation(admin, 'post', `/api/v1/users/${lifecycle.id}/revoke-sessions`).send({}).expect(200);
         await activeAgain.agent.get('/api/v1/auth/me').expect(401);
@@ -293,21 +290,27 @@ describe('Phase 9 full E2E, regression, and security validation', () => {
         await mutation(admin, 'patch', `/api/v1/users/${lifecycle.id}/disable`).send({}).expect(200);
         await afterRevoke.agent.get('/api/v1/auth/me').expect(401);
         await login({ username: lifecycle.username, password: SECOND_PASSWORD }, 401);
-        await mutation(admin, 'post', `/api/v1/users/${lifecycle.id}/reset-password`).send({}).expect(409);
+        await mutation(admin, 'post', `/api/v1/users/${lifecycle.id}/reset-password`)
+            .send({ password: FINAL_PASSWORD, confirmPassword: FINAL_PASSWORD })
+            .expect(409);
         await mutation(admin, 'delete', `/api/v1/users/${lifecycle.id}`).expect(404);
         await mutation(admin, 'post', '/api/v1/users')
-            .send({ name: 'reuse', username: lifecycle.username, role: 'SECRETARY' })
+            .send({
+                name: 'reuse',
+                username: lifecycle.username,
+                role: 'SECRETARY',
+                password: FINAL_PASSWORD,
+                confirmPassword: FINAL_PASSWORD,
+            })
             .expect(409);
 
         const reactivated = await mutation(admin, 'patch', `/api/v1/users/${lifecycle.id}/reactivate`)
-            .send({})
+            .send({ password: FINAL_PASSWORD, confirmPassword: FINAL_PASSWORD })
             .expect(200);
-        const freshTemp = reactivated.body.temporaryPassword;
+        assert.equal(reactivated.body.temporaryPassword, undefined);
         await login({ username: lifecycle.username, password: SECOND_PASSWORD }, 401);
-        const forcedAgain = await login({ username: lifecycle.username, password: freshTemp });
-        assert.equal((await forcedAgain.agent.get('/api/v1/plantings').expect(403)).body.code, 'PASSWORD_CHANGE_REQUIRED');
-        await changePassword(forcedAgain.agent, freshTemp, FINAL_PASSWORD);
         const restored = await login({ username: lifecycle.username, password: FINAL_PASSWORD });
+        await restored.agent.get('/api/v1/plantings').expect(200);
         await restored.agent.get('/api/v1/auth/me').expect(200);
         lifecycle.agent = restored.agent;
         lifecycle.password = FINAL_PASSWORD;
@@ -408,9 +411,9 @@ describe('Phase 9 full E2E, regression, and security validation', () => {
         createdUserIds.push(worker.id);
         const workerLogin = await login({
             username: worker.username,
-            password: worker.temporaryPassword,
+            password: worker.password,
         });
-        await changePassword(workerLogin.agent, worker.temporaryPassword, FINAL_PASSWORD);
+        await changePassword(workerLogin.agent, worker.password, FINAL_PASSWORD);
         const workerAgent = (await login({ username: worker.username, password: FINAL_PASSWORD })).agent;
 
         await workerAgent.get('/api/v1/users').expect(403);
@@ -510,11 +513,15 @@ describe('Phase 9 full E2E, regression, and security validation', () => {
                     name: 'Phase 9 Dup A',
                     username,
                     role: 'SECRETARY',
+                    password: FINAL_PASSWORD,
+                    confirmPassword: FINAL_PASSWORD,
                 }),
                 mutation(admin, 'post', '/api/v1/users').send({
                     name: 'Phase 9 Dup B',
                     username,
                     role: 'SECRETARY',
+                    password: FINAL_PASSWORD,
+                    confirmPassword: FINAL_PASSWORD,
                 }),
             ]);
             assert.deepEqual([first.status, second.status].sort(), [201, 409], `username round ${round}`);
@@ -553,11 +560,13 @@ describe('Phase 9 full E2E, regression, and security validation', () => {
         createdUserIds.push(raceUser.id);
         const raceLogin = await login({
             username: raceUser.username,
-            password: raceUser.temporaryPassword,
+            password: raceUser.password,
         });
-        await changePassword(raceLogin.agent, raceUser.temporaryPassword, FINAL_PASSWORD);
+        await changePassword(raceLogin.agent, raceUser.password, FINAL_PASSWORD);
         const armed = await login({ username: raceUser.username, password: FINAL_PASSWORD });
-        await mutation(admin, 'post', `/api/v1/users/${raceUser.id}/reset-password`).send({}).expect(200);
+        await mutation(admin, 'post', `/api/v1/users/${raceUser.id}/reset-password`)
+            .send({ password: SECOND_PASSWORD, confirmPassword: SECOND_PASSWORD })
+            .expect(200);
         await login({ username: raceUser.username, password: FINAL_PASSWORD }, 401);
         await armed.agent.get('/api/v1/auth/me').expect(401);
 
@@ -565,9 +574,9 @@ describe('Phase 9 full E2E, regression, and security validation', () => {
         createdUserIds.push(disableTarget.id);
         const disableLogin = await login({
             username: disableTarget.username,
-            password: disableTarget.temporaryPassword,
+            password: disableTarget.password,
         });
-        await changePassword(disableLogin.agent, disableTarget.temporaryPassword, FINAL_PASSWORD);
+        await changePassword(disableLogin.agent, disableTarget.password, FINAL_PASSWORD);
         const live = await login({ username: disableTarget.username, password: FINAL_PASSWORD });
         await db.query('UPDATE users SET is_active = 0, status = ? WHERE id = ?', ['INACTIVE', disableTarget.id]);
         const disabledMe = await live.agent.get('/api/v1/auth/me').expect(403);
@@ -595,6 +604,8 @@ describe('Phase 9 full E2E, regression, and security validation', () => {
                 name: 'Phase 9 Injected Fail',
                 username: failUsername,
                 role: 'SECRETARY',
+                password: FINAL_PASSWORD,
+                confirmPassword: FINAL_PASSWORD,
             });
             assert.equal(failedUser.status, 500);
             assert.notEqual(failedUser.status, 409);

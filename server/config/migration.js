@@ -392,6 +392,16 @@ const runMigrations = async (db) => {
         await db.query("UPDATE activities SET status = 'SKIPPED' WHERE status = 'skipped'");
         await db.query("UPDATE activities SET status = 'CANCELLED' WHERE status = 'cancelled'");
 
+        // Soft-archive column for disabled subordinate Accounts removal (migration 012).
+        // Keep in the startup runner so local DBs stay aligned without a full setup:dev-db.
+        if (!(await checkColumn('users', 'archived_at'))) {
+            console.log('🔹 Adding archived_at to users...');
+            await db.query(
+                'ALTER TABLE users ADD COLUMN archived_at DATETIME NULL DEFAULT NULL AFTER disabled_by'
+            );
+            console.log('✅ Added users.archived_at.');
+        }
+
         console.log('🎉 Migrations completed successfully!');
     } catch (err) {
         console.error('❌ Migration failed:', err.message);

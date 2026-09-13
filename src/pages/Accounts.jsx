@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Ban,
-  Clipboard,
   KeyRound,
   Loader2,
   Plus,
   RotateCcw,
-  ShieldAlert,
+  Trash2,
   UserCheck,
   Users,
 } from 'lucide-react';
@@ -17,6 +16,7 @@ import Select from '../components/Select';
 import { SkeletonCard, SkeletonTable } from '../components/Skeleton';
 import { useToast } from '../context/ToastContext';
 import {
+  archiveUser,
   createUser,
   disableUser,
   getUsers,
@@ -29,6 +29,16 @@ const ROLE_OPTIONS = [
   { value: 'SECRETARY', label: 'Secretary' },
   { value: 'FARM_WORKER', label: 'Farm Worker' },
 ];
+
+const EMPTY_CREATE_FORM = {
+  name: '',
+  username: '',
+  role: 'SECRETARY',
+  password: '',
+  confirmPassword: '',
+};
+
+const EMPTY_PASSWORD_FORM = { password: '', confirmPassword: '' };
 
 const roleLabel = (role) => (
   role === 'FARM_WORKER' ? 'Farm Worker' : role === 'SECRETARY' ? 'Secretary' : role
@@ -53,18 +63,13 @@ const formatTimestamp = (value) => {
 
 const responsePayload = (response) => response?.data?.data ?? response?.data ?? {};
 
-const getTemporaryCredentials = (response, fallbackUsername) => {
-  const payload = responsePayload(response);
-  const user = payload.user || payload.account || response?.data?.user || {};
-  const temporaryPassword =
-    payload.temporaryPassword
-    || payload.temporary_password
-    || response?.data?.temporaryPassword
-    || response?.data?.temporary_password;
+const utf8ByteLength = (value) => new TextEncoder().encode(value).length;
 
-  return temporaryPassword
-    ? { username: user.username || fallbackUsername, temporaryPassword }
-    : null;
+const validateChosenPassword = (password, confirmPassword) => {
+  if (!password) return 'Password is required.';
+  if (utf8ByteLength(password) > 72) return 'Password must not exceed 72 UTF-8 bytes.';
+  if (password !== confirmPassword) return 'New password and confirmation do not match.';
+  return '';
 };
 
 const accountName = (account) => (
@@ -76,11 +81,13 @@ const Accounts = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [credentials, setCredentials] = useState(null);
   const [pendingAction, setPendingAction] = useState(null);
+  const [passwordAction, setPasswordAction] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
-  const [form, setForm] = useState({ name: '', username: '', role: 'SECRETARY' });
+  const [passwordError, setPasswordError] = useState('');
+  const [form, setForm] = useState(EMPTY_CREATE_FORM);
+  const [passwordForm, setPasswordForm] = useState(EMPTY_PASSWORD_FORM);
   const toast = useToast();
 
   const fetchAccounts = useCallback(async () => {
@@ -102,21 +109,30 @@ const Accounts = () => {
   }, [fetchAccounts]);
 
   const openCreate = () => {
-    setForm({ name: '', username: '', role: 'SECRETARY' });
+    setForm(EMPTY_CREATE_FORM);
     setFormError('');
     setCreateOpen(true);
   };
 
   const handleCreate = async (event) => {
     event.preventDefault();
+    const clientError = validateChosenPassword(form.password, form.confirmPassword);
+    if (clientError) {
+      setFormError(clientError);
+      return;
+    }
     setSaving(true);
     setFormError('');
     try {
-      const response = await createUser(form);
-      const oneTimeCredentials = getTemporaryCredentials(response, form.username);
+      await createUser({
+        name: form.name,
+        username: form.username,
+        role: form.role,
+        password: form.password,
+        confirmPassword: form.confirmPassword,
+      });
       setCreateOpen(false);
       await fetchAccounts();
-      setCredentials(oneTimeCredentials);
       toast.success('Account created successfully.');
     } catch (err) {
       const apiErrors = err.response?.data?.errors;
@@ -135,21 +151,14 @@ const Accounts = () => {
     const { type, account } = pendingAction;
     setSaving(true);
     try {
-      let response;
-      if (type === 'reset') response = await resetUserPassword(account.id);
-      if (type === 'disable') response = await disableUser(account.id);
-      if (type === 'reactivate') response = await reactivateUser(account.id);
-      if (type === 'revoke') response = await revokeUserSessions(account.id);
-
-      if (type === 'reset' || type === 'reactivate') {
-        setCredentials(getTemporaryCredentials(response, account.username));
-      }
+      if (type === 'disable') await disableUser(account.id);
+      if (type === 'revoke') await revokeUserSessions(account.id);
+      if (type === 'delete') await archiveUser(account.id);
       await fetchAccounts();
       const messages = {
-        reset: 'Password reset and existing sessions revoked.',
         disable: 'Account disabled and existing sessions revoked.',
-        reactivate: 'Account reactivated with a new temporary password.',
         revoke: 'All account sessions revoked.',
+        delete: 'Account removed from the Accounts list.',
       };
       toast.success(messages[type]);
     } catch (err) {
@@ -160,41 +169,66 @@ const Accounts = () => {
     }
   };
 
-  const closeCredentials = () => setCredentials(null);
+  const openPasswordAction = (type, account) => {
+    setPasswordForm(EMPTY_PASSWORD_FORM);
+    setPasswordError('');
+    setPasswordAction({ type, account });
+  };
 
-  const copyCredential = async (value, label) => {
+  const handlePasswordAction = async (event) => {
+    event.preventDefault();
+    if (!passwordAction) return;
+    const clientError = validateChosenPassword(passwordForm.password, passwordForm.confirmPassword);
+    if (clientError) {
+      setPasswordError(clientError);
+      return;
+    }
+    setSaving(true);
+    setPasswordError('');
     try {
-      await navigator.clipboard.writeText(value);
-      toast.success(`${label} copied.`);
-    } catch {
-      toast.error(`Could not copy ${label.toLowerCase()}.`);
+      const payload = {
+        password: passwordForm.password,
+        confirmPassword: passwordForm.confirmPassword,
+      };
+      if (passwordAction.type === 'reset') {
+        await resetUserPassword(passwordAction.account.id, payload);
+        toast.success('Password updated and existing sessions revoked.');
+      } else {
+        await reactivateUser(passwordAction.account.id, payload);
+        toast.success('Account reactivated with the new password.');
+      }
+      setPasswordAction(null);
+      await fetchAccounts();
+    } catch (err) {
+      const apiErrors = err.response?.data?.errors;
+      setPasswordError(
+        apiErrors?.[0]?.message
+        || err.response?.data?.message
+        || 'The account action could not be completed.'
+      );
+    } finally {
+      setSaving(false);
     }
   };
 
   const confirmContent = {
-    reset: {
-      title: 'Reset Password',
-      message: `Issue a new temporary password for ${pendingAction?.account.username}? All existing sessions will be revoked.`,
-      confirmText: 'Reset Password',
-      confirmColor: 'bg-amber-600 hover:bg-amber-700 text-white',
-    },
     disable: {
       title: 'Disable Account',
       message: `Disable ${pendingAction?.account.username}? The user will be signed out and unable to log in.`,
       confirmText: 'Disable',
       confirmColor: 'bg-red-600 hover:bg-red-700 text-white',
     },
-    reactivate: {
-      title: 'Reactivate Account',
-      message: `Reactivate ${pendingAction?.account.username} with a new temporary password? Old sessions will remain revoked.`,
-      confirmText: 'Reactivate',
-      confirmColor: 'bg-green-700 hover:bg-green-600 text-white',
-    },
     revoke: {
       title: 'Revoke Sessions',
       message: `Sign ${pendingAction?.account.username} out of every active session? Their password will not change.`,
       confirmText: 'Revoke Sessions',
       confirmColor: 'bg-amber-600 hover:bg-amber-700 text-white',
+    },
+    delete: {
+      title: 'Delete Account?',
+      message: 'This account will be removed from the Accounts list and will no longer be usable. Historical records and audit logs will be retained.',
+      confirmText: 'Delete Account',
+      confirmColor: 'bg-red-600 hover:bg-red-700 text-white',
     },
   };
   const currentConfirm = pendingAction ? confirmContent[pendingAction.type] : null;
@@ -207,7 +241,7 @@ const Accounts = () => {
           <>
             <button
               type="button"
-              onClick={() => setPendingAction({ type: 'reset', account })}
+              onClick={() => openPasswordAction('reset', account)}
               disabled={saving}
               className="p-2 rounded-lg hover:bg-amber-50 text-gray-400 hover:text-amber-700 disabled:opacity-50"
               title="Reset password"
@@ -237,18 +271,65 @@ const Accounts = () => {
             </button>
           </>
         ) : (
-          <button
-            type="button"
-            onClick={() => setPendingAction({ type: 'reactivate', account })}
-            disabled={saving}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 hover:bg-green-100 text-sm font-medium text-green-700 disabled:opacity-50"
-          >
-            <UserCheck size={16} /> Reactivate
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => openPasswordAction('reactivate', account)}
+              disabled={saving}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 hover:bg-green-100 text-sm font-medium text-green-700 disabled:opacity-50"
+            >
+              <UserCheck size={16} /> Reactivate
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingAction({ type: 'delete', account })}
+              disabled={saving}
+              className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 disabled:opacity-50"
+              title="Delete account"
+              aria-label={`Delete ${account.username}`}
+            >
+              <Trash2 size={16} />
+            </button>
+          </>
         )}
       </div>
     );
   };
+
+  const PasswordFields = ({ idPrefix, values, onChange, disabled }) => (
+    <>
+      <div>
+        <label htmlFor={`${idPrefix}-password`} className="text-sm font-medium text-gray-700 mb-1 block">
+          Password *
+        </label>
+        <input
+          id={`${idPrefix}-password`}
+          type="password"
+          value={values.password}
+          onChange={(event) => onChange({ ...values, password: event.target.value })}
+          disabled={disabled}
+          autoComplete="new-password"
+          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+          required
+        />
+      </div>
+      <div>
+        <label htmlFor={`${idPrefix}-confirm`} className="text-sm font-medium text-gray-700 mb-1 block">
+          Confirm Password *
+        </label>
+        <input
+          id={`${idPrefix}-confirm`}
+          type="password"
+          value={values.confirmPassword}
+          onChange={(event) => onChange({ ...values, confirmPassword: event.target.value })}
+          disabled={disabled}
+          autoComplete="new-password"
+          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+          required
+        />
+      </div>
+    </>
+  );
 
   return (
     <div className="space-y-6">
@@ -282,7 +363,7 @@ const Accounts = () => {
             <SkeletonTable
               rows={5}
               cols={6}
-              columnHeaders={['Name', 'Username', 'Role', 'Status', 'Timestamps', 'Actions']}
+              columnHeaders={['Name', 'Username', 'Role', 'Status', 'Created', 'Actions']}
             />
           </div>
         </>
@@ -313,10 +394,6 @@ const Accounts = () => {
                     <span className="text-xs text-gray-500">Created</span>
                     <span className="text-xs text-gray-700 text-right">{formatTimestamp(account.created_at)}</span>
                   </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-xs text-gray-500">Last login</span>
-                    <span className="text-xs text-gray-700 text-right">{formatTimestamp(account.last_login_at)}</span>
-                  </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-gray-100">
                   <Actions account={account} />
@@ -334,7 +411,7 @@ const Accounts = () => {
                     <th className="px-6 py-3">Username</th>
                     <th className="px-6 py-3">Role</th>
                     <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3">Timestamps</th>
+                    <th className="px-6 py-3">Created</th>
                     <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -348,8 +425,8 @@ const Accounts = () => {
                         <Badge status={isActiveAccount(account) ? 'active' : 'inactive'} />
                       </td>
                       <td className="px-6 py-4 text-xs text-gray-500">
-                        <div>Created: {formatTimestamp(account.created_at)}</div>
-                        <div className="mt-1">Last login: {formatTimestamp(account.last_login_at)}</div>
+                        <div className="font-medium text-gray-600">Created</div>
+                        <div className="mt-0.5">{formatTimestamp(account.created_at)}</div>
                       </td>
                       <td className="px-6 py-4"><Actions account={account} /></td>
                     </tr>
@@ -362,7 +439,7 @@ const Accounts = () => {
       )}
 
       <Modal isOpen={createOpen} onClose={() => setCreateOpen(false)} title="Create Account">
-        <form onSubmit={handleCreate} className="space-y-4">
+        <form onSubmit={handleCreate} className="space-y-4 pb-8">
           {formError && (
             <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">
               {formError}
@@ -395,7 +472,7 @@ const Accounts = () => {
               required
             />
           </div>
-          <div>
+          <div className="pb-6">
             <label htmlFor="account-role" className="text-sm font-medium text-gray-700 mb-1 block">
               Role *
             </label>
@@ -408,6 +485,12 @@ const Accounts = () => {
               required
             />
           </div>
+          <PasswordFields
+            idPrefix="account-create"
+            values={form}
+            onChange={setForm}
+            disabled={saving}
+          />
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
@@ -430,53 +513,49 @@ const Accounts = () => {
       </Modal>
 
       <Modal
-        isOpen={Boolean(credentials)}
-        onClose={closeCredentials}
-        title="One-Time Credentials"
-        maxWidth="max-w-lg"
+        isOpen={Boolean(passwordAction)}
+        onClose={() => !saving && setPasswordAction(null)}
+        title={passwordAction?.type === 'reactivate' ? 'Reactivate Account' : 'Reset Password'}
       >
-        {credentials && (
-          <div className="space-y-5">
-            <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-sm text-amber-800">
-                Copy and share these credentials securely now. The temporary password is shown only
-                once and cannot be retrieved after this window is closed.
-              </p>
+        {passwordAction && (
+          <form onSubmit={handlePasswordAction} className="space-y-4">
+            {passwordError && (
+              <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">
+                {passwordError}
+              </div>
+            )}
+            <p className="text-sm text-gray-600">
+              {passwordAction.type === 'reactivate'
+                ? `Set a new password to reactivate ${passwordAction.account.username}. Old sessions remain revoked.`
+                : `Set a new password for ${passwordAction.account.username}. All existing sessions will be revoked.`}
+            </p>
+            <PasswordFields
+              idPrefix="account-set"
+              values={passwordForm}
+              onChange={setPasswordForm}
+              disabled={saving}
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPasswordAction(null)}
+                disabled={saving}
+                className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center gap-2 bg-green-700 hover:bg-green-600 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                {saving && <Loader2 size={16} className="animate-spin" />}
+                {saving
+                  ? (passwordAction.type === 'reactivate' ? 'Reactivating...' : 'Saving...')
+                  : (passwordAction.type === 'reactivate' ? 'Reactivate' : 'Reset Password')}
+              </button>
             </div>
-            <div className="space-y-3">
-              {[
-                ['Username', credentials.username],
-                ['Temporary password', credentials.temporaryPassword],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    {label}
-                  </label>
-                  <div className="mt-1 flex items-center gap-2">
-                    <code className="min-w-0 flex-1 px-3 py-2.5 rounded-lg bg-gray-100 border border-gray-200 text-sm text-gray-900 break-all">
-                      {value}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={() => copyCredential(value, label)}
-                      className="shrink-0 p-2.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-600"
-                      aria-label={`Copy ${label.toLowerCase()}`}
-                    >
-                      <Clipboard size={18} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={closeCredentials}
-              className="w-full py-2.5 px-4 rounded-lg bg-green-700 hover:bg-green-600 text-white font-semibold"
-            >
-              I have saved these credentials
-            </button>
-          </div>
+          </form>
         )}
       </Modal>
 

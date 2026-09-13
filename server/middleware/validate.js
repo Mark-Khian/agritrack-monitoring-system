@@ -65,8 +65,20 @@ const rejectUnknownBodyFields = (allowedFields) => (req, res, next) => {
     return next();
 };
 
+const adminChosenPasswordRules = [
+    body('password')
+        .custom((value) => {
+            const error = validateUserSelectedPassword(value);
+            if (error) throw new Error(error);
+            return true;
+        }),
+    body('confirmPassword')
+        .custom((value, { req }) => value === req.body.password)
+        .withMessage('New password and confirmation do not match.'),
+];
+
 const validateCreateUser = [
-    rejectUnknownBodyFields(['name', 'username', 'role']),
+    rejectUnknownBodyFields(['name', 'username', 'role', 'password', 'confirmPassword']),
     body('name')
         .isString().withMessage('Name is required.')
         .trim()
@@ -81,6 +93,13 @@ const validateCreateUser = [
     body('role')
         .isIn(['SECRETARY', 'FARM_WORKER'])
         .withMessage('Role must be exactly SECRETARY or FARM_WORKER.'),
+    ...adminChosenPasswordRules,
+    handleValidation
+];
+
+const validateAdminSetPassword = [
+    rejectUnknownBodyFields(['password', 'confirmPassword']),
+    ...adminChosenPasswordRules,
     handleValidation
 ];
 
@@ -120,6 +139,7 @@ module.exports = {
     validateLogin,
     validateLoginChallenge,
     validateCreateUser,
+    validateAdminSetPassword,
     validateUserId,
     validateEmptyBody,
     validateChangePassword

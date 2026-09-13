@@ -1,7 +1,6 @@
 process.env.NODE_ENV = 'test';
 process.env.DB_NAME = 'crop_management_rearch_test';
 process.env.COOKIE_SECURE = 'false';
-process.env.ALLOWED_ORIGIN = 'http://127.0.0.1:5179';
 
 const path = require('node:path');
 require('../server/node_modules/dotenv').config({
@@ -16,6 +15,7 @@ if (process.env.DB_NAME !== 'crop_management_rearch_test') {
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
+const os = require('node:os');
 const mysql = require('../server/node_modules/mysql2/promise');
 const puppeteer = require('../server/node_modules/puppeteer');
 
@@ -23,7 +23,14 @@ const ROOT = path.join(__dirname, '..');
 const TEST_DB = 'crop_management_rearch_test';
 const API_PORT = 5109;
 const UI_PORT = 5179;
-const APP_URL = `http://127.0.0.1:${UI_PORT}`;
+const APP_ORIGIN = `http://127.0.0.1:${UI_PORT}`;
+const APP_URL = APP_ORIGIN;
+
+const pinBrowserTestOrigin = () => {
+    process.env.ALLOWED_ORIGIN = APP_ORIGIN;
+    process.env.ALLOWED_ORIGINS = APP_ORIGIN;
+};
+pinBrowserTestOrigin();
 const PREFIX = `phase9_${process.pid}_`;
 const STAMP = Date.now();
 const TEST_ADMIN = {
@@ -51,16 +58,49 @@ const waitForHttp = async (url) => {
     throw lastError || new Error(`Timed out waiting for ${url}`);
 };
 
+const fillField = async (page, selector, value) => {
+    await page.waitForSelector(selector, { visible: true });
+    await page.focus(selector);
+    await page.$eval(selector, (el, next) => {
+        const proto = el instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        const tracker = el._valueTracker;
+        if (tracker) tracker.setValue('');
+        if (setter) setter.call(el, next);
+        else el.value = next;
+        el.dispatchEvent(new InputEvent('input', {
+            bubbles: true,
+            composed: true,
+            data: next,
+            inputType: 'insertFromPaste',
+        }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, value);
+    await page.waitForFunction(
+        (sel, expected) => document.querySelector(sel)?.value === expected,
+        {},
+        selector,
+        value
+    );
+};
+
 const loginUi = async (page, account, destination) => {
-    await page.goto(APP_URL, { waitUntil: 'networkidle0' });
-    await page.waitForSelector('#username');
-    await page.type('#username', account.username);
-    await page.type('#password', account.password);
-    await page.evaluate(() => {
-        [...document.querySelectorAll('button')]
-            .find((button) => button.textContent.trim() === 'Login')
-            .click();
-    });
+    await page.evaluate(() => window.__closeAgriTrackEventSources?.()).catch(() => {});
+    await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+    await fillField(page, '#username', account.username);
+    await fillField(page, '#password', account.password);
+    await page.waitForFunction(
+        (user, pass) => (
+            document.querySelector('#username')?.value === user
+            && document.querySelector('#password')?.value === pass
+        ),
+        {},
+        account.username,
+        account.password
+    );
+    await clickMatching(page, 'form button[type="submit"]', 'Login', { exact: true });
     await page.waitForFunction(
         (pathname) => window.location.pathname === pathname,
         { timeout: 20_000 },
@@ -73,14 +113,30 @@ const storageSnapshot = (page) => page.evaluate(() => ({
     session: Object.fromEntries(Object.entries(sessionStorage)),
 }));
 
-const clickText = (page, text) => page.evaluate((expected) => {
-    const element = [...document.querySelectorAll('button, a')]
-        .find((candidate) => candidate.textContent.replace(/\s+/g, ' ').trim().includes(expected));
-    if (!element) throw new Error(`Could not find clickable text: ${expected}`);
-    element.click();
-}, text);
+const clickText = async (page, text) => {
+    const handle = await page.waitForFunction((expected) => (
+        [...document.querySelectorAll('button, a')]
+            .find((candidate) => candidate.textContent.replace(/\s+/g, ' ').trim().includes(expected)) || null
+    ), {}, text);
+    const element = handle.asElement();
+    if (!element) throw new Error(`Could not find clickable text: ${text}`);
+    await element.click();
+};
+
+const clickMatching = async (page, selector, match, { exact = false } = {}) => {
+    const handle = await page.waitForFunction((sel, expected, exactMatch) => (
+        [...document.querySelectorAll(sel)].find((candidate) => {
+            const label = candidate.textContent.replace(/\s+/g, ' ').trim();
+            return exactMatch ? label === expected : label.includes(expected);
+        }) || null
+    ), {}, selector, match, exact);
+    const element = handle.asElement();
+    if (!element) throw new Error(`Could not find ${selector} matching ${match}`);
+    await element.click();
+};
 
 const logoutUi = async (page) => {
+    await page.evaluate(() => window.__closeAgriTrackEventSources?.()).catch(() => {});
     await clickText(page, 'Logout');
     await page.waitForFunction(() => (
         [...document.querySelectorAll('button')]
@@ -101,6 +157,60 @@ const waitForText = (page, text) => page.waitForFunction(
     text
 );
 
+const openSuitePage = async (context) => {
+    const page = await context.newPage();
+    await page.setViewport({ width: 1440, height: 900 });
+    await page.evaluateOnNewDocument(() => {
+        const Original = window.EventSource;
+        const registry = [];
+        window.EventSource = class extends Original {
+            constructor(url, configuration) {
+                super(url, configuration);
+                registry.push(this);
+            }
+        };
+        window.__closeAgriTrackEventSources = () => {
+            for (const source of registry.splice(0, registry.length)) {
+                try { source.close(); } catch { /* already closed */ }
+            }
+        };
+    });
+    return page;
+};
+
+const gotoPath = async (page, target, expectedPath) => {
+    const url = target.startsWith('http') ? target : `${APP_URL}${target}`;
+    const targetPath = new URL(url).pathname;
+    const expected = expectedPath || targetPath;
+    let usedNav = false;
+    if (page.url().startsWith(APP_ORIGIN) && targetPath === expected && !url.includes('?')) {
+        const handle = await page.evaluateHandle((path) => (
+            [...document.querySelectorAll('nav a')].find((anchor) => {
+                try {
+                    return new URL(anchor.getAttribute('href'), location.origin).pathname === path;
+                } catch {
+                    return false;
+                }
+            }) || null
+        ), targetPath);
+        const navLink = handle.asElement();
+        if (navLink) {
+            await navLink.click();
+            usedNav = true;
+        }
+    }
+    if (!usedNav) {
+        await page.evaluate(() => window.__closeAgriTrackEventSources?.()).catch(() => {});
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+    }
+    await page.waitForFunction(
+        (pathname) => window.location.pathname === pathname,
+        { timeout: 20_000 },
+        expected
+    );
+    assert.equal(new URL(page.url()).pathname, expected);
+};
+
 const navTexts = (page) => page.$$eval(
     'nav a',
     (links) => links.map((link) => link.textContent.trim())
@@ -110,45 +220,27 @@ const buttonTexts = (page) => page.evaluate(() => (
     [...document.querySelectorAll('button')].map((button) => button.textContent.trim()).filter(Boolean)
 ));
 
-const createAccountUi = async (page, { name, username, role }) => {
-    await clickText(page, 'Create Account');
-    await page.waitForSelector('#account-name', { visible: true });
+const createAccountUi = async (page, { name, username, role, password }) => {
+    const chosenPassword = password || `p9_${username.slice(-8)}_ok`;
+    await clickMatching(page, 'button[type="button"]', 'Create Account');
+    const nameInput = await page.waitForSelector('#account-name', { visible: true });
+    assert.ok(nameInput, 'Create Account modal did not expose #account-name');
+    const box = await nameInput.boundingBox();
+    assert.ok(box && box.width > 0 && box.height > 0, '#account-name is not visible');
     await page.waitForSelector('form [aria-haspopup="listbox"]', { visible: true });
-    await page.evaluate(() => {
-        const trigger = document.querySelector('form [aria-haspopup="listbox"]');
-        if (!trigger) throw new Error('role listbox trigger missing');
-        trigger.click();
-    });
+    await page.click('form [aria-haspopup="listbox"]');
     const roleLabel = role === 'FARM_WORKER' ? 'Farm Worker' : 'Secretary';
-    await page.waitForSelector('[role="listbox"]');
-    await page.evaluate((expected) => {
-        const option = [...document.querySelectorAll('[role="option"]')]
-            .find((candidate) => candidate.textContent.trim() === expected);
-        if (!option) throw new Error(`Could not find role option: ${expected}`);
-        option.click();
-    }, roleLabel);
-    await page.type('#account-name', name);
-    await page.type('#account-username', username);
-    await page.evaluate(() => document.querySelector('#account-name').closest('form').requestSubmit());
-    await page.waitForFunction(() => (
-        [...document.querySelectorAll('h2, h3')]
-            .some((element) => element.textContent.trim() === 'One-Time Credentials')
-    ));
-    const codes = await page.$$eval('code', (elements) => elements.map((element) => element.textContent));
-    assert.equal(codes[0], username);
-    assert.equal(typeof codes[1], 'string');
-    const temporaryPassword = codes[1];
-    const serializedStorage = JSON.stringify(await storageSnapshot(page));
-    assert.equal(serializedStorage.includes(temporaryPassword), false);
-    await clickText(page, 'I have saved these credentials');
-    await page.waitForFunction(
-        (secret) => !document.body.textContent.includes(secret),
-        {},
-        temporaryPassword
-    );
+    await clickMatching(page, '[role="option"]', roleLabel, { exact: true });
+    await fillField(page, '#account-name', name);
+    await fillField(page, '#account-username', username);
+    await fillField(page, '#account-create-password', chosenPassword);
+    await fillField(page, '#account-create-confirm', chosenPassword);
+    await page.click('form:has(#account-name) button[type="submit"]');
     await page.waitForSelector('#account-name', { hidden: true });
-    assert.equal(JSON.stringify(await storageSnapshot(page)).includes(temporaryPassword), false);
-    return temporaryPassword;
+    await waitForText(page, username);
+    const serializedStorage = JSON.stringify(await storageSnapshot(page));
+    assert.equal(serializedStorage.includes(chosenPassword), false);
+    return chosenPassword;
 };
 
 const changePasswordUi = async (page, currentPassword, newPassword) => {
@@ -212,6 +304,7 @@ const collectApiPaths = (requests) => requests
         );
         assert.equal(adminRows.length, 1, 'test admin missing; run the test DB setup first');
 
+        pinBrowserTestOrigin();
         const app = require('../server/app');
         apiServer = http.createServer(app);
         await new Promise((resolve, reject) => {
@@ -226,12 +319,19 @@ const collectApiPaths = (requests) => requests
             server: { host: '127.0.0.1', port: UI_PORT, strictPort: true },
         });
         await vite.listen();
+        pinBrowserTestOrigin();
         await waitForHttp(APP_URL);
 
+        const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agritrack-p9-'));
         browser = await puppeteer.launch({
             headless: true,
             executablePath,
-            args: ['--no-sandbox'],
+            userDataDir,
+            args: [
+                '--no-sandbox',
+                '--disable-save-password-bubble',
+                '--disable-features=PasswordGeneration,PasswordManagerOnboarding,AutofillServerCommunication',
+            ],
         });
 
         const fixtures = {
@@ -249,8 +349,7 @@ const collectApiPaths = (requests) => requests
 
         const adminContext = await browser.createBrowserContext();
         contexts.push(adminContext);
-        const adminPage = await adminContext.newPage();
-        await adminPage.setViewport({ width: 1440, height: 900 });
+        const adminPage = await openSuitePage(adminContext);
         const adminRequests = [];
         adminPage.on('request', (request) => adminRequests.push({
             method: request.method(),
@@ -271,19 +370,25 @@ const collectApiPaths = (requests) => requests
         await clickText(adminPage, 'Accounts');
         await adminPage.waitForFunction(() => window.location.pathname === '/accounts');
         await waitForText(adminPage, 'Manage Secretary and Farm Worker access');
-        fixtures.secretary.tempPassword = await createAccountUi(adminPage, fixtures.secretary);
+        fixtures.secretary.password = await createAccountUi(adminPage, {
+            ...fixtures.secretary,
+            password: SECRETARY_PASSWORD,
+        });
         const workerCreation = await apiFromPage(adminPage, '/api/v1/users', {
             method: 'POST',
             body: {
                 name: fixtures.worker.name,
                 username: fixtures.worker.username,
                 role: fixtures.worker.role,
+                password: WORKER_PASSWORD,
+                confirmPassword: WORKER_PASSWORD,
             },
         });
         assert.equal(workerCreation.status, 201);
-        fixtures.worker.tempPassword = workerCreation.body.temporaryPassword;
+        fixtures.worker.password = WORKER_PASSWORD;
+        assert.equal(workerCreation.body.temporaryPassword, undefined);
         assert.equal(
-            JSON.stringify(await storageSnapshot(adminPage)).includes(fixtures.worker.tempPassword),
+            JSON.stringify(await storageSnapshot(adminPage)).includes(WORKER_PASSWORD),
             false
         );
 
@@ -334,8 +439,7 @@ const collectApiPaths = (requests) => requests
         noteIds.push(adminNote.body.data.id);
 
         for (const route of ['/plantings', '/activities', '/harvests', '/calendar', '/analytics', '/audit']) {
-            await adminPage.goto(`${APP_URL}${route}`, { waitUntil: 'networkidle0' });
-            assert.equal(new URL(adminPage.url()).pathname, route);
+            await gotoPath(adminPage, route);
         }
         await waitForText(adminPage, 'Audit Log');
         const weatherStatus = await apiFromPage(adminPage, '/api/v1/weather');
@@ -344,17 +448,15 @@ const collectApiPaths = (requests) => requests
 
         const secretaryContext = await browser.createBrowserContext();
         contexts.push(secretaryContext);
-        const secretaryPage = await secretaryContext.newPage();
-        await secretaryPage.setViewport({ width: 1440, height: 900 });
+        const secretaryPage = await openSuitePage(secretaryContext);
         await loginUi(secretaryPage, {
             username: fixtures.secretary.username,
-            password: fixtures.secretary.tempPassword,
-        }, '/change-password');
-        for (const blocked of ['/accounts', '/audit', '/plantings']) {
-            await secretaryPage.goto(`${APP_URL}${blocked}`, { waitUntil: 'networkidle0' });
-            assert.equal(new URL(secretaryPage.url()).pathname, '/change-password');
+            password: SECRETARY_PASSWORD,
+        }, '/dashboard');
+        for (const blocked of ['/accounts', '/audit']) {
+            await gotoPath(secretaryPage, blocked, '/dashboard');
         }
-        await changePasswordUi(secretaryPage, fixtures.secretary.tempPassword, SECRETARY_PASSWORD);
+        await gotoPath(secretaryPage, '/plantings');
         await secretaryPage.waitForSelector('nav');
         const secretaryLinks = await navTexts(secretaryPage);
         assert.equal(secretaryLinks.includes('Accounts'), false);
@@ -362,16 +464,16 @@ const collectApiPaths = (requests) => requests
         assert.ok(secretaryLinks.includes('Harvests'));
         assert.ok(secretaryLinks.includes('Analytics'));
 
-        await secretaryPage.goto(`${APP_URL}/plantings`, { waitUntil: 'networkidle0' });
+        await gotoPath(secretaryPage, '/plantings');
         let buttons = await buttonTexts(secretaryPage);
         assert.ok(buttons.includes('Add Planting'));
-        assert.ok(!buttons.includes('Export Report'));
+        assert.ok(buttons.includes('Export Report'));
         assert.equal((await secretaryPage.$$('[title="Delete planting"]')).length, 0);
 
-        await secretaryPage.goto(`${APP_URL}/harvests`, { waitUntil: 'networkidle0' });
+        await gotoPath(secretaryPage, '/harvests');
         buttons = await buttonTexts(secretaryPage);
         assert.ok(buttons.includes('Record Harvest'));
-        assert.ok(!buttons.includes('Export Report'));
+        assert.ok(buttons.includes('Export Report'));
         assert.equal((await secretaryPage.$$('[title="Delete harvest"]')).length, 0);
 
         const secretaryField = `${PREFIX}${STAMP}_sec_field`;
@@ -450,14 +552,10 @@ const collectApiPaths = (requests) => requests
         assert.equal(secretaryNote.status, 201);
         noteIds.push(secretaryNote.body.data.id);
 
-        await secretaryPage.goto(`${APP_URL}/calendar`, { waitUntil: 'networkidle0' });
-        assert.equal(new URL(secretaryPage.url()).pathname, '/calendar');
-        await secretaryPage.goto(`${APP_URL}/analytics`, { waitUntil: 'networkidle0' });
-        assert.equal(new URL(secretaryPage.url()).pathname, '/analytics');
-        await secretaryPage.goto(`${APP_URL}/accounts`, { waitUntil: 'networkidle0' });
-        assert.equal(new URL(secretaryPage.url()).pathname, '/dashboard');
-        await secretaryPage.goto(`${APP_URL}/audit`, { waitUntil: 'networkidle0' });
-        assert.equal(new URL(secretaryPage.url()).pathname, '/dashboard');
+        await gotoPath(secretaryPage, '/calendar');
+        await gotoPath(secretaryPage, '/analytics');
+        await gotoPath(secretaryPage, '/accounts', '/dashboard');
+        await gotoPath(secretaryPage, '/audit', '/dashboard');
 
         const secretaryForbidden = await secretaryPage.evaluate(async () => {
             const users = await fetch('/api/v1/users', { credentials: 'include' });
@@ -470,8 +568,7 @@ const collectApiPaths = (requests) => requests
 
         const workerContext = await browser.createBrowserContext();
         contexts.push(workerContext);
-        const workerPage = await workerContext.newPage();
-        await workerPage.setViewport({ width: 1440, height: 900 });
+        const workerPage = await openSuitePage(workerContext);
         const workerRequests = [];
         workerPage.on('request', (request) => workerRequests.push({
             method: request.method(),
@@ -479,9 +576,8 @@ const collectApiPaths = (requests) => requests
         }));
         await loginUi(workerPage, {
             username: fixtures.worker.username,
-            password: fixtures.worker.tempPassword,
-        }, '/change-password');
-        await changePasswordUi(workerPage, fixtures.worker.tempPassword, WORKER_PASSWORD);
+            password: WORKER_PASSWORD,
+        }, '/dashboard');
         await workerPage.waitForSelector('nav');
         const workerLinks = await navTexts(workerPage);
         assert.equal(workerLinks.includes('Harvests'), false);
@@ -493,21 +589,18 @@ const collectApiPaths = (requests) => requests
             'Worker dashboard must not request harvests'
         );
 
-        await workerPage.goto(`${APP_URL}/plantings`, { waitUntil: 'networkidle0' });
+        await gotoPath(workerPage, '/plantings');
+        await waitForText(workerPage, 'Current');
         buttons = await buttonTexts(workerPage);
         assert.ok(!buttons.includes('Add Planting'));
-        assert.ok(buttons.includes('Active'));
-        await workerPage.goto(`${APP_URL}/calendar`, { waitUntil: 'networkidle0' });
+        assert.ok(buttons.includes('Current'));
+        await gotoPath(workerPage, '/calendar');
         const addNote = await workerPage.$$('[title="Add Note"]');
         assert.equal(addNote.length, 0);
-        await workerPage.goto(`${APP_URL}/harvests`, { waitUntil: 'networkidle0' });
-        assert.equal(new URL(workerPage.url()).pathname, '/dashboard');
-        await workerPage.goto(`${APP_URL}/analytics`, { waitUntil: 'networkidle0' });
-        assert.equal(new URL(workerPage.url()).pathname, '/dashboard');
-        await workerPage.goto(`${APP_URL}/accounts`, { waitUntil: 'networkidle0' });
-        assert.equal(new URL(workerPage.url()).pathname, '/dashboard');
-        await workerPage.goto(`${APP_URL}/audit`, { waitUntil: 'networkidle0' });
-        assert.equal(new URL(workerPage.url()).pathname, '/dashboard');
+        await gotoPath(workerPage, '/harvests', '/dashboard');
+        await gotoPath(workerPage, '/analytics', '/dashboard');
+        await gotoPath(workerPage, '/accounts', '/dashboard');
+        await gotoPath(workerPage, '/audit', '/dashboard');
 
         const workerApi = await workerPage.evaluate(async () => {
             const harvests = await fetch('/api/v1/harvests', { credentials: 'include' });
