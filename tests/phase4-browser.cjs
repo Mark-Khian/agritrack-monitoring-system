@@ -211,62 +211,88 @@ const login = async (page) => {
         });
 
         await test('cookie-authenticated GET/POST/PUT/PATCH/DELETE pass CSRF', async () => {
-            const result = await page.evaluate(async () => {
-                const json = { 'Content-Type': 'application/json' };
-                const get = await fetch('/api/v1/notes', { credentials: 'include' });
-                const created = await fetch('/api/v1/notes', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: json,
-                    body: JSON.stringify({
-                        title: 'Phase 4 browser test',
-                        note_date: '2026-09-10',
-                        color: 'slate',
-                    }),
+            // Synthetic notification owned by this harness — never call unscoped read-all
+            // against persistent localhost Admin weather/activity rows.
+            const [[adminUser]] = await db.query(
+                `SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1`,
+                [ADMIN.username, ADMIN.username]
+            );
+            assert.ok(adminUser?.id, 'configured admin fixture must exist');
+            const probeRelatedId = Number(String(Date.now()).slice(-9));
+            const [probeIns] = await db.query(
+                `INSERT INTO notifications
+                    (user_id, type, title, message, related_id, notif_date, is_read)
+                 VALUES (?, 'system_guidance', ?, ?, ?, CURDATE(), 0)`,
+                [
+                    adminUser.id,
+                    `Phase4 CSRF probe ${probeRelatedId}`,
+                    'Harness-owned notification for CSRF PATCH probe only.',
+                    probeRelatedId,
+                ]
+            );
+            const probeNotifId = probeIns.insertId;
+            assert.ok(probeNotifId);
+
+            try {
+                const result = await page.evaluate(async (notifId) => {
+                    const json = { 'Content-Type': 'application/json' };
+                    const get = await fetch('/api/v1/notes', { credentials: 'include' });
+                    const created = await fetch('/api/v1/notes', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: json,
+                        body: JSON.stringify({
+                            title: 'Phase 4 browser test',
+                            note_date: '2026-09-10',
+                            color: 'slate',
+                        }),
+                    });
+                    const createdBody = await created.json();
+                    const noteId = createdBody.data?.id;
+                    const put = await fetch(`/api/v1/notes/${noteId}`, {
+                        method: 'PUT',
+                        credentials: 'include',
+                        headers: json,
+                        body: JSON.stringify({
+                            title: 'Phase 4 browser test updated',
+                            note_date: '2026-09-10',
+                            color: 'slate',
+                        }),
+                    });
+                    const patch = await fetch(`/api/v1/notifications/${notifId}/read`, {
+                        method: 'PATCH',
+                        credentials: 'include',
+                        headers: json,
+                        body: JSON.stringify({}),
+                    });
+                    const del = await fetch(`/api/v1/notes/${noteId}`, {
+                        method: 'DELETE',
+                        credentials: 'include',
+                    });
+                    return {
+                        get: get.status,
+                        post: created.status,
+                        put: put.status,
+                        patch: patch.status,
+                        delete: del.status,
+                    };
+                }, probeNotifId);
+                assert.deepEqual(result, {
+                    get: 200,
+                    post: 201,
+                    put: 200,
+                    patch: 200,
+                    delete: 200,
                 });
-                const createdBody = await created.json();
-                const noteId = createdBody.data?.id;
-                const put = await fetch(`/api/v1/notes/${noteId}`, {
-                    method: 'PUT',
-                    credentials: 'include',
-                    headers: json,
-                    body: JSON.stringify({
-                        title: 'Phase 4 browser test updated',
-                        note_date: '2026-09-10',
-                        color: 'slate',
-                    }),
-                });
-                const patch = await fetch('/api/v1/notifications/read-all', {
-                    method: 'PATCH',
-                    credentials: 'include',
-                    headers: json,
-                    body: JSON.stringify({}),
-                });
-                const del = await fetch(`/api/v1/notes/${noteId}`, {
-                    method: 'DELETE',
-                    credentials: 'include',
-                });
-                return {
-                    get: get.status,
-                    post: created.status,
-                    put: put.status,
-                    patch: patch.status,
-                    delete: del.status,
-                };
-            });
-            assert.deepEqual(result, {
-                get: 200,
-                post: 201,
-                put: 200,
-                patch: 200,
-                delete: 200,
-            });
-            const unsafeRequests = requests.filter((request) => (
-                request.url.includes('/api/v1/')
-                && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
-            ));
-            assert.ok(unsafeRequests.length >= 4);
-            assert.ok(unsafeRequests.every((request) => request.headers.origin === APP_URL));
+                const unsafeRequests = requests.filter((request) => (
+                    request.url.includes('/api/v1/')
+                    && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
+                ));
+                assert.ok(unsafeRequests.length >= 4);
+                assert.ok(unsafeRequests.every((request) => request.headers.origin === APP_URL));
+            } finally {
+                await db.query('DELETE FROM notifications WHERE id = ?', [probeNotifId]);
+            }
         });
 
         await test('existing functional pages and centralized Analytics requests regress cleanly', async () => {
@@ -459,6 +485,16 @@ const login = async (page) => {
         console.log(`PASS admin fixture ${ADMIN.username}`);
     } finally {
         await browser.close();
+        await db.query(
+            `DELETE FROM notifications
+             WHERE type = 'system_guidance'
+               AND title LIKE 'Phase4 CSRF probe %'
+               AND user_id IN (
+                    SELECT id FROM users
+                    WHERE username = ? OR email = ?
+               )`,
+            [ADMIN.username, ADMIN.username]
+        );
         await db.query(
             `DELETE FROM sessions
              WHERE user_id IN (

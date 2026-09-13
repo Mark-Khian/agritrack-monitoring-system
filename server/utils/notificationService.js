@@ -2,15 +2,17 @@
  * notificationService.js
  *
  * Lifecycle-driven notification generator.
- * All functions operate globally across ALL users by joining through the
- * farms ownership chain. Duplicate prevention is handled by the UNIQUE
- * constraint uq_notification_daily (user_id, type, related_id, DATE(created_at)).
+ * Farm-level notifications (weather, activity due/overdue, lifecycle) fan out
+ * one row per eligible active non-archived Admin/Secretary/Farm Worker.
+ * Weather dedupe uses per-user/day existence checks (related_id is NULL).
+ * Activity/lifecycle rely on uq_notification_daily
+ * (user_id, type, related_id, notif_date).
  *
  * Types:
  *   activity_due      — scheduled today, still pending
  *   activity_overdue  — past due, still pending
  *   lifecycle_update  — crop entered a new growth stage
- *   weather_alert     — rain expected at farm location
+ *   weather_alert     — rain expected at farm location (per eligible user)
  *   system_guidance   — general advisory (unused by scheduler; reserved)
  */
 
@@ -79,8 +81,7 @@ const fetchRainStatus = async (lat, lon) => {
     }
 };
 
-// Single active admin — notifications are not per-farm-user scoped at insert time.
-// Uses the shared active-admin helper (never inactive historical admins).
+// Active admin lookup — farm weather location / legacy helpers (not recipient policy).
 const getAdminId = async () => {
     try {
         return await getActiveAdminId();
@@ -90,28 +91,91 @@ const getAdminId = async () => {
     }
 };
 
+/**
+ * Eligible recipients for farm-level notifications (weather + activity/lifecycle):
+ * active, non-archived ADMIN / SECRETARY / FARM_WORKER accounts.
+ */
+const getFarmNotificationRecipientIds = async () => {
+    const [rows] = await db.query(
+        `SELECT id
+         FROM users
+         WHERE is_active = 1
+           AND status = 'ACTIVE'
+           AND archived_at IS NULL
+           AND role IN ('admin', 'ADMIN', 'SECRETARY', 'FARM_WORKER')
+         ORDER BY id ASC`
+    );
+    return rows.map((row) => row.id);
+};
+
+/** @deprecated alias — same eligibility set as getFarmNotificationRecipientIds */
+const getWeatherAlertRecipientIds = getFarmNotificationRecipientIds;
+
 // ── Safe insert ───────────────────────────────────────────────────────────────
 
 /**
+ * Insert one notification for a specific user.
  * @returns {Promise<boolean>} true when a new row was inserted
  */
-const insertNotification = async (type, title, message, relatedId = null) => {
-    const adminId = await getAdminId();
-    if (!adminId) {
-        console.log(`[NotifService] Generation skipped — no valid admin account found for notification type: ${type}`);
-        return false;
-    }
+const insertNotificationForUser = async (userId, type, title, message, relatedId = null) => {
+    if (!userId) return false;
     try {
         const [result] = await db.query(
             `INSERT IGNORE INTO notifications (user_id, type, title, message, related_id, notif_date)
              VALUES (?, ?, ?, ?, ?, CURDATE())`,
-            [adminId, type, title, message, relatedId]
+            [userId, type, title, message, relatedId]
         );
         return (result.affectedRows || 0) > 0;
     } catch (err) {
         console.error('[NotifService] Insert error:', err.message);
         return false;
     }
+};
+
+/**
+ * Weather alerts use related_id NULL; enforce one active copy per user/day explicitly.
+ * @returns {Promise<boolean>} true when a new row was inserted
+ */
+const insertWeatherAlertForUser = async (userId, title, message) => {
+    if (!userId) return false;
+    try {
+        const [result] = await db.query(
+            `INSERT INTO notifications (user_id, type, title, message, related_id, notif_date)
+             SELECT ?, 'weather_alert', ?, ?, NULL, CURDATE()
+             FROM DUAL
+             WHERE NOT EXISTS (
+                SELECT 1
+                FROM notifications
+                WHERE user_id = ?
+                  AND type = 'weather_alert'
+                  AND notif_date = CURDATE()
+             )`,
+            [userId, title, message, userId]
+        );
+        return (result.affectedRows || 0) > 0;
+    } catch (err) {
+        console.error('[NotifService] Weather insert error:', err.message);
+        return false;
+    }
+};
+
+/**
+ * Fan-out one logical activity/lifecycle event to every eligible recipient.
+ * Dedup is per (user_id, type, related_id, notif_date) via INSERT IGNORE.
+ * @returns {Promise<number>} number of new rows inserted
+ */
+const insertNotification = async (type, title, message, relatedId = null) => {
+    const recipientIds = await getFarmNotificationRecipientIds();
+    if (recipientIds.length === 0) {
+        console.log(`[NotifService] Generation skipped — no eligible recipients for notification type: ${type}`);
+        return 0;
+    }
+    let inserted = 0;
+    for (const userId of recipientIds) {
+        const ok = await insertNotificationForUser(userId, type, title, message, relatedId);
+        if (ok) inserted += 1;
+    }
+    return inserted;
 };
 
 // ── Growth stage computation ──────────────────────────────────────────────────
@@ -182,13 +246,13 @@ const generateActivityNotifications = async () => {
         for (const row of rows) {
             const actLabel = String(row.activity_type).replaceAll('_', ' ');
             const plotLabel = [row.variety, row.field_name].filter(Boolean).join(' · ');
-            const ok = await insertNotification(
+            const n = await insertNotification(
                 'activity_due',
                 `${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)} Due Today${plotLabel ? ` — ${plotLabel}` : ''}`,
                 `Your ${actLabel} activity is scheduled for today${plotLabel ? ` on ${plotLabel}` : ''}. Complete it to stay on track with your crop lifecycle.`,
                 row.activity_id
             );
-            if (ok) inserted += 1;
+            inserted += n;
         }
 
         if (inserted > 0) {
@@ -226,13 +290,13 @@ const generateOverdueNotifications = async () => {
             const actLabel = String(row.activity_type).replaceAll('_', ' ');
             const plotLabel = [row.variety, row.field_name].filter(Boolean).join(' · ');
             const daysLabel = row.days_overdue === 1 ? '1 day' : `${row.days_overdue} days`;
-            const ok = await insertNotification(
+            const n = await insertNotification(
                 'activity_overdue',
                 `Overdue: ${actLabel.charAt(0).toUpperCase() + actLabel.slice(1)}${plotLabel ? ` — ${plotLabel}` : ''}`,
                 `Your ${actLabel} activity${plotLabel ? ` on ${plotLabel}` : ''} is ${daysLabel} overdue. Take action immediately to protect crop health.`,
                 row.activity_id
             );
-            if (ok) inserted += 1;
+            inserted += n;
         }
 
         if (inserted > 0) {
@@ -274,13 +338,13 @@ const generateLifecycleNotifications = async () => {
             const plotLabel = [row.variety, row.field_name].filter(Boolean).join(' · ');
             const title = `Lifecycle Update: ${label}${plotLabel ? ` — ${plotLabel}` : ''}`;
 
-            const ok = await insertNotification(
+            const n = await insertNotification(
                 'lifecycle_update',
                 title,
                 message,
                 row.planting_id
             );
-            if (ok) inserted += 1;
+            inserted += n;
         }
 
         if (inserted > 0) {
@@ -318,17 +382,25 @@ const generateWeatherNotifications = async () => {
         const weather = await fetchRainStatus(lat, lon);
         if (!weather || !weather.rainExpected) return false;
 
-        const ok = await insertNotification(
-            'weather_alert',
-            `Rain Expected at ${locationName || 'Farm'}`,
-            `Rain is forecast in the next 18 hours near ${locationName || 'your farm'}. Consider postponing pesticide applications, and check drainage in low-lying fields.`,
-            null  // weather alerts have no single related_id; null groups them per day
-        );
-
-        if (ok) {
-            console.log(`[NotifService] weather_alert: generated for farm location`);
+        const recipientIds = await getFarmNotificationRecipientIds();
+        if (recipientIds.length === 0) {
+            console.log('[NotifService] Weather alerts skipped — no eligible active recipients.');
+            return false;
         }
-        return ok;
+
+        const title = `Rain Expected at ${locationName || 'Farm'}`;
+        const message = `Rain is forecast in the next 18 hours near ${locationName || 'your farm'}. Consider postponing pesticide applications, and check drainage in low-lying fields.`;
+
+        let inserted = 0;
+        for (const userId of recipientIds) {
+            const ok = await insertWeatherAlertForUser(userId, title, message);
+            if (ok) inserted += 1;
+        }
+
+        if (inserted > 0) {
+            console.log(`[NotifService] weather_alert: generated ${inserted} notification(s) for farm location`);
+        }
+        return inserted > 0;
     } catch (err) {
         console.error('[NotifService] generateWeatherNotifications error:', err.message);
         return false;
@@ -426,6 +498,10 @@ module.exports = {
     runWeatherCycle,
     pruneNotifications,
     getAdminId,
+    getFarmNotificationRecipientIds,
+    getWeatherAlertRecipientIds,
     insertNotification,
+    insertNotificationForUser,
+    insertWeatherAlertForUser,
     setRainStatusOverrideForTests,
 };

@@ -219,7 +219,12 @@ describe('Notifications SSE', () => {
         if (plantingId) {
             await db.query('DELETE FROM notifications WHERE related_id = ?', [activityId]);
             await db.query('DELETE FROM notifications WHERE related_id = ?', [plantingId]);
-            await db.query('DELETE FROM notifications WHERE user_id = ? AND type = ?', [adminId, 'weather_alert']);
+            await db.query(
+                `DELETE FROM notifications
+                 WHERE type = 'weather_alert'
+                   AND user_id IN (?, ?, ?)`,
+                [adminId, workerId, secretaryId]
+            );
             await db.query('DELETE FROM activities WHERE planting_id = ?', [plantingId]);
             await db.query('DELETE FROM plantings WHERE id = ?', [plantingId]);
         }
@@ -293,8 +298,9 @@ describe('Notifications SSE', () => {
     it('failed/no-op weather generation does not broadcast', async () => {
         // Ensure prune has nothing to delete so a no-op cycle stays silent.
         await db.query(
-            `DELETE FROM notifications WHERE user_id = ? AND type = 'weather_alert'`,
-            [adminId]
+            `DELETE FROM notifications
+             WHERE type = 'weather_alert' AND user_id IN (?, ?, ?)`,
+            [adminId, workerId, secretaryId]
         );
 
         const writes = [];
@@ -312,8 +318,10 @@ describe('Notifications SSE', () => {
 
     it('creation of weather alert triggers notifications_changed', async () => {
         await db.query(
-            `DELETE FROM notifications WHERE user_id = ? AND type = 'weather_alert' AND notif_date = CURDATE()`,
-            [adminId]
+            `DELETE FROM notifications
+             WHERE type = 'weather_alert' AND notif_date = CURDATE()
+               AND user_id IN (?, ?, ?)`,
+            [adminId, workerId, secretaryId]
         );
 
         const writes = [];
@@ -325,6 +333,19 @@ describe('Notifications SSE', () => {
 
         assert.ok(writes.some((w) => w.includes('notifications-changed')));
         assert.ok(writes.every((w) => !/Rain Expected|15\.35|120\.94|SSE Notif Farm|OPENWEATHER|appid/i.test(w)));
+
+        const [rows] = await db.query(
+            `SELECT user_id FROM notifications
+             WHERE type = 'weather_alert' AND notif_date = CURDATE()
+               AND user_id IN (?, ?, ?)
+             ORDER BY user_id ASC`,
+            [adminId, workerId, secretaryId]
+        );
+        assert.deepEqual(
+            rows.map((row) => row.user_id).sort((a, b) => a - b),
+            [adminId, workerId, secretaryId].sort((a, b) => a - b)
+        );
+
         removeClient(fakeRes);
         setRainStatusOverrideForTests(null);
     });
@@ -333,8 +354,8 @@ describe('Notifications SSE', () => {
         await db.query(
             `DELETE FROM notifications
              WHERE related_id IN (?, ?)
-                OR (user_id = ? AND type IN ('activity_due', 'activity_overdue', 'lifecycle_update') AND notif_date = CURDATE())`,
-            [activityId, plantingId, adminId]
+                OR (user_id IN (?, ?, ?) AND type IN ('activity_due', 'activity_overdue', 'lifecycle_update') AND notif_date = CURDATE())`,
+            [activityId, plantingId, adminId, workerId, secretaryId]
         );
 
         const writes = [];

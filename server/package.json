@@ -15,6 +15,8 @@
     "test:weather-admin": "node --test tests/weather-active-admin.test.js",
     "test:weather-sse": "node --test tests/weather-sse.test.js",
     "test:notification-sse": "node --test tests/notification-sse.test.js",
+    "test:weather-alert-recipients": "node --test tests/weather-alert-recipients.test.js",
+    "test:notification-fanout": "node --test tests/notification-fanout.test.js",
     "test:planting-sse": "node --test tests/planting-sse.test.js",
     "test:setup-db": "node tests/setup-test-db.js",
     "setup:dev-db": "node setup-dev-db.js"
