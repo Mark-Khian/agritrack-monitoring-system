@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const API = axios.create({
-    baseURL: '/api/v1',
+    baseURL: import.meta.env.VITE_API_URL || '/api/v1',
     withCredentials: true,
 });
 
@@ -97,7 +97,7 @@ export const getAllActivities = async (params = {}) => {
     let rows = [];
     let meta = { page: 1, limit: pageSize, total: 0, pages: 1 };
 
-    for (;;) {
+    for (; ;) {
         const res = await getActivities({ ...params, limit: pageSize, page });
         const chunk = res.data?.data || [];
         meta = res.data?.meta || meta;
@@ -127,13 +127,13 @@ export const getActivityById = (id) => API.get(`/activities/${id}`);
 export const createActivity = (data) => API.post('/activities', data);
 export const updateActivity = (id, data) => API.put(`/activities/${id}`, data);
 export const updateActivityProgress = (id, data) => API.patch(`/activities/${id}/progress`, data);
-export const deleteActivity   = (id)           => API.delete(`/activities/${id}`);
+export const deleteActivity = (id) => API.delete(`/activities/${id}`);
 
 // ── Notes ─────────────────────────────────
-export const getNotes      = ()           => API.get('/notes');
-export const createNote    = (data)       => API.post('/notes', data);
-export const updateNote    = (id, data)   => API.put(`/notes/${id}`, data);
-export const deleteNote    = (id)         => API.delete(`/notes/${id}`);
+export const getNotes = () => API.get('/notes');
+export const createNote = (data) => API.post('/notes', data);
+export const updateNote = (id, data) => API.put(`/notes/${id}`, data);
+export const deleteNote = (id) => API.delete(`/notes/${id}`);
 
 // ── Harvests ──────────────────────────────
 export const getHarvests = (params = {}) => API.get('/harvests', { params: { limit: 100, ...params } });
