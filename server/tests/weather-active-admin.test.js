@@ -167,6 +167,39 @@ describe('Weather active-admin lookup', () => {
         }
     });
 
+    it('prefers active admin with configured farm location over lower-id active admin without coords', async () => {
+        await db.query(
+            `UPDATE users
+             SET is_active = 1, status = 'ACTIVE',
+                 farm_latitude = NULL, farm_longitude = NULL, farm_location_name = NULL
+             WHERE id = ?`,
+            [inactiveId]
+        );
+        await db.query(
+            `UPDATE users
+             SET farm_latitude = ?, farm_longitude = ?, farm_location_name = ?
+             WHERE id = ?`,
+            [15.3371, 120.9060, 'Jaen / Nueva Ecija / PH', activeId]
+        );
+
+        const admin = await getActiveAdmin();
+        assert.equal(admin.id, activeId);
+        assert.notEqual(admin.id, inactiveId);
+        assert.equal(Number(Number(admin.farm_latitude).toFixed(4)), 15.3371);
+
+        const weather = await loginAgent.get('/api/v1/weather');
+        assert.notEqual(weather.body.farmNotConfigured, true);
+        assert.ok([200, 502].includes(weather.status), `unexpected status ${weather.status}`);
+
+        await db.query(
+            `UPDATE users
+             SET is_active = 0, status = 'INACTIVE',
+                 farm_latitude = NULL, farm_longitude = NULL, farm_location_name = NULL
+             WHERE id = ?`,
+            [inactiveId]
+        );
+    });
+
     it('farm-location save on session admin is the same identity weather reads', async () => {
         // Simulate successful PUT /farm-location write target (req.user.id = active admin)
         await db.query(
@@ -195,8 +228,8 @@ describe('Weather active-admin lookup', () => {
 
     it('does not select inactive admin when no active admin exists', async () => {
         await db.query(
-            `UPDATE users SET is_active = 0, status = 'INACTIVE' WHERE id = ?`,
-            [activeId]
+            `UPDATE users SET is_active = 0, status = 'INACTIVE'
+             WHERE role = 'admin' AND is_active = 1`
         );
 
         const admin = await getActiveAdmin();
