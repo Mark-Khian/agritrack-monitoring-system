@@ -35,20 +35,21 @@ export function isCurrentActivePlanting(planting) {
 /**
  * Row action flags for Plantings list (capabilities already decided by RBAC).
  * @param {object} planting
- * @param {{ canUpdate: boolean, canDelete: boolean, canExport: boolean }} caps
+ * @param {{ canUpdate: boolean, canDelete: boolean, canExport: boolean, canUpdateHarvested?: boolean }} caps
  */
 export function getPlantingRowActionFlags(planting, caps = {}) {
     const completed = isCompletedPlanting(planting);
     const canUpdate = Boolean(caps.canUpdate);
     const canDelete = Boolean(caps.canDelete);
     const canExport = Boolean(caps.canExport);
+    const canUpdateHarvested = Boolean(caps.canUpdateHarvested);
 
     if (completed) {
         return {
-            showEdit: false,
+            showEdit: canUpdateHarvested,
             showDelete: false,
             showPrint: canExport,
-            showView: true,
+            showView: !canUpdateHarvested,
             mode: 'completed',
         };
     }

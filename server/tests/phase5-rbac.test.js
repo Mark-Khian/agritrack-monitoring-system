@@ -242,6 +242,12 @@ describe('Phase 5 centralized RBAC', () => {
         assert.equal(hasCapability('SECRETARY', CAPABILITIES.AUDIT_READ), false);
         assert.equal(hasCapability('SECRETARY', CAPABILITIES.PLANTING_DELETE), false);
         assert.equal(hasCapability('SECRETARY', CAPABILITIES.HARVEST_DELETE), false);
+        assert.equal(hasCapability('ADMIN', CAPABILITIES.PLANTING_UPDATE_HARVESTED), true);
+        assert.equal(hasCapability('ADMIN', CAPABILITIES.HARVEST_UPDATE_HARVESTED), true);
+        assert.equal(hasCapability('SECRETARY', CAPABILITIES.PLANTING_UPDATE_HARVESTED), false);
+        assert.equal(hasCapability('SECRETARY', CAPABILITIES.HARVEST_UPDATE_HARVESTED), false);
+        assert.equal(hasCapability('FARM_WORKER', CAPABILITIES.PLANTING_UPDATE_HARVESTED), false);
+        assert.equal(hasCapability('FARM_WORKER', CAPABILITIES.HARVEST_UPDATE_HARVESTED), false);
     });
 
     it('enforces authentication, unknown-role, and inactive-account boundaries', async () => {
@@ -269,16 +275,6 @@ describe('Phase 5 centralized RBAC', () => {
             .expect(200);
 
         await secretary.get('/api/v1/harvests').expect(200);
-        await mutation(secretary, 'put', `/api/v1/harvests/${harvestId}`)
-            .send({
-                planting_id: harvestPlantingId,
-                harvest_date: '2026-09-01',
-                yield_kg: 275,
-                quality_grade: 'A',
-                remarks: 'Phase 5 harvest updated',
-                financial_value: 5500,
-            })
-            .expect(200);
 
         await mutation(secretary, 'put', `/api/v1/notes/${secretaryNoteId}`)
             .send({
@@ -292,6 +288,46 @@ describe('Phase 5 centralized RBAC', () => {
         const weather = await secretary.get('/api/v1/weather');
         assert.notEqual(weather.status, 401);
         assert.notEqual(weather.status, 403);
+    });
+
+    it('allows Admin harvested-record updates and denies Secretary and Worker', async () => {
+        const harvestPayload = {
+            planting_id: harvestPlantingId,
+            harvest_date: '2026-09-01',
+            yield_kg: 275,
+            quality_grade: 'A',
+            remarks: 'Phase 5 harvest updated',
+            financial_value: 5500,
+        };
+
+        const secretaryHarvestedPlanting = await mutation(secretary, 'put', `/api/v1/plantings/${harvestPlantingId}`)
+            .send({ expected_stage: 'Vegetative Stage' });
+        assert.equal(secretaryHarvestedPlanting.status, 403);
+        assert.equal(secretaryHarvestedPlanting.body.message, 'Access denied. Insufficient privilege.');
+
+        await mutation(admin, 'put', `/api/v1/plantings/${harvestPlantingId}`)
+            .send({ expected_stage: 'Vegetative Stage' })
+            .expect(200);
+
+        const secretaryHarvestedHarvest = await mutation(secretary, 'put', `/api/v1/harvests/${harvestId}`)
+            .send(harvestPayload);
+        assert.equal(secretaryHarvestedHarvest.status, 403);
+        assert.equal(secretaryHarvestedHarvest.body.message, 'Access denied. Insufficient privilege.');
+
+        await mutation(admin, 'put', `/api/v1/harvests/${harvestId}`)
+            .send({ ...harvestPayload, yield_kg: 280 })
+            .expect(200);
+
+        await mutation(secretary, 'put', `/api/v1/plantings/${secretaryPlantingId}`)
+            .send({ expected_stage: 'Vegetative Stage' })
+            .expect(200);
+
+        await mutation(worker, 'put', `/api/v1/plantings/${harvestPlantingId}`)
+            .send({ expected_stage: 'Vegetative Stage' })
+            .expect(403);
+        await mutation(worker, 'put', `/api/v1/harvests/${harvestId}`)
+            .send(harvestPayload)
+            .expect(403);
     });
 
     it('allows Admin and Secretary completed-crop CSV/PDF export', async () => {

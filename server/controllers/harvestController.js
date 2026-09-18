@@ -1,5 +1,6 @@
 ﻿const db = require('../config/db');
 const logActivity = require('../middleware/logger');
+const { CAPABILITIES, assertHarvestedWrite } = require('../security/rbac');
 const {
     isDuplicateKeyError,
     isRetryableTransactionError,
@@ -28,6 +29,8 @@ const getAllHarvests = async (req, res) => {
                 plantings.id      AS planting_id,
                 plantings.variety AS planting_variety,
                 plantings.season,
+                plantings.status AS planting_status,
+                plantings.lifecycle_state AS planting_lifecycle_state,
                 plantings.field_name AS field_name
              FROM harvests
              JOIN plantings ON harvests.planting_id = plantings.id
@@ -278,7 +281,9 @@ const updateHarvest = async (req, res) => {
 
 ﻿        // 1. Fetch current Harvest and Planting baseline
         const [harvests] = await connection.query(
-            `SELECT h.planting_id, h.harvest_date, p.planting_date, DATEDIFF(?, p.planting_date) AS maturity_days
+            `SELECT h.planting_id, h.harvest_date, p.planting_date,
+                    p.status AS planting_status, p.lifecycle_state AS planting_lifecycle_state,
+                    DATEDIFF(?, p.planting_date) AS maturity_days
              FROM harvests h
              JOIN plantings p ON p.id = h.planting_id
              WHERE h.id = ? AND h.deleted_at IS NULL
@@ -286,10 +291,16 @@ const updateHarvest = async (req, res) => {
             [harvest_date, req.params.id]
         );
 
-        
         if (harvests.length === 0) {
             await connection.rollback();
             return res.status(404).json({ message: 'Harvest not found.' });
+        }
+
+        if (harvests[0].planting_lifecycle_state === 'HARVESTED' || harvests[0].planting_status === 'completed') {
+            if (!assertHarvestedWrite(req.user.role, CAPABILITIES.HARVEST_UPDATE_HARVESTED)) {
+                await connection.rollback();
+                return res.status(403).json({ message: 'Access denied. Insufficient privilege.' });
+            }
         }
 
         const plantingId = harvests[0].planting_id;

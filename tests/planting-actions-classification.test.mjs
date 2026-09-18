@@ -14,6 +14,7 @@ const capsFor = (role) => ({
     canUpdate: hasCapability(role, CAPABILITIES.PLANTING_UPDATE),
     canDelete: hasCapability(role, CAPABILITIES.PLANTING_DELETE),
     canExport: hasCapability(role, CAPABILITIES.PLANTING_EXPORT),
+    canUpdateHarvested: hasCapability(role, CAPABILITIES.PLANTING_UPDATE_HARVESTED),
 });
 
 describe('planting action classification (authoritative)', () => {
@@ -71,10 +72,10 @@ describe('planting action classification (authoritative)', () => {
         assert.equal(isCompletedPlanting(completedHarvested), true);
         const flags = getPlantingRowActionFlags(completedHarvested, capsFor(ROLES.ADMIN));
         assert.deepEqual(flags, {
-            showEdit: false,
+            showEdit: true,
             showDelete: false,
             showPrint: true,
-            showView: true,
+            showView: false,
             mode: 'completed',
         });
     });

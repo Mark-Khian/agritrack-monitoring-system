@@ -12,6 +12,7 @@ import Select from '../components/Select';
 import { formatDisplayDate } from '../utils/dateFormatter';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES } from '../security/permissions';
+import { isCompletedPlanting } from '../utils/plantingCompletion';
 
 /** Matches harvestController createHarvest: DATEDIFF(harvest_date, planting_date) >= 60. */
 const MIN_HARVEST_MATURITY_DAYS = 60;
@@ -51,6 +52,18 @@ const calendarDaysBetween = (fromValue, toValue) => {
 
 const Harvests = () => {
     const { can } = useAuth();
+    const canEditHarvestRow = (harvest) => {
+        if (!can(CAPABILITIES.HARVEST_UPDATE)) return false;
+        const parentCompleted = isCompletedPlanting({
+            status: harvest?.planting_status,
+            lifecycle_state: harvest?.planting_lifecycle_state,
+        });
+        // Harvest rows are completed-crop records; missing parent state still requires Admin write.
+        if (parentCompleted || (harvest?.planting_status == null && harvest?.planting_lifecycle_state == null)) {
+            return can(CAPABILITIES.HARVEST_UPDATE_HARVESTED);
+        }
+        return true;
+    };
     const [harvests, setHarvests] = useState([]);
     const [activePlantings, setActivePlantings] = useState([]); // only active for dropdown
     const [loading, setLoading] = useState(true);
@@ -235,6 +248,7 @@ const Harvests = () => {
     const handleOpenModal = (item = null) => {
         setFormError('');
         if (item) {
+            if (!canEditHarvestRow(item)) return;
             setFormData({
                 planting_id: item.planting_id,
                 harvest_date: item.harvest_date?.slice(0, 10) || '',
@@ -386,6 +400,7 @@ const Harvests = () => {
                                         )}
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
+                                        {canEditHarvestRow(h) && (
                                         <button
                                             type="button"
                                             onClick={() => handleOpenModal(h)}
@@ -394,6 +409,7 @@ const Harvests = () => {
                                         >
                                             <Edit2 size={16} />
                                         </button>
+                                        )}
                                         {can(CAPABILITIES.HARVEST_DELETE) && (
                                             <button
                                                 type="button"
@@ -484,9 +500,11 @@ const Harvests = () => {
                                                 {h.remarks || '—'}
                                             </td>
                                             <td className="px-6 py-4 text-right space-x-2">
+                                                {canEditHarvestRow(h) && (
                                                 <button onClick={() => handleOpenModal(h)} className="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors">
                                                     <Edit2 size={16} />
                                                 </button>
+                                                )}
                                                 {can(CAPABILITIES.HARVEST_DELETE) && (
                                                     <button onClick={() => handleDeleteClick(h.id)} className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors">
                                                         <Trash2 size={16} />

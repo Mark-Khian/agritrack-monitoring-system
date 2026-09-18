@@ -9,6 +9,7 @@ const CAPABILITIES = Object.freeze({
     PLANTING_READ: 'planting.read',
     PLANTING_CREATE: 'planting.create',
     PLANTING_UPDATE: 'planting.update',
+    PLANTING_UPDATE_HARVESTED: 'planting.update_harvested',
     PLANTING_DELETE: 'planting.delete',
     PLANTING_EXPORT: 'planting.export',
     VARIETY_READ: 'variety.read',
@@ -20,6 +21,7 @@ const CAPABILITIES = Object.freeze({
     HARVEST_READ: 'harvest.read',
     HARVEST_CREATE: 'harvest.create',
     HARVEST_UPDATE: 'harvest.update',
+    HARVEST_UPDATE_HARVESTED: 'harvest.update_harvested',
     HARVEST_DELETE: 'harvest.delete',
     HARVEST_EXPORT: 'harvest.export',
     NOTE_READ: 'note.read',
@@ -52,6 +54,7 @@ const ROLE_CAPABILITIES = Object.freeze({
         ...COMMON_READ,
         CAPABILITIES.PLANTING_CREATE,
         CAPABILITIES.PLANTING_UPDATE,
+        CAPABILITIES.PLANTING_UPDATE_HARVESTED,
         CAPABILITIES.PLANTING_DELETE,
         CAPABILITIES.PLANTING_EXPORT,
         CAPABILITIES.ACTIVITY_CREATE,
@@ -60,6 +63,7 @@ const ROLE_CAPABILITIES = Object.freeze({
         CAPABILITIES.HARVEST_READ,
         CAPABILITIES.HARVEST_CREATE,
         CAPABILITIES.HARVEST_UPDATE,
+        CAPABILITIES.HARVEST_UPDATE_HARVESTED,
         CAPABILITIES.HARVEST_DELETE,
         CAPABILITIES.HARVEST_EXPORT,
         CAPABILITIES.NOTE_MANAGE,
@@ -100,6 +104,8 @@ const hasCapability = (role, capability) => {
     );
 };
 
+const assertHarvestedWrite = (role, capability) => hasCapability(role, capability);
+
 const authorize = (capability) => (req, res, next) => {
     if (!req.user?.id) {
         return res.status(401).json({ message: 'Access denied. User not authenticated.' });
@@ -120,5 +126,6 @@ module.exports = {
     ROLE_CAPABILITIES,
     normalizeRole,
     hasCapability,
+    assertHarvestedWrite,
     authorize,
 };
