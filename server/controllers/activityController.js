@@ -41,6 +41,11 @@ const getAllActivities = async (req, res) => {
         const plantingFilter = req.query.planting_id ? 'AND activities.planting_id = ?' : '';
         const includeSystemGenerated = req.query.include_system_generated !== '0';
         const systemGeneratedFilter = includeSystemGenerated ? '' : 'AND activities.is_system_generated = 0';
+        const activePlantingsOnly = req.query.active_plantings_only === '1'
+            || req.query.active_plantings_only === 'true';
+        const activePlantingsFilter = activePlantingsOnly
+            ? "AND plantings.status NOT IN ('completed', 'failed')"
+            : '';
         const filterParams = req.query.planting_id ? [req.query.planting_id] : [];
 
         const [activities] = await db.query(
@@ -70,6 +75,7 @@ const getAllActivities = async (req, res) => {
                AND plantings.deleted_at IS NULL
                ${plantingFilter}
                ${systemGeneratedFilter}
+               ${activePlantingsFilter}
              ORDER BY activities.planned_date ASC, activities.created_at DESC
              LIMIT ? OFFSET ?`,
             [...filterParams, limit, offset]
@@ -84,7 +90,8 @@ const getAllActivities = async (req, res) => {
              WHERE activities.deleted_at IS NULL
                AND plantings.deleted_at IS NULL
                ${countWhere}
-               ${includeSystemGenerated ? '' : 'AND activities.is_system_generated = 0'}`,
+               ${includeSystemGenerated ? '' : 'AND activities.is_system_generated = 0'}
+               ${activePlantingsFilter}`,
             countParams
         );
 
