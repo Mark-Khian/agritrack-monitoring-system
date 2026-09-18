@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
     AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, Legend,
-    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList
+    XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList, ReferenceArea, Sector
 } from 'recharts';
 import {
     Loader2, AlertTriangle,
     Wheat, TrendingUp, Sprout, Award, Activity,
     BarChart2, Home, Tractor, Map as MapIcon,
     Shovel, Droplets, Bug, Scissors,
-    FlaskConical, Package, ChevronRight, ChevronDown
+    FlaskConical, Package, ChevronRight, ChevronDown, Inbox
 } from 'lucide-react';
 import {
     SkeletonPageHeader,
@@ -28,15 +29,12 @@ import {
     fillTimelineForRange,
     timelineSubtitleForRange,
 } from '../utils/analyticsTimeline';
+import useTheme from '../hooks/useTheme';
+import { patchSearchParams, pickAllowed } from '../utils/urlQueryState';
+
+const ANALYTICS_RANGES = ['7d', '30d', '3m', 'all'];
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
-
-const PLANTING_VARIETY_CLASS_FILTERS = [
-    { value: '', label: 'All classes' },
-    { value: 'Irrigated / Lowland Varieties', label: 'Irrigated / Lowland' },
-    { value: 'Rainfed / Dry-Seeded Varieties (DSR)', label: 'Rainfed / DSR' },
-    { value: 'Upland Varieties', label: 'Upland' },
-];
 
 const getSuccessRate = (harvests) => {
     if (!harvests || harvests.length === 0) return 0;
@@ -162,15 +160,516 @@ const ErrorChart = ({ message }) => (
     </div>
 );
 
-const EmptyChart = ({ message }) => (
-    <div className="flex flex-col items-center justify-center py-10 text-sm text-gray-400">
-        <BarChart2 size={34} className="text-gray-300 mb-2" />
-        <p>{message || 'No data available yet.'}</p>
+const EmptyChart = ({ icon: Icon = Inbox, message }) => (
+    <div className="h-[220px] flex flex-col items-center justify-center text-center px-6">
+        <div className="w-12 h-12 rounded-2xl bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 flex items-center justify-center mb-3">
+            <Icon size={22} className="text-gray-400 dark:text-slate-500" strokeWidth={1.75} />
+        </div>
+        <p className="text-sm font-medium text-gray-500 dark:text-slate-400 max-w-[240px] leading-snug">
+            {message || 'No data available yet.'}
+        </p>
     </div>
 );
 
+/** Sit the tooltip above and slightly beside the active point instead of covering it. */
+const ChartTooltipFrame = ({ children }) => (
+    <div
+        className="pointer-events-none"
+        style={{ transform: 'translate(12px, calc(-100% - 10px))' }}
+    >
+        {children}
+    </div>
+);
+
+const CHART_TOOLTIP_PROPS = {
+    offset: 18,
+    allowEscapeViewBox: { x: true, y: true },
+    wrapperStyle: { outline: 'none', zIndex: 20, pointerEvents: 'none' },
+};
+
+/** Same RGB as Harvest Yield Wet/Dry ReferenceArea (rgba(59,130,246) / rgba(245,158,11)). */
+const SEASON_WET_HEX = '#3b82f6';
+const SEASON_DRY_HEX = '#f59e0b';
+
+const seasonBarFill = (season) => {
+    const s = String(season || '').toLowerCase();
+    return s.includes('dry') ? SEASON_DRY_HEX : SEASON_WET_HEX;
+};
+
+const roundedTopBarPath = (x, y, width, height, radius = 8) => {
+    const h = Math.max(height, 0);
+    const r = Math.min(radius, width / 2, h);
+    if (r <= 0) {
+        return `M${x},${y + h}H${x + width}V${y}H${x}Z`;
+    }
+    return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + width - r}Q${x + width},${y} ${x + width},${y + r}V${y + h}Z`;
+};
+
+const SeasonZeroAwareBar = (props) => {
+    const { x = 0, y = 0, width = 0, height = 0, fill, payload } = props;
+    const isZero = !Number(payload?.yield_kg);
+    const barWidth = Math.max(width, 22);
+    const barX = x + (width - barWidth) / 2;
+    if (isZero) {
+        const placeholderH = 10;
+        return (
+            <rect
+                className="recharts-bar-rectangle"
+                x={barX}
+                y={y - placeholderH}
+                width={barWidth}
+                height={placeholderH}
+                fill="none"
+                stroke={fill}
+                strokeWidth={1.5}
+                strokeDasharray="5 4"
+                rx={8}
+                opacity={0.75}
+            />
+        );
+    }
+    return (
+        <path
+            className="recharts-bar-rectangle"
+            d={roundedTopBarPath(x, y, width, Math.max(height, 0), 8)}
+            fill={fill}
+        />
+    );
+};
+
+const FieldStatusBadge = ({ status }) => {
+    const isActive = status === 'Active';
+    return (
+        <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap ${
+                isActive
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600'
+            }`}
+        >
+            <span
+                className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                    isActive ? 'bg-emerald-600 dark:bg-emerald-400' : 'bg-slate-400 dark:bg-slate-500'
+                }`}
+            />
+            {status}
+        </span>
+    );
+};
+
+/** No harvest rows in range → placeholder. Harvests present at 0 kg → measured zero. */
+const FieldYieldDisplay = ({ harvestCount, value, fractionDigits = 0 }) => {
+    if (Number(harvestCount) === 0) {
+        return <span className="text-slate-400 dark:text-slate-500">—</span>;
+    }
+    const n = Number(value) || 0;
+    const shown = fractionDigits > 0
+        ? n.toLocaleString(undefined, { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })
+        : n.toLocaleString();
+    return (
+        <>
+            {shown}{' '}
+            <span className="text-slate-400 dark:text-slate-500 font-normal">kg</span>
+        </>
+    );
+};
+
+/** Same wet/dry test as Season Comparison (planting.season string includes 'wet' / 'dry'). */
+const classifyWetDrySeason = (season) => {
+    const s = String(season || '').toLowerCase();
+    if (s.includes('wet')) return 'Wet';
+    if (s.includes('dry')) return 'Dry';
+    return null;
+};
+
+const seasonBandsFromYieldTimeline = (chartData, plantingById) => {
+    const perSlot = (chartData || []).map((slot) => {
+        let wet = 0;
+        let dry = 0;
+        (slot.harvestsList || []).forEach((h) => {
+            const planting = plantingById.get(h?.planting_id);
+            const kind = classifyWetDrySeason(planting?.season || h?.season || h?.cropping_season);
+            if (kind === 'Wet') wet += 1;
+            if (kind === 'Dry') dry += 1;
+        });
+        if (wet === 0 && dry === 0) return null;
+        return wet >= dry ? 'Wet' : 'Dry';
+    });
+
+    const bands = [];
+    let i = 0;
+    while (i < perSlot.length) {
+        if (!perSlot[i]) {
+            i += 1;
+            continue;
+        }
+        const season = perSlot[i];
+        let j = i;
+        while (j + 1 < perSlot.length && perSlot[j + 1] === season) j += 1;
+        bands.push({
+            season,
+            x1: chartData[i].month,
+            x2: chartData[j].month,
+        });
+        i = j + 1;
+    }
+    return bands;
+};
+
+const peakAndLowIndexes = (chartData) => {
+    const scored = (chartData || [])
+        .map((row, index) => ({ index, yield_kg: Number(row.yield_kg) || 0 }))
+        .filter((d) => d.yield_kg > 0);
+    if (scored.length < 3) return { peakIdx: null, lowIdx: null };
+
+    let peak = scored[0];
+    let low = scored[0];
+    scored.forEach((d) => {
+        if (d.yield_kg > peak.yield_kg) peak = d;
+        if (d.yield_kg < low.yield_kg) low = d;
+    });
+    if (peak.index === low.index || peak.yield_kg === low.yield_kg) {
+        return { peakIdx: null, lowIdx: null };
+    }
+    return { peakIdx: peak.index, lowIdx: low.index };
+};
+
+const riceGreenByRank = (rank, rankCount, isDark) => {
+    const steps = Math.max(rankCount - 1, 1);
+    const t = 1 - rank / steps;
+    const opacity = 0.38 + t * 0.62;
+    return isDark
+        ? `rgba(74, 222, 128, ${opacity.toFixed(3)})`
+        : `rgba(22, 101, 52, ${opacity.toFixed(3)})`;
+};
+
+/** Rank 0 = highest value. Ties share a rank (same unique value). */
+const rankFillsForValues = (values, isDark) => {
+    const uniqueDesc = [...new Set((values || []).map((v) => Number(v) || 0))].sort((a, b) => b - a);
+    return (values || []).map((v) => {
+        const rank = uniqueDesc.indexOf(Number(v) || 0);
+        return riceGreenByRank(rank, uniqueDesc.length, isDark);
+    });
+};
+
+const barHoverClassName = (isDark) =>
+    `[&_.recharts-bar-rectangle]:transition-[filter] [&_.recharts-bar-rectangle]:duration-150 ${
+        isDark
+            ? '[&_.recharts-bar-rectangle:hover]:[filter:brightness(1.22)]'
+            : '[&_.recharts-bar-rectangle:hover]:[filter:brightness(1.1)]'
+    }`;
+
+const activityAxisMax = (dataMax) => {
+    const n = Math.max(0, Number(dataMax) || 0);
+    const padded = n * 1.2;
+    if (padded <= 1) return 1;
+    if (padded <= 20) return Math.ceil(padded);
+    const exp = Math.floor(Math.log10(padded));
+    const mag = 10 ** exp;
+    const mantissa = padded / mag;
+    const nice = mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 2.5 ? 2.5 : mantissa <= 5 ? 5 : 10;
+    return nice * mag;
+};
+
+/** 20% headroom, then round up to a 2-significant-digit clean number (5210 → 6300, not 5992). */
+const niceAxisMax = (dataMax) => {
+    const n = Math.max(0, Number(dataMax) || 0);
+    const padded = n * 1.2;
+    if (padded <= 1) return 1;
+    if (padded <= 20) return Math.ceil(padded);
+    const exp = Math.floor(Math.log10(padded));
+    const mag = 10 ** Math.max(0, exp - 1);
+    return Math.ceil(padded / mag) * mag;
+};
+
+const QUALITY_GRADE_ORDER = ['A', 'B', 'C', 'rejected'];
+const QUALITY_FILL = {
+    a: '#22c55e',
+    b: '#3b82f6',
+    c: '#f59e0b',
+    rejected: '#ef4444',
+};
+
+const orderQualityGrades = (rows) => {
+    const byGrade = new Map((rows || []).map((row) => [String(row.grade), row]));
+    return QUALITY_GRADE_ORDER.map((grade) => byGrade.get(grade)).filter(Boolean);
+};
+
+const HarvestQualityDonut = ({ data, isDark }) => {
+    const chartData = orderQualityGrades(data);
+    const total = chartData.reduce((sum, row) => sum + Number(row.count || 0), 0);
+    const countA = Number(chartData.find((row) => row.grade === 'A')?.count || 0);
+    const countB = Number(chartData.find((row) => row.grade === 'B')?.count || 0);
+    const countRejected = Number(
+        chartData.find((row) => String(row.grade).toLowerCase() === 'rejected')?.count || 0
+    );
+    const gradedTotal = total - countRejected;
+    const highQualityPct = gradedTotal > 0
+        ? Math.round(((countA + countB) / gradedTotal) * 100)
+        : 0;
+
+    const renderActiveShape = (props) => (
+        <Sector
+            {...props}
+            outerRadius={(props.outerRadius || 0) + 5}
+            stroke="none"
+            style={{
+                filter: isDark ? 'brightness(1.2)' : 'brightness(1.08)',
+            }}
+        />
+    );
+
+    return (
+        <div className="h-[220px] flex flex-col">
+            <div className="relative flex-1 min-h-0">
+                <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                        <Tooltip
+                            {...CHART_TOOLTIP_PROPS}
+                            content={({ active, payload }) => {
+                                if (!active || !payload || payload.length === 0) return null;
+                                const item = payload[0]?.payload;
+                                return (
+                                    <ChartTooltipFrame>
+                                        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
+                                            <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">Grade {item?.grade}</p>
+                                            <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">
+                                                {item?.count ?? 0} <span className="text-xs font-normal text-gray-500">harvest{item?.count !== 1 ? 's' : ''}</span>
+                                            </p>
+                                        </div>
+                                    </ChartTooltipFrame>
+                                );
+                            }}
+                        />
+                        <Pie
+                            data={chartData}
+                            dataKey="count"
+                            nameKey="grade"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={56}
+                            outerRadius={76}
+                            startAngle={90}
+                            endAngle={-270}
+                            paddingAngle={0}
+                            cornerRadius={0}
+                            stroke="none"
+                            isAnimationActive={false}
+                            activeShape={renderActiveShape}
+                        >
+                            {chartData.map((entry) => {
+                                const gradeKey = String(entry.grade).toLowerCase();
+                                return (
+                                    <Cell
+                                        key={entry.grade}
+                                        fill={QUALITY_FILL[gradeKey] || QUALITY_FILL.rejected}
+                                        stroke="none"
+                                        strokeWidth={0}
+                                    />
+                                );
+                            })}
+                        </Pie>
+                    </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-2xl font-black text-gray-900 dark:text-white leading-none tabular-nums">
+                        {highQualityPct}%
+                    </span>
+                    <span className="text-[10px] font-semibold text-gray-500 dark:text-slate-400 mt-1 tracking-wide">
+                        High Quality
+                    </span>
+                    <span className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">
+                        {total} harvest{total !== 1 ? 's' : ''}
+                    </span>
+                </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-1 pb-0.5">
+                {chartData.map((entry) => {
+                    const count = Number(entry.count || 0);
+                    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                    const isRejected = String(entry.grade).toLowerCase() === 'rejected';
+                    const gradeKey = String(entry.grade).toLowerCase();
+                    return (
+                        <span
+                            key={entry.grade}
+                            className={`inline-flex items-center gap-1.5 text-[11px] ${
+                                isRejected && count > 0
+                                    ? 'font-bold text-amber-800 dark:text-amber-300'
+                                    : 'font-medium text-gray-600 dark:text-slate-300'
+                            }`}
+                        >
+                            <span
+                                className="h-2 w-2 rounded-full shrink-0"
+                                style={{ backgroundColor: QUALITY_FILL[gradeKey] || QUALITY_FILL.rejected }}
+                            />
+                            {entry.grade} · {count} ({pct}%)
+                        </span>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
+const GROWTH_STAGE_ORDER = [
+    'Seedling Stage',
+    'Vegetative Stage',
+    'Reproductive Stage',
+    'Ripening Stage',
+    'Ready for Harvest',
+];
+
+const GROWTH_STAGE_FILL = {
+    'Seedling Stage': '#4ade80',
+    'Vegetative Stage': '#22c55e',
+    'Reproductive Stage': '#166534',
+    'Ripening Stage': '#ca8a04',
+    'Ready for Harvest': '#d97706',
+};
+
+const GROWTH_STAGE_OTHER_FILL = '#94a3b8';
+
+const growthStageFill = (stage) => GROWTH_STAGE_FILL[stage] || GROWTH_STAGE_OTHER_FILL;
+
+const growthStageLegendLabel = (stage) => {
+    if (stage === 'Ready for Harvest') return 'Ready';
+    return String(stage || '').replace(/ Stage$/i, '') || stage;
+};
+
+const orderGrowthStages = (rows) => {
+    const byStage = new Map((rows || []).map((row) => [String(row.stage), row]));
+    const canonical = GROWTH_STAGE_ORDER.map((stage) => byStage.get(stage)).filter(Boolean);
+    const extras = [...byStage.keys()]
+        .filter((stage) => !GROWTH_STAGE_ORDER.includes(stage))
+        .sort((a, b) => a.localeCompare(b))
+        .map((stage) => byStage.get(stage));
+    return [...canonical, ...extras];
+};
+
+const GrowthStagesDonut = ({ data, isDark }) => {
+    const chartData = orderGrowthStages(data);
+    const total = chartData.reduce((sum, row) => sum + Number(row.count || 0), 0);
+    const dominant = chartData.reduce((best, row) => {
+        const count = Number(row.count || 0);
+        if (!best || count > best.count) return { stage: row.stage, count };
+        return best;
+    }, null);
+    const dominantPct = total > 0 && dominant ? (dominant.count / total) * 100 : 0;
+    const showDominant = dominantPct > 60 && chartData.length > 0;
+
+    const renderActiveShape = (props) => (
+        <Sector
+            {...props}
+            outerRadius={(props.outerRadius || 0) + 5}
+            stroke="none"
+            style={{
+                filter: isDark ? 'brightness(1.2)' : 'brightness(1.08)',
+            }}
+        />
+    );
+
+    return (
+        <div className="h-[220px] flex flex-col">
+            <div className="relative flex-1 min-h-0">
+                <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                        <Tooltip
+                            {...CHART_TOOLTIP_PROPS}
+                            content={({ active, payload }) => {
+                                if (!active || !payload || payload.length === 0) return null;
+                                const item = payload[0]?.payload;
+                                const count = Number(item?.count || 0);
+                                const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                                return (
+                                    <ChartTooltipFrame>
+                                        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
+                                            <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.stage}</p>
+                                            <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">
+                                                {count}{' '}
+                                                <span className="text-xs font-normal text-gray-500">
+                                                    planting{count !== 1 ? 's' : ''} ({pct}%)
+                                                </span>
+                                            </p>
+                                        </div>
+                                    </ChartTooltipFrame>
+                                );
+                            }}
+                        />
+                        <Pie
+                            data={chartData}
+                            dataKey="count"
+                            nameKey="stage"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={56}
+                            outerRadius={76}
+                            startAngle={90}
+                            endAngle={-270}
+                            paddingAngle={0}
+                            cornerRadius={0}
+                            stroke="none"
+                            isAnimationActive={false}
+                            activeShape={renderActiveShape}
+                        >
+                            {chartData.map((entry) => (
+                                <Cell
+                                    key={entry.stage}
+                                    fill={growthStageFill(entry.stage)}
+                                    stroke="none"
+                                    strokeWidth={0}
+                                />
+                            ))}
+                        </Pie>
+                    </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-2xl font-black text-gray-900 dark:text-white leading-none tabular-nums">
+                        {total}
+                    </span>
+                    <span className="text-[10px] font-semibold text-gray-500 dark:text-slate-400 mt-1 tracking-wide">
+                        Active Plantings
+                    </span>
+                    {showDominant && (
+                        <span className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5 max-w-[120px] truncate text-center">
+                            {growthStageLegendLabel(dominant.stage)}
+                        </span>
+                    )}
+                </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-1 pb-0.5">
+                {chartData.map((entry) => {
+                    const count = Number(entry.count || 0);
+                    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                    return (
+                        <span
+                            key={entry.stage}
+                            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-600 dark:text-slate-300"
+                        >
+                            <span
+                                className="h-2 w-2 rounded-full shrink-0"
+                                style={{ backgroundColor: growthStageFill(entry.stage) }}
+                            />
+                            {growthStageLegendLabel(entry.stage)} · {count} ({pct}%)
+                        </span>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
 const Analytics = () => {
-    const [dateRange, setDateRange] = useState('7d');
+    const { isDark } = useTheme();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const gridStroke = isDark ? '#334155' : '#e2e8f0';
+    const tickFill = isDark ? '#cbd5e1' : '#9ca3af';
+    const tickStyle = { fill: tickFill, fontSize: 10.5 };
+    const areaDotStroke = isDark ? '#1e293b' : '#fff';
+
+    const dateRange = pickAllowed(searchParams.get('range'), ANALYTICS_RANGES, '7d');
+    const setDateRange = (range) => {
+        patchSearchParams(setSearchParams, searchParams, { range });
+    };
     const [plantingFilters] = useState({
         variety_class: '',
         variety_id: '',
@@ -337,14 +836,8 @@ const Analytics = () => {
             const stage = String(p?.growth_stage || 'Unknown');
             counts[stage] = (counts[stage] || 0) + 1;
         });
-        const entries = Object.entries(counts)
-            .map(([stage, count]) => ({ stage, count }))
-            .sort((a, b) => b.count - a.count);
-        return entries.map((e, idx) => ({
-            stage: e.stage,
-            count: e.count,
-            color: COLORS[idx % COLORS.length]
-        }));
+        const entries = Object.entries(counts).map(([stage, count]) => ({ stage, count }));
+        return orderGrowthStages(entries);
     }, [plantings]);
 
     const seasonComparison = useMemo(() => {
@@ -468,8 +961,7 @@ const Analytics = () => {
     const ActivityCursor = (props) => {
         const { x, y, width, height, payload } = props;
         if (!payload || !payload[0]) return null;
-        const activeObject = payload[0]?.payload;
-        const color = activeObject?.color || '#22c55e';
+        const color = isDark ? '#4ade80' : '#14532d';
         return (
             <rect
                 x={x}
@@ -487,7 +979,7 @@ const Analytics = () => {
         const { x, y, width, height, payload } = props;
         if (!payload || !payload[0]) return null;
         const item = payload[0]?.payload;
-        const color = item?.season === 'Dry' ? '#f59e0b' : '#3b82f6';
+        const color = seasonBarFill(item?.season);
         return (
             <rect
                 x={x}
@@ -508,10 +1000,11 @@ const Analytics = () => {
         const harvestsList = dataPoint.harvestsList || [];
 
         return (
-            <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800 text-white rounded-xl p-3.5 shadow-2xl backdrop-blur-sm max-w-xs md:max-w-md">
-                <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
-                    <span className="text-xs font-semibold text-slate-400">{dataPoint.month}</span>
-                    <span className="text-sm font-bold text-emerald-400 ml-3">
+            <ChartTooltipFrame>
+            <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl p-3.5 shadow-2xl backdrop-blur-sm max-w-xs md:max-w-md">
+                <div className="flex justify-between items-center border-b border-gray-100 dark:border-slate-800 pb-2 mb-2">
+                    <span className="text-xs font-semibold text-gray-500 dark:text-slate-400">{dataPoint.month}</span>
+                    <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 ml-3">
                         Total: {dataPoint.yield_kg.toLocaleString()} kg
                     </span>
                 </div>
@@ -522,16 +1015,16 @@ const Analytics = () => {
                                 ? new Date(h.harvest_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                                 : '—';
                             return (
-                                <div key={h.id || idx} className="text-xs flex flex-col border-b border-slate-800/40 last:border-0 pb-1.5 last:pb-0">
+                                <div key={h.id || idx} className="text-xs flex flex-col border-b border-gray-100 dark:border-slate-800/40 last:border-0 pb-1.5 last:pb-0">
                                     <div className="flex justify-between items-start gap-3">
-                                        <span className="font-semibold text-slate-200">
+                                        <span className="font-semibold text-gray-900 dark:text-slate-200">
                                             {h.variety || 'Unknown Variety'}
                                         </span>
-                                        <span className="font-bold text-emerald-400 shrink-0">
+                                        <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
                                             {Number(h.yield_kg || 0).toLocaleString()} kg
                                         </span>
                                     </div>
-                                    <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
+                                    <div className="flex justify-between text-[10px] text-gray-400 dark:text-slate-400 mt-0.5">
                                         <span>{h.field_name || 'No Field'}</span>
                                         <span>{hDate}</span>
                                     </div>
@@ -540,9 +1033,10 @@ const Analytics = () => {
                         })}
                     </div>
                 ) : (
-                    <p className="text-[11px] text-slate-500 italic">No detailed harvests recorded</p>
+                    <p className="text-[11px] text-gray-400 dark:text-slate-500 italic">No detailed harvests recorded</p>
                 )}
             </div>
+            </ChartTooltipFrame>
         );
     };
 
@@ -550,10 +1044,12 @@ const Analytics = () => {
         if (!active || !payload || payload.length === 0) return null;
         const item = payload[0]?.payload;
         return (
+            <ChartTooltipFrame>
             <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
                 <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.type}</p>
                 <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">{item?.count ?? 0} <span className="text-xs font-normal text-gray-500">activities</span></p>
             </div>
+            </ChartTooltipFrame>
         );
     }; const successRateValue = Number(totals.successRate).toFixed(1);
 
@@ -653,8 +1149,8 @@ const Analytics = () => {
                         value: harvestsError ? '—' : formatNumber(totals.totalYield),
                         unit: harvestsError ? 'Unavailable' : 'kg',
                         icon: Wheat,
-                        accent: '#d97706',
-                        iconBg: '#fffbeb',
+                        accent: isDark ? '#fbbf24' : '#d97706',
+                        iconBg: isDark ? 'rgba(217, 119, 6, 0.18)' : '#fffbeb',
                         isLoading: showHarvestSkeleton
                     },
                     {
@@ -662,8 +1158,8 @@ const Analytics = () => {
                         value: harvestsError ? '—' : Number(totals.avgYield || 0).toFixed(1),
                         unit: harvestsError ? 'Unavailable' : 'kg/harvest',
                         icon: TrendingUp,
-                        accent: '#16a34a',
-                        iconBg: '#f0fdf4',
+                        accent: isDark ? '#4ade80' : '#16a34a',
+                        iconBg: isDark ? 'rgba(22, 163, 74, 0.18)' : '#f0fdf4',
                         isLoading: showHarvestSkeleton
                     },
                     {
@@ -671,8 +1167,8 @@ const Analytics = () => {
                         value: plantingsError ? '—' : formatNumber(totals.activeCount),
                         unit: plantingsError ? 'Unavailable' : 'in progress',
                         icon: Sprout,
-                        accent: '#0d9488',
-                        iconBg: '#e0fef9',
+                        accent: isDark ? '#2dd4bf' : '#0d9488',
+                        iconBg: isDark ? 'rgba(13, 148, 136, 0.18)' : '#e0fef9',
                         isLoading: showPlantingSkeleton
                     },
                     {
@@ -680,36 +1176,43 @@ const Analytics = () => {
                         value: harvestsError ? '—' : `${successRateValue}%`,
                         unit: harvestsError ? 'Unavailable' : 'grade A & B',
                         icon: Award,
-                        accent: '#2563eb',
-                        iconBg: '#eff6ff',
+                        accent: isDark ? '#60a5fa' : '#2563eb',
+                        iconBg: isDark ? 'rgba(37, 99, 235, 0.18)' : '#eff6ff',
                         tooltip: 'Percentage of Harvests achieving Quality Grade A or B',
                         isLoading: showHarvestSkeleton
                     }
                 ].map((card) => {
                     if (card.isLoading) return <SkeletonStatCard key={card.label} />;
                     const Icon = card.icon;
+                    const isHero = card.label === 'Total Yield';
                     return (
                         <div
                             key={card.label}
-                            className="group relative text-center bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden flex flex-col items-center justify-center p-2.5 transition-transform hover:-translate-y-1 md:text-left md:items-start md:p-5 md:pl-6"
+                            className={`group relative text-center border rounded-2xl overflow-hidden flex flex-col items-center justify-center transition-transform hover:-translate-y-1 md:text-left md:items-start ${
+                                isHero
+                                    ? 'bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/30 dark:to-slate-800 border-amber-200/80 dark:border-amber-800/40 shadow-md p-3 md:p-6 md:pl-7'
+                                    : 'bg-white border-gray-100 shadow-sm p-2.5 md:p-5 md:pl-6'
+                            }`}
                         >
                             <span
-                                className="absolute left-0 top-0 w-full h-[3px] md:bottom-0 md:h-full md:w-[4px]"
+                                className={`absolute left-0 top-0 w-full md:bottom-0 md:h-full ${
+                                    isHero ? 'h-[4px] md:w-[6px]' : 'h-[3px] md:w-[4px]'
+                                }`}
                                 style={{ backgroundColor: card.accent }}
                             />
                             <div className="flex flex-col items-center justify-center gap-1.5 md:flex-row md:items-start md:justify-between md:gap-4 md:w-full">
                                 <div
-                                    className="rounded-xl p-1.5 border border-gray-100 md:p-3"
+                                    className={`rounded-xl border border-gray-100 ${isHero ? 'p-2 md:p-3.5' : 'p-1.5 md:p-3'}`}
                                     style={{ backgroundColor: card.iconBg }}
                                 >
-                                    <Icon size={16} className="md:size-[20px]" style={{ color: card.accent }} />
+                                    <Icon size={isHero ? 18 : 16} className={isHero ? 'md:size-[22px]' : 'md:size-[20px]'} style={{ color: card.accent }} />
                                 </div>
                                 <div className="text-center md:text-right">
-                                    <div className="text-base font-bold text-gray-900 leading-none md:text-3xl">{card.value}</div>
-                                    <div className="text-[9px] text-gray-500 mt-0.5 md:text-xs md:mt-1">{card.unit}</div>
+                                    <div className={`text-gray-900 leading-none ${isHero ? 'text-2xl font-black md:text-4xl' : 'text-base font-bold md:text-2xl'}`}>{card.value}</div>
+                                    <div className={`text-gray-500 mt-0.5 ${isHero ? 'text-[10px] md:text-sm md:mt-1.5' : 'text-[9px] md:text-xs md:mt-1'}`}>{card.unit}</div>
                                 </div>
                             </div>
-                            <div className="mt-1.5 text-[9px] font-semibold text-gray-800 leading-tight md:mt-3 md:text-sm" title={card.tooltip}>{card.label}</div>
+                            <div className={`mt-1.5 font-semibold text-gray-800 leading-tight md:mt-3 ${isHero ? 'text-[10px] md:text-base' : 'text-[9px] md:text-sm'}`} title={card.tooltip}>{card.label}</div>
                         </div>
                     );
                 })}
@@ -717,55 +1220,138 @@ const Analytics = () => {
 
             {/* Section 2: Harvest yield over time */}
             <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
-                <div className="mb-4">
-                    <h2 className="text-lg font-bold text-gray-800">Harvest Yield Over Time</h2>
-                    <p className="text-xs text-gray-400 mt-1">{timelineSubtitleForRange(dateRange)}</p>
+                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <h2 className="text-lg font-bold text-gray-800">Harvest Yield Over Time</h2>
+                        <p className="text-xs text-gray-400 mt-1">{timelineSubtitleForRange(dateRange)}</p>
+                    </div>
+                    <div className="flex items-center gap-3 text-[10px] font-semibold text-gray-500 dark:text-slate-400">
+                        <span className="inline-flex items-center gap-1.5">
+                            <span className="h-2.5 w-3.5 rounded-sm bg-blue-500/20 dark:bg-blue-400/25 border border-blue-400/30" />
+                            Wet
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                            <span className="h-2.5 w-3.5 rounded-sm bg-amber-500/20 dark:bg-amber-400/25 border border-amber-400/30" />
+                            Dry
+                        </span>
+                    </div>
                 </div>
 
                 {showHarvestSkeleton ? <SkeletonChartBars /> : harvestsError ? <ErrorChart message="Unable to load harvest data." /> : (() => {
                     const chartData = fillTimelineForRange(harvestYieldOverTime, dateRange);
                     const isPlaceholder = !chartData.some((row) => Number(row.yield_kg) > 0);
+                    if (isPlaceholder) {
+                        return <EmptyChart icon={Wheat} message="No harvest yield data in this range" />;
+                    }
+
+                    const { peakIdx, lowIdx } = peakAndLowIndexes(chartData);
+                    const seasonBands = seasonBandsFromYieldTimeline(chartData, plantingById);
+                    const wetFill = isDark ? 'rgba(59, 130, 246, 0.12)' : 'rgba(59, 130, 246, 0.07)';
+                    const dryFill = isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.07)';
+                    const gold = isDark ? '#fbbf24' : '#f59e0b';
+                    const riceGreen = isDark ? '#166534' : '#14532d';
+                    const lineColor = isDark ? '#f59e0b' : '#b45309';
+                    const axisTick = {
+                        fill: isDark ? '#e2e8f0' : '#4b5563',
+                        fontSize: 11,
+                        fontWeight: 600,
+                    };
+                    const calloutFill = isDark ? '#e2e8f0' : '#374151';
+
+                    const yieldDot = (props) => {
+                        const { cx, cy, index } = props;
+                        if (cx == null || cy == null) return null;
+                        if (index !== peakIdx && index !== lowIdx) return null;
+                        const isPeak = index === peakIdx;
+                        return (
+                            <circle
+                                cx={cx}
+                                cy={cy}
+                                r={5}
+                                fill={isPeak ? gold : riceGreen}
+                                stroke={areaDotStroke}
+                                strokeWidth={1.75}
+                            />
+                        );
+                    };
+
+                    const yieldCallout = (props) => {
+                        const { x, y, index } = props;
+                        if (index !== peakIdx && index !== lowIdx) return null;
+                        if (x == null || y == null) return null;
+                        const isPeak = index === peakIdx;
+                        const nearRight = index >= chartData.length - 2;
+                        return (
+                            <text
+                                x={x}
+                                y={y - 10}
+                                textAnchor={nearRight ? 'end' : 'middle'}
+                                fill={calloutFill}
+                                fontSize={10}
+                                fontWeight={700}
+                            >
+                                {chartData[index].month} · {isPeak ? 'Peak' : 'Low'}
+                            </text>
+                        );
+                    };
+
                     return (
-                        <div className="h-[220px] relative">
+                        <div
+                            className="h-[220px] relative [&_.recharts-area-area]:[mask-image:linear-gradient(to_right,black_0%,black_88%,transparent_100%)] [&_.recharts-area-area]:[-webkit-mask-image:linear-gradient(to_right,black_0%,black_88%,transparent_100%)]"
+                        >
                             <ResponsiveContainer width="100%" height={220}>
-                                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                <AreaChart data={chartData} margin={{ top: 28, right: 16, left: 4, bottom: 4 }}>
                                     <defs>
-                                        <linearGradient id="yieldGradient" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.28} />
-                                            <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                                        <linearGradient id="yieldHarvestGradient" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+                                            <stop offset="0%" stopColor={gold} stopOpacity={isDark ? 0.38 : 0.42} />
+                                            <stop offset="52%" stopColor={isDark ? '#22c55e' : '#166534'} stopOpacity={isDark ? 0.22 : 0.28} />
+                                            <stop offset="100%" stopColor={riceGreen} stopOpacity={0} />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-700" vertical={false} />
-                                    <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 10.5 }} />
+                                    {seasonBands.map((band, idx) => (
+                                        <ReferenceArea
+                                            key={`${band.season}-${band.x1}-${idx}`}
+                                            x1={band.x1}
+                                            x2={band.x2}
+                                            fill={band.season === 'Wet' ? wetFill : dryFill}
+                                            fillOpacity={1}
+                                            ifOverflow="visible"
+                                            strokeOpacity={0}
+                                        />
+                                    ))}
+                                    <XAxis
+                                        dataKey="month"
+                                        axisLine={false}
+                                        tickLine={false}
+                                        tick={axisTick}
+                                        interval="preserveStartEnd"
+                                    />
                                     <YAxis
                                         axisLine={false}
                                         tickLine={false}
-                                        tick={{ fill: '#9ca3af', fontSize: 10.5 }}
+                                        tick={axisTick}
                                         tickFormatter={(v) => `${v}kg`}
-                                        domain={isPlaceholder ? [0, 10000] : undefined}
                                     />
-                                    {!isPlaceholder && <Tooltip content={areaTooltip} />}
+                                    <Tooltip
+                                        {...CHART_TOOLTIP_PROPS}
+                                        content={areaTooltip}
+                                    />
                                     <Area
                                         type="monotone"
                                         dataKey="yield_kg"
-                                        stroke={isPlaceholder ? "#94a3b8" : "#22c55e"}
-                                        strokeWidth={isPlaceholder ? 1.5 : 2.5}
-                                        strokeDasharray={isPlaceholder ? "4 4" : undefined}
-                                        fill={isPlaceholder ? "none" : "url(#yieldGradient)"}
+                                        stroke={lineColor}
+                                        strokeWidth={2.5}
+                                        fill="url(#yieldHarvestGradient)"
                                         name="Yield"
-                                        dot={isPlaceholder ? false : { r: 4, fill: '#22c55e', strokeWidth: 1.5, stroke: '#fff' }}
-                                    />
+                                        dot={yieldDot}
+                                        activeDot={{ r: 6, fill: gold, stroke: areaDotStroke, strokeWidth: 1.5 }}
+                                    >
+                                        {(peakIdx != null && lowIdx != null) && (
+                                            <LabelList dataKey="yield_kg" content={yieldCallout} />
+                                        )}
+                                    </Area>
                                 </AreaChart>
                             </ResponsiveContainer>
-
-                            {isPlaceholder && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px] pointer-events-none">
-                                    <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
-                                        <Wheat size={16} className="text-emerald-600 animate-pulse" />
-                                        <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No harvest yield data in this range</span>
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     );
                 })()}
@@ -780,83 +1366,11 @@ const Analytics = () => {
                         <p className="text-xs text-gray-400 mt-1">Distribution by quality grade</p>
                     </div>
 
-                    {showHarvestSkeleton ? <SkeletonDonutChart /> : harvestsError ? <ErrorChart message="Unable to load harvest data." /> : (() => {
-                        if (harvestQualityDistribution.length === 0) {
-                            return (
-                                <div className="h-[220px] relative flex items-center justify-center">
-                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px]">
-                                        <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
-                                            <Award size={16} className="text-emerald-600 animate-pulse" />
-                                            <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No quality distribution data</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        }
-
-                        const isSingle = harvestQualityDistribution.length === 1;
-                        const chartData = harvestQualityDistribution;
-
-                        return (
-                            <div className="h-[220px] relative flex items-center justify-center">
-                                <ResponsiveContainer width="100%" height={220}>
-                                    <PieChart>
-                                        <Tooltip
-                                            content={({ active, payload }) => {
-                                                if (!active || !payload || payload.length === 0) return null;
-                                                const item = payload[0]?.payload;
-                                                return (
-                                                    <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
-                                                        <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">Grade {item?.grade}</p>
-                                                        <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">
-                                                            {item?.count ?? 0} <span className="text-xs font-normal text-gray-500">harvest{item?.count !== 1 ? 's' : ''}</span>
-                                                        </p>
-                                                    </div>
-                                                );
-                                            }}
-                                        />
-                                        <Pie
-                                            data={chartData}
-                                            dataKey="count"
-                                            nameKey="grade"
-                                            innerRadius={isSingle ? 55 : 35}
-                                            outerRadius={75}
-                                            paddingAngle={isSingle ? 0 : 3}
-                                            cornerRadius={isSingle ? 0 : 8}
-                                        >
-                                            {chartData.map((entry) => {
-                                                const gradeKey = String(entry.grade).toLowerCase();
-                                                const fill =
-                                                    gradeKey === 'a' ? '#22c55e'
-                                                        : gradeKey === 'b' ? '#3b82f6'
-                                                            : gradeKey === 'c' ? '#f59e0b'
-                                                                : '#ef4444';
-                                                return <Cell key={entry.grade} fill={fill} />;
-                                            })}
-                                        </Pie>
-                                        <Legend
-                                            verticalAlign="bottom"
-                                            align="center"
-                                            formatter={(value, entry) => {
-                                                const count = entry?.payload?.count;
-                                                if (isSingle) {
-                                                    return `Grade ${value} · ${count} harvest${count !== 1 ? 's' : ''}`;
-                                                }
-                                                return `${value} (${count})`;
-                                            }}
-                                        />
-                                    </PieChart>
-                                </ResponsiveContainer>
-
-                                {isSingle && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pb-[20px]">
-                                        <span className="text-2xl font-black text-gray-900 dark:text-white leading-none">{chartData[0].grade}</span>
-                                        <span className="text-[10px] font-bold text-gray-400 mt-0.5">100%</span>
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })()}
+                    {showHarvestSkeleton ? <SkeletonDonutChart /> : harvestsError ? <ErrorChart message="Unable to load harvest data." /> : harvestQualityDistribution.length === 0 ? (
+                        <EmptyChart icon={Award} message="No quality distribution data in this range" />
+                    ) : (
+                        <HarvestQualityDonut data={harvestQualityDistribution} isDark={isDark} />
+                    )}
                 </section>
 
                 {/* Activity Breakdown */}
@@ -868,35 +1382,32 @@ const Analytics = () => {
 
                     {showActivitySkeleton ? <SkeletonHorizontalBarChart /> : activitiesError ? <ErrorChart message="Unable to load activity data." /> : (() => {
                         if (activityBreakdown.length === 0) {
-                            return (
-                                <div className="h-[220px] relative flex items-center justify-center">
-                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px]">
-                                        <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
-                                            <Activity size={16} className="text-emerald-600 animate-pulse" />
-                                            <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No activity logs in this range</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
+                            return <EmptyChart icon={Activity} message="No activity logs in this range" />;
                         }
 
-                        const chartData = activityBreakdown;
+                        const chartData = [...activityBreakdown].sort((a, b) => b.count - a.count);
+                        const fills = rankFillsForValues(chartData.map((row) => row.count), isDark);
+                        const labelFill = isDark ? '#e2e8f0' : '#374151';
+                        const categoryTick = {
+                            fill: isDark ? '#e2e8f0' : '#4b5563',
+                            fontSize: 11,
+                            fontWeight: 600,
+                        };
 
                         return (
-                            <div className="h-[220px] relative">
+                            <div className={`h-[220px] relative ${barHoverClassName(isDark)}`}>
                                 <ResponsiveContainer width="100%" height={220}>
                                     <BarChart
                                         data={chartData}
                                         layout="vertical"
-                                        margin={{ top: 10, right: 35, left: 0, bottom: 0 }}
+                                        margin={{ top: 8, right: 36, left: 0, bottom: 0 }}
                                     >
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-700" horizontal={true} vertical={false} />
                                         <XAxis
                                             type="number"
                                             axisLine={false}
                                             tickLine={false}
-                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }}
-                                            domain={[0, dataMax => Math.max(5, Math.ceil(dataMax * 1.2))]}
+                                            tick={categoryTick}
+                                            domain={[0, (dataMax) => activityAxisMax(dataMax)]}
                                             allowDecimals={false}
                                         />
                                         <YAxis
@@ -904,19 +1415,21 @@ const Analytics = () => {
                                             dataKey="type"
                                             axisLine={false}
                                             tickLine={false}
-                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }}
+                                            tick={categoryTick}
                                             width={110}
+                                            reversed
                                         />
-                                        <Tooltip content={activityTooltip} cursor={<ActivityCursor />} />
-                                        <Bar dataKey="count" radius={[0, 6, 6, 0]} maxBarSize={48}>
+                                        <Tooltip {...CHART_TOOLTIP_PROPS} content={activityTooltip} cursor={<ActivityCursor />} />
+                                        <Bar dataKey="count" radius={[0, 8, 8, 0]} maxBarSize={48} isAnimationActive={false}>
                                             {chartData.map((entry, idx) => (
-                                                <Cell key={`cell-${idx}`} fill={entry.color} />
+                                                <Cell key={entry.type} fill={fills[idx]} />
                                             ))}
                                             <LabelList
                                                 dataKey="count"
                                                 position="right"
-                                                fill="#9ca3af"
-                                                fontSize={10.5}
+                                                fill={labelFill}
+                                                fontSize={11}
+                                                fontWeight={700}
                                                 offset={8}
                                                 formatter={(v) => `${v}`}
                                             />
@@ -940,56 +1453,53 @@ const Analytics = () => {
 
                     {showHarvestSkeleton ? <SkeletonChartBars /> : harvestsError ? <ErrorChart message="Unable to load harvest data." /> : (() => {
                         if (varietyPerformance.length === 0) {
-                            return (
-                                <div className="h-[220px] relative flex items-center justify-center">
-                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px]">
-                                        <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
-                                            <Wheat size={16} className="text-emerald-600 animate-pulse" />
-                                            <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No variety yield found in this range</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
+                            return <EmptyChart icon={Wheat} message="No variety yield found in this range" />;
                         }
 
-                        const chartData = varietyPerformance;
+                        const chartData = [...varietyPerformance].sort(
+                            (a, b) => Number(b.yield_kg || 0) - Number(a.yield_kg || 0)
+                        );
+                        const fills = rankFillsForValues(chartData.map((row) => row.yield_kg), isDark);
+                        const axisTick = {
+                            fill: isDark ? '#e2e8f0' : '#4b5563',
+                            fontSize: 11,
+                            fontWeight: 600,
+                        };
 
                         return (
-                            <div className="h-[220px] relative">
+                            <div className={`h-[220px] relative ${barHoverClassName(isDark)}`}>
                                 <ResponsiveContainer width="100%" height={220}>
-                                    <BarChart data={chartData} margin={{ top: 25, right: 10, left: 0, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-700" vertical={false} />
-                                        <XAxis dataKey="variety" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 10.5 }} interval={0} />
+                                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                        <XAxis dataKey="variety" axisLine={false} tickLine={false} tick={axisTick} interval={0} />
                                         <YAxis
                                             axisLine={false}
                                             tickLine={false}
-                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }}
+                                            tick={axisTick}
                                             tickFormatter={(v) => `${v.toLocaleString()}`}
-                                            domain={[0, dataMax => Math.max(10, Math.ceil(dataMax * 1.15))]}
+                                            domain={[0, (dataMax) => niceAxisMax(dataMax)]}
                                         />
                                         <Tooltip
-                                            cursor={{ fill: '#22c55e', fillOpacity: 0.06, rx: 6 }}
+                                            {...CHART_TOOLTIP_PROPS}
+                                            cursor={{ fill: isDark ? '#4ade80' : '#14532d', fillOpacity: 0.06, rx: 6 }}
                                             content={({ active, payload }) => {
                                                 if (!active || !payload || payload.length === 0) return null;
                                                 const item = payload[0]?.payload;
                                                 return (
+                                                    <ChartTooltipFrame>
                                                     <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
                                                         <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.variety}</p>
                                                         <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">
                                                             {Number(item?.yield_kg || 0).toLocaleString()} <span className="text-xs font-normal text-gray-500">kg</span>
                                                         </p>
                                                     </div>
+                                                    </ChartTooltipFrame>
                                                 );
                                             }}
                                         />
-                                        <Bar dataKey="yield_kg" fill="#22c55e" radius={[6, 6, 0, 0]} maxBarSize={60}>
-                                            <LabelList
-                                                dataKey="yield_kg"
-                                                position="top"
-                                                fill="#9ca3af"
-                                                fontSize={10.5}
-                                                formatter={(v) => `${Number(v).toLocaleString()} kg`}
-                                            />
+                                        <Bar dataKey="yield_kg" radius={[8, 8, 0, 0]} maxBarSize={60} isAnimationActive={false}>
+                                            {chartData.map((entry, idx) => (
+                                                <Cell key={entry.variety} fill={fills[idx]} />
+                                            ))}
                                         </Bar>
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -1006,85 +1516,9 @@ const Analytics = () => {
                     </div>
 
                     {showPlantingSkeleton ? <SkeletonDonutChart /> : plantingsError ? <ErrorChart message="Unable to load planting data." /> : growthStageDistribution.length === 0 ? (
-                        <EmptyChart message="No active plantings" />
-                    ) : growthStageDistribution.length === 1 ? (
-                        <div className="flex flex-col items-center justify-center h-[220px] text-center px-4 w-full">
-                            <div className="flex flex-col items-center mb-4">
-                                <span className="text-5xl font-extrabold text-gray-900 leading-none">
-                                    {growthStageDistribution[0].count}
-                                </span>
-                                <span className="text-[10px] font-bold tracking-wider uppercase text-gray-400 mt-1">
-                                    Active Plantings
-                                </span>
-                            </div>
-
-                            <div
-                                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold mb-3 shadow-sm border border-white/50"
-                                style={{ backgroundColor: `${growthStageDistribution[0].color}15`, color: growthStageDistribution[0].color }}
-                            >
-                                <Sprout size={14} />
-                                {growthStageDistribution[0].stage}
-                            </div>
-
-                            <div className="w-full max-w-[200px] mb-3">
-                                <div className="flex items-center justify-between text-[11px] font-bold mb-1.5" style={{ color: growthStageDistribution[0].color }}>
-                                    <span>Distribution</span>
-                                    <span>{Math.round((growthStageDistribution[0].count / totals.activeCount) * 100)}%</span>
-                                </div>
-                                <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                    <div
-                                        className="h-full rounded-full"
-                                        style={{
-                                            width: `${(growthStageDistribution[0].count / totals.activeCount) * 100}%`,
-                                            backgroundColor: growthStageDistribution[0].color
-                                        }}
-                                    />
-                                </div>
-                            </div>
-
-                            <p className="text-[11px] font-medium text-gray-500 leading-tight max-w-[220px]">
-                                {growthStageDistribution[0].count === totals.activeCount ? 'All ' : ''}{growthStageDistribution[0].count} active planting{growthStageDistribution[0].count !== 1 ? 's' : ''} {growthStageDistribution[0].count === 1 ? 'is' : 'are'} currently in the <span className="font-semibold text-gray-700">{growthStageDistribution[0].stage}</span>.
-                            </p>
-                        </div>
+                        <EmptyChart icon={Sprout} message="No active plantings" />
                     ) : (
-                        <ResponsiveContainer width="100%" height={220}>
-                            <PieChart>
-                                <Tooltip
-                                    content={({ active, payload }) => {
-                                        if (!active || !payload || payload.length === 0) return null;
-                                        const item = payload[0]?.payload;
-                                        return (
-                                            <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
-                                                <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.stage}</p>
-                                                <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">{item?.count ?? 0} <span className="text-xs font-normal text-gray-500">plantings</span></p>
-                                            </div>
-                                        );
-                                    }}
-                                />
-                                <Pie
-                                    data={growthStageDistribution}
-                                    dataKey="count"
-                                    nameKey="stage"
-                                    innerRadius={35}
-                                    outerRadius={75}
-                                    paddingAngle={3}
-                                    cornerRadius={8}
-                                >
-                                    {growthStageDistribution.map((entry) => (
-                                        <Cell key={entry.stage} fill={entry.color} />
-                                    ))}
-                                </Pie>
-                                <Legend
-                                    verticalAlign="bottom"
-                                    align="center"
-                                    formatter={(value, entry) => {
-                                        const item = entry?.payload;
-                                        const count = item?.count;
-                                        return `${value} (${count})`;
-                                    }}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
+                        <GrowthStagesDonut data={growthStageDistribution} isDark={isDark} />
                     )}
                 </section>
 
@@ -1097,16 +1531,7 @@ const Analytics = () => {
 
                     {showHarvestSkeleton ? <SkeletonChartBars /> : harvestsError ? <ErrorChart message="Unable to load harvest data." /> : (() => {
                         if (seasonComparison.length === 0) {
-                            return (
-                                <div className="h-[220px] relative flex items-center justify-center">
-                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-50/10 dark:bg-slate-900/10 backdrop-blur-[0.5px]">
-                                        <div className="bg-slate-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 rounded-xl px-4 py-2 shadow-lg flex items-center gap-2">
-                                            <Wheat size={16} className="text-emerald-600 animate-pulse" />
-                                            <span className="text-xs font-semibold text-gray-500 dark:text-slate-300">No season yield data found</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
+                            return <EmptyChart icon={Wheat} message="No season yield data found" />;
                         }
 
                         // Ensure both Wet and Dry seasons always appear in the chart
@@ -1114,48 +1539,46 @@ const Analytics = () => {
                         const dryRecord = seasonComparison.find(s => String(s.season).toLowerCase().includes('dry')) || { season: 'Dry', yield_kg: 0 };
 
                         const chartData = [wetRecord, dryRecord];
+                        const axisTick = {
+                            fill: isDark ? '#e2e8f0' : '#4b5563',
+                            fontSize: 11,
+                            fontWeight: 600,
+                        };
 
                         return (
-                            <div className="h-[220px] relative">
+                            <div className={`h-[220px] relative ${barHoverClassName(isDark)}`}>
                                 <ResponsiveContainer width="100%" height={220}>
-                                    <BarChart data={chartData} margin={{ top: 25, right: 10, left: 0, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-700" vertical={false} />
-                                        <XAxis dataKey="season" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 10.5 }} />
+                                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                        <XAxis dataKey="season" axisLine={false} tickLine={false} tick={axisTick} />
                                         <YAxis
                                             axisLine={false}
                                             tickLine={false}
-                                            tick={{ fill: '#9ca3af', fontSize: 10.5 }}
+                                            tick={axisTick}
                                             tickFormatter={(v) => `${v.toLocaleString()}`}
-                                            domain={[0, dataMax => Math.max(10, Math.ceil(dataMax * 1.15))]}
+                                            domain={[0, (dataMax) => niceAxisMax(dataMax)]}
                                         />
                                         <Tooltip
+                                            {...CHART_TOOLTIP_PROPS}
                                             cursor={<SeasonCursor />}
                                             content={({ active, payload }) => {
                                                 if (!active || !payload || payload.length === 0) return null;
                                                 const item = payload[0]?.payload;
                                                 return (
+                                                    <ChartTooltipFrame>
                                                     <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xl px-4 py-2.5 text-sm">
                                                         <p className="text-gray-500 dark:text-slate-400 text-xs font-medium">{item?.season} Season</p>
                                                         <p className="font-bold text-gray-900 dark:text-slate-100 mt-0.5">
                                                             {Number(item?.yield_kg || 0).toLocaleString()} <span className="text-xs font-normal text-gray-500">kg</span>
                                                         </p>
                                                     </div>
+                                                    </ChartTooltipFrame>
                                                 );
                                             }}
                                         />
-                                        <Bar dataKey="yield_kg" radius={[6, 6, 0, 0]} maxBarSize={60}>
-                                            {chartData.map((entry) => {
-                                                const seasonKey = String(entry.season).toLowerCase();
-                                                const fill = seasonKey.includes('wet') ? '#3b82f6' : '#f59e0b';
-                                                return <Cell key={entry.season} fill={fill} />;
-                                            })}
-                                            <LabelList
-                                                dataKey="yield_kg"
-                                                position="top"
-                                                fill="#9ca3af"
-                                                fontSize={10.5}
-                                                formatter={(v) => `${Number(v).toLocaleString()} kg`}
-                                            />
+                                        <Bar dataKey="yield_kg" radius={[8, 8, 0, 0]} maxBarSize={60} shape={SeasonZeroAwareBar} isAnimationActive={false}>
+                                            {chartData.map((entry) => (
+                                                <Cell key={entry.season} fill={seasonBarFill(entry.season)} />
+                                            ))}
                                         </Bar>
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -1196,40 +1619,33 @@ const Analytics = () => {
                                             <p className="font-bold text-gray-900 dark:text-slate-100 break-words">{row.fieldName}</p>
                                         </div>
                                         <div className="flex items-center gap-1 shrink-0">
-                                            <span
-                                                className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${row.status === 'Active'
-                                                    ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
-                                                    : 'bg-gray-100 dark:bg-slate-800/60 text-gray-700 dark:text-slate-300'
-                                                    }`}
-                                            >
-                                                {row.status}
-                                            </span>
+                                            <FieldStatusBadge status={row.status} />
                                         </div>
                                     </div>
                                     <div className="mt-3 border-t border-gray-100 dark:border-slate-700 pt-3 space-y-2.5 text-sm">
                                         <div className="flex items-start justify-between gap-3">
                                             <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Plantings</span>
-                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">{row.plantingsCount}</span>
+                                            <span className="font-medium text-slate-600 dark:text-slate-300 text-right tabular-nums">{row.plantingsCount}</span>
                                         </div>
                                         <div className="flex items-start justify-between gap-3">
                                             <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Harvests</span>
-                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">{row.harvestCount}</span>
+                                            <span className="font-medium text-slate-600 dark:text-slate-300 text-right tabular-nums">{row.harvestCount}</span>
                                         </div>
                                         <div className="flex items-start justify-between gap-3">
                                             <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Total Yield</span>
-                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">
-                                                {row.totalYield.toLocaleString()} <span className="text-gray-500 dark:text-slate-500 font-normal">kg</span>
+                                            <span className="font-medium text-slate-600 dark:text-slate-300 text-right tabular-nums">
+                                                <FieldYieldDisplay harvestCount={row.harvestCount} value={row.totalYield} />
                                             </span>
                                         </div>
                                         <div className="flex items-start justify-between gap-3">
                                             <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Avg Yield</span>
-                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">
-                                                {row.avgYield.toLocaleString()} <span className="text-gray-500 dark:text-slate-500 font-normal">kg</span>
+                                            <span className="font-medium text-slate-600 dark:text-slate-300 text-right tabular-nums">
+                                                <FieldYieldDisplay harvestCount={row.harvestCount} value={row.avgYield} fractionDigits={1} />
                                             </span>
                                         </div>
                                         <div className="flex items-start justify-between gap-3">
                                             <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0">Top Variety</span>
-                                            <span className="font-semibold text-gray-700 dark:text-slate-200 text-right">{formatVariant(row.topVariety)}</span>
+                                            <span className="font-medium text-slate-600 dark:text-slate-300 text-right">{formatVariant(row.topVariety)}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1240,7 +1656,7 @@ const Analytics = () => {
                         <div className="hidden md:block overflow-x-auto">
                             <table className="w-full text-left border-collapse">
                                 <thead>
-                                    <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-white dark:bg-slate-800">
+                                    <tr className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider bg-white dark:bg-slate-800">
                                         <th className="px-5 py-3">FIELD NAME</th>
                                         <th className="px-5 py-3">PLANTINGS</th>
                                         <th className="px-5 py-3">HARVESTS</th>
@@ -1257,24 +1673,17 @@ const Analytics = () => {
                                             className="hover:bg-emerald-50/40 dark:hover:bg-slate-800/50 transition-colors"
                                         >
                                             <td className="px-5 py-3 font-semibold text-gray-900 dark:text-slate-100">{row.fieldName}</td>
-                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200">{row.plantingsCount}</td>
-                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200">{row.harvestCount}</td>
-                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200 font-semibold">
-                                                {row.totalYield.toLocaleString()} <span className="text-gray-500 dark:text-slate-500 font-normal">kg</span>
+                                            <td className="px-5 py-3 text-slate-600 dark:text-slate-300 tabular-nums">{row.plantingsCount}</td>
+                                            <td className="px-5 py-3 text-slate-600 dark:text-slate-300 tabular-nums">{row.harvestCount}</td>
+                                            <td className="px-5 py-3 text-slate-600 dark:text-slate-300 tabular-nums">
+                                                <FieldYieldDisplay harvestCount={row.harvestCount} value={row.totalYield} />
                                             </td>
-                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200">
-                                                {row.avgYield.toLocaleString()} <span className="text-gray-500 dark:text-slate-500 font-normal">kg</span>
+                                            <td className="px-5 py-3 text-slate-600 dark:text-slate-300 tabular-nums">
+                                                <FieldYieldDisplay harvestCount={row.harvestCount} value={row.avgYield} fractionDigits={1} />
                                             </td>
-                                            <td className="px-5 py-3 text-gray-700 dark:text-slate-200">{formatVariant(row.topVariety)}</td>
+                                            <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{formatVariant(row.topVariety)}</td>
                                             <td className="px-5 py-3">
-                                                <span
-                                                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${row.status === 'Active'
-                                                        ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
-                                                        : 'bg-gray-100 dark:bg-slate-800/60 text-gray-700 dark:text-slate-300'
-                                                        }`}
-                                                >
-                                                    {row.status}
-                                                </span>
+                                                <FieldStatusBadge status={row.status} />
                                             </td>
                                         </tr>
                                     ))}
