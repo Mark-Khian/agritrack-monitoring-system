@@ -172,12 +172,12 @@ export const SkeletonHorizontalBarChart = ({ rows = 6 }) => (
 );
 
 /**
- * SkeletonWeatherCard — dark bg skeleton for weather widget
+ * SkeletonWeatherCard — theme-aware placeholder matching Dashboard weather card chrome
  */
 export const SkeletonWeatherCard = () => (
-    <div className="bg-gray-800 rounded-2xl border border-gray-700 shadow-sm p-6 space-y-4">
-        <div className="h-6 w-32 bg-gray-700 animate-pulse rounded" />
-        <div className="h-16 w-16 bg-gray-700 animate-pulse rounded-full" />
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm p-6 space-y-4">
+        <div className="h-6 w-32 bg-gray-200 dark:bg-slate-700 animate-pulse rounded" />
+        <div className="h-16 w-16 bg-gray-200 dark:bg-slate-700 animate-pulse rounded-full" />
         <div className="space-y-2">
             <SkeletonText width="80%" size="md" />
             <SkeletonText width="60%" size="sm" />
