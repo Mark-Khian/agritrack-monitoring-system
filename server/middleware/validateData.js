@@ -226,7 +226,7 @@ const validateActivity = [
             'fertilizing', 'first_fertilizing', 'second_fertilizing',
             'irrigation', 'drain_irrigation', 'pest_control',
             'final_pest_inspection', 'crop_monitoring',
-            'weeding', 'harvesting', 'other'
+            'weeding', 'harvesting', 'postharvest', 'other'
         ]).withMessage('Invalid activity type.'),
 
     body('planned_date')
@@ -263,7 +263,7 @@ const validateActivityUpdate = [
             'fertilizing', 'first_fertilizing', 'second_fertilizing',
             'irrigation', 'drain_irrigation', 'pest_control',
             'final_pest_inspection', 'crop_monitoring',
-            'weeding', 'harvesting', 'other'
+            'weeding', 'harvesting', 'postharvest', 'other'
         ]).withMessage('Invalid activity type.'),
 
     body('planned_date')

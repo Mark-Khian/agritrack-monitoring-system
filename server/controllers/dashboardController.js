@@ -11,7 +11,7 @@
 const db = require('../config/db');
 const { utcTodayYmd, calendarDaysBetween } = require('../utils/plantingDates');
 const { loadPresentationContext, enrichPlantingRow } = require('../services/plantingPresentationService');
-const { LIFECYCLE_ACTIVITY_TEMPLATES } = require('../utils/activityScheduler');
+const { listLifecycleTemplateIndicesForMethod } = require('../utils/activityScheduler');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -174,8 +174,15 @@ const getLifecycleMonitoring = async (req, res) => {
                     .filter((a) => a.is_system_generated && a.lifecycle_template_index != null && a.status === 'completed')
                     .map((a) => a.lifecycle_template_index)
             );
+            const presentTemplateIndices = new Set(
+                activities
+                    .filter((a) => a.is_system_generated && a.lifecycle_template_index != null)
+                    .map((a) => a.lifecycle_template_index)
+            );
             const lifecycle_tasks_completed = completedTemplateIndices.size;
-            const lifecycle_tasks_total     = LIFECYCLE_ACTIVITY_TEMPLATES.length;
+            const lifecycle_tasks_total = presentTemplateIndices.size > 0
+                ? presentTemplateIndices.size
+                : listLifecycleTemplateIndicesForMethod(p.establishment_method).length;
 
             return {
                 id:               p.id,

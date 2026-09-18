@@ -27,7 +27,7 @@ const TEST_ADMIN = {
 const FINAL_PASSWORD = 'Phase9-Final!42';
 const SECOND_PASSWORD = 'Phase9-Second!84';
 const COOKIE_NAME = 'agritrack_session';
-const TRANSPLANTED_TEMPLATE_COUNT = 9;
+const TRANSPLANTED_TEMPLATE_COUNT = 11;
 
 const mutation = (agent, method, urlPath) => agent[method](urlPath).set('Origin', ORIGIN);
 
