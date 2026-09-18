@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -42,15 +42,12 @@ import {
 import useAuth from '../context/useAuth';
 import { CAPABILITIES, ROLES, normalizeRole } from '../security/permissions';
 import { isCompletedPlanting, isCurrentActivePlanting } from '../utils/plantingCompletion';
+import { patchSearchParams, pickAllowed } from '../utils/urlQueryState';
+
+const DASHBOARD_PLOT_TABS = ['active', 'completed'];
+const DASHBOARD_ACTIVITY_STATUSES = ['all', 'pending', 'ongoing'];
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6'];
-
-const PLANTING_VARIETY_CLASS_FILTERS = [
-    { value: '', label: 'All variety classes' },
-    { value: 'Irrigated / Lowland Varieties', label: 'Irrigated / Lowland' },
-    { value: 'Rainfed / Dry-Seeded Varieties (DSR)', label: 'Rainfed / DSR' },
-    { value: 'Upland Varieties', label: 'Upland' },
-];
 
 // ── Activity Type Icons ───────────────────
 const getIconForType = (type) => {
@@ -69,6 +66,7 @@ const getIconForType = (type) => {
         'crop monitoring': <Eye size={16} className="text-purple-600 dark:text-purple-400" />,
         'weeding': <Scissors size={16} className="text-purple-600 dark:text-purple-400" />,
         'harvesting': <Wheat size={16} className="text-yellow-600 dark:text-yellow-400" />,
+        'postharvest': <Package size={16} className="text-stone-600 dark:text-stone-400" />,
         'other': <Package size={16} className="text-gray-500 dark:text-gray-400" />,
     };
     return icons[type?.toLowerCase()] || <Package size={16} className="text-gray-500 dark:text-gray-400" />;
@@ -179,12 +177,23 @@ const Dashboard = () => {
     const [expandedPlantingIds, setExpandedPlantingIds] = useState({});
     const [plotActivitiesByPlantingId, setPlotActivitiesByPlantingId] = useState({});
     const [plotActivitiesLoadingByPlantingId, setPlotActivitiesLoadingByPlantingId] = useState({});
-    const [plotOverviewTab, setPlotOverviewTab] = useState('active');
+    const plotOverviewTab = pickAllowed(searchParams.get('plots'), DASHBOARD_PLOT_TABS, 'active');
+    const setPlotOverviewTab = (tab) => {
+        patchSearchParams(setSearchParams, searchParams, { plots: tab });
+    };
     const [expandedHarvestIds, setExpandedHarvestIds] = useState({});
     const [expandedTaskIds, setExpandedTaskIds] = useState({});
     const [plotSearch, setPlotSearch] = useState('');
     const [selectedPlotDetails, setSelectedPlotDetails] = useState(null);
-    const [activityStatusFilter, setActivityStatusFilter] = useState('all');
+    const [criticalAlertModal, setCriticalAlertModal] = useState(null);
+    const activityStatusFilter = pickAllowed(
+        searchParams.get('activityStatus'),
+        DASHBOARD_ACTIVITY_STATUSES,
+        'all'
+    );
+    const setActivityStatusFilter = (value) => {
+        patchSearchParams(setSearchParams, searchParams, { activityStatus: value });
+    };
     const [plantingFilters] = useState({
         variety_class: '',
         variety_id: '',
@@ -237,7 +246,7 @@ const Dashboard = () => {
                     canReadHarvests
                         ? getHarvests({ limit: 100 })
                         : Promise.resolve({ data: { data: [], meta: { total: 0 } } }),
-                    getAllActivities({ limit: 500 })
+                    getAllActivities({ limit: 500, active_plantings_only: 1 })
                 ]);
 
                 const plantings = plantingsRes.data.data || [];
@@ -308,6 +317,69 @@ const Dashboard = () => {
         };
         fetchAll();
     }, [canReadHarvests, user?.role]);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const safeDate = (value) => {
+        if (!value) return null;
+        const s = String(value).slice(0, 10);
+        const parts = s.split('-');
+        if (parts.length === 3) {
+            return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        }
+        return new Date(value);
+    };
+
+    const isOverdue = (activity) => {
+        const status = normalize(activity?.status);
+        const d = safeDate(activity?.activity_date);
+        if (!d) return false;
+        return (status === 'pending' || status === 'ongoing') && d < today;
+    };
+
+    const isActivityInCurrentMonth = (activity) => {
+        const d = safeDate(activity?.activity_date);
+        if (!d) return false;
+        return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+    };
+
+    const overdueHarvestPlantings = useMemo(() => {
+        return (plantingsList || [])
+            .filter((p) => {
+                const exp = safeDate(p?.expected_harvest);
+                if (!exp) return false;
+                if (exp >= today) return false;
+                if (isCompletedPlanting(p)) return false;
+                if (normalize(p?.status) === 'failed') return false;
+                const ls = normalize(p?.lifecycle_state);
+                if (ls === 'abandoned') return false;
+                return true;
+            })
+            .map((p) => {
+                const exp = safeDate(p.expected_harvest);
+                const daysOverdue = Math.max(1, Math.round((today - exp) / (1000 * 60 * 60 * 24)));
+                return { ...p, daysOverdue };
+            })
+            .sort((a, b) => b.daysOverdue - a.daysOverdue);
+    }, [plantingsList]);
+
+    const pendingActivitiesThisMonth = useMemo(() => {
+        return (activitiesList || []).filter((a) => {
+            if (!isActivityInCurrentMonth(a)) return false;
+            const s = normalize(a?.status);
+            return s === 'pending' || s === 'ongoing';
+        });
+    }, [activitiesList]);
+
+    const monthlyActivities = useMemo(() => {
+        return (activitiesList || []).filter((a) => isActivityInCurrentMonth(a));
+    }, [activitiesList]);
+
+    const overdueHarvestCount = overdueHarvestPlantings.length;
+    const pendingActivitiesThisMonthCount = pendingActivitiesThisMonth.length;
+    const overduePendingActivitiesThisMonthCount = pendingActivitiesThisMonth.filter((a) => isOverdue(a)).length;
+    const activitiesThisMonthCount = monthlyActivities.length;
 
     if (loading) {
         return (
@@ -410,26 +482,6 @@ const Dashboard = () => {
             </div>
         );
     }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const safeDate = (value) => {
-        if (!value) return null;
-        const s = String(value).slice(0, 10);
-        const parts = s.split('-');
-        if (parts.length === 3) {
-            return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-        }
-        return new Date(value);
-    };
-
-    const isOverdue = (activity) => {
-        const status = normalize(activity?.status);
-        const d = safeDate(activity?.activity_date);
-        if (!d) return false;
-        return (status === 'pending' || status === 'ongoing') && d < today;
-    };
 
     const getPriorityBadge = (activityType) => {
         const t = normalize(activityType);
@@ -547,26 +599,6 @@ const Dashboard = () => {
     const currentLifecycleDay = plantingDate
         ? Math.max(0, Math.round((today - plantingDate) / (1000 * 60 * 60 * 24)))
         : 0;
-
-    const overdueHarvestCount = plantingsList.filter((p) => {
-        const exp = safeDate(p?.expected_harvest);
-        if (!exp) return false;
-        if (exp >= today) return false;
-        if (isCompletedPlanting(p)) return false;
-        const ls = normalize(p?.lifecycle_state);
-        if (ls === 'abandoned') return false;
-        return true;
-    }).length;
-
-    const currentMonthKey = new Date().toLocaleString('default', { month: 'short', year: '2-digit' });
-    const activitiesThisMonthCount = activitiesPerMonth?.find((m) => m.month === currentMonthKey)?.count || 0;
-    const pendingActivitiesThisMonthCount = activitiesList.filter((a) => {
-        const d = safeDate(a?.activity_date);
-        if (!d) return false;
-        const isThisMonth = d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
-        const s = normalize(a?.status);
-        return isThisMonth && (s === 'pending' || s === 'ongoing');
-    }).length;
 
     const togglePlotActivities = async (plantingId) => {
         if (!plantingId) return;
@@ -774,49 +806,71 @@ const Dashboard = () => {
         );
     };
 
-    const renderCriticalAlertsCard = (extraClassName = '') => (
+    const renderCriticalAlertsCard = (extraClassName = '') => {
+        const harvestAlert = overdueHarvestCount > 0;
+        const pendingOverdue = overduePendingActivitiesThisMonthCount > 0;
+        const lowActivity = activitiesThisMonthCount === 0;
+        const rowBase =
+            'flex items-start gap-3 rounded-xl p-4 lg:p-3 w-full text-left cursor-pointer transition-colors';
+
+        return (
         <div className={`rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-5 sm:p-6 lg:p-5 shadow-sm flex flex-col w-full h-auto ${extraClassName}`}>
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">Critical Alerts</h2>
 
             <div className="mt-4 lg:mt-3 space-y-3 lg:space-y-2.5">
-                <div className={`flex items-start gap-3 rounded-xl p-4 lg:p-3 ${overdueHarvestCount > 0 ? 'bg-red-50 dark:bg-red-950/30' : 'bg-gray-50 dark:bg-slate-900/50'}`}>
-                    <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${overdueHarvestCount > 0 ? 'text-red-600' : 'text-gray-500 dark:text-slate-400'}`} />
+                <button
+                    type="button"
+                    onClick={() => setCriticalAlertModal('harvest')}
+                    className={`${rowBase} ${harvestAlert ? 'bg-red-50 dark:bg-red-950/30 hover:bg-red-100/80 dark:hover:bg-red-950/50' : 'bg-gray-50 dark:bg-slate-900/50 hover:bg-gray-100 dark:hover:bg-slate-800'}`}
+                >
+                    <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${harvestAlert ? 'text-red-600' : 'text-gray-500 dark:text-slate-400'}`} />
                     <div>
                         <p className="font-bold text-gray-900 dark:text-white">Overdue Harvest</p>
-                        <p className={`mt-1 text-xs ${overdueHarvestCount > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-600 dark:text-slate-400'}`}>
-                            {overdueHarvestCount > 0
+                        <p className={`mt-1 text-xs ${harvestAlert ? 'text-red-700 dark:text-red-300' : 'text-gray-600 dark:text-slate-400'}`}>
+                            {harvestAlert
                                 ? `${overdueHarvestCount} planting(s) are past their expected harvest date. Review field conditions and harvest plans.`
                                 : 'No plantings are past expected harvest date.'}
                         </p>
                     </div>
-                </div>
+                </button>
 
-                <div className="flex items-start gap-3 rounded-xl p-4 lg:p-3 bg-gray-50 dark:bg-slate-900/50">
-                    <Clock className="mt-0.5 h-5 w-5 text-gray-600 dark:text-slate-400 shrink-0" />
+                <button
+                    type="button"
+                    onClick={() => setCriticalAlertModal('pending')}
+                    className={`${rowBase} ${pendingOverdue ? 'bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100/80 dark:hover:bg-amber-950/50' : 'bg-gray-50 dark:bg-slate-900/50 hover:bg-gray-100 dark:hover:bg-slate-800'}`}
+                >
+                    <Clock className={`mt-0.5 h-5 w-5 shrink-0 ${pendingOverdue ? 'text-amber-700 dark:text-amber-400' : 'text-gray-600 dark:text-slate-400'}`} />
                     <div>
                         <p className="font-bold text-gray-900 dark:text-white">Pending Activities</p>
-                        <p className="mt-1 text-xs text-gray-600 dark:text-slate-400">
-                            {pendingActivitiesThisMonthCount} pending/ongoing activity(ies) scheduled for this month.
+                        <p className={`mt-1 text-xs ${pendingOverdue ? 'text-amber-900/80 dark:text-amber-200/80' : 'text-gray-600 dark:text-slate-400'}`}>
+                            {pendingOverdue
+                                ? `${pendingActivitiesThisMonthCount} pending, ${overduePendingActivitiesThisMonthCount} overdue this month.`
+                                : `${pendingActivitiesThisMonthCount} pending/ongoing activity(ies) scheduled for this month.`}
                         </p>
                     </div>
-                </div>
+                </button>
 
-                <div className="flex items-start gap-3 rounded-xl p-4 lg:p-3 bg-yellow-50 dark:bg-yellow-950/20">
-                    <Info className="mt-0.5 h-5 w-5 text-yellow-700 dark:text-yellow-400 shrink-0" />
+                <button
+                    type="button"
+                    onClick={() => setCriticalAlertModal('monthly')}
+                    className={`${rowBase} ${lowActivity ? 'bg-yellow-50 dark:bg-yellow-950/20 hover:bg-yellow-100/80 dark:hover:bg-yellow-950/40' : 'bg-gray-50 dark:bg-slate-900/50 hover:bg-gray-100 dark:hover:bg-slate-800'}`}
+                >
+                    <Info className={`mt-0.5 h-5 w-5 shrink-0 ${lowActivity ? 'text-yellow-700 dark:text-yellow-400' : 'text-gray-600 dark:text-slate-400'}`} />
                     <div>
                         <p className="font-bold text-gray-900 dark:text-white">
-                            {activitiesThisMonthCount === 0 ? 'Low Activity' : 'Monthly Activity'}
+                            {lowActivity ? 'Low Activity' : 'Monthly Activity'}
                         </p>
-                        <p className="mt-1 text-xs text-yellow-900/80 dark:text-yellow-200/80">
-                            {activitiesThisMonthCount === 0
+                        <p className={`mt-1 text-xs ${lowActivity ? 'text-yellow-900/80 dark:text-yellow-200/80' : 'text-gray-600 dark:text-slate-400'}`}>
+                            {lowActivity
                                 ? 'No activities logged this month. Schedule key field operations to stay on track.'
                                 : `${activitiesThisMonthCount} activity(ies) logged this month. Keep planning future tasks.`}
                         </p>
                     </div>
-                </div>
+                </button>
             </div>
         </div>
-    );
+        );
+    };
 
     return (
         <div className="flex flex-col gap-5 sm:gap-6 lg:gap-6 bg-[#f5f5f0] dark:bg-transparent min-h-full text-gray-900 dark:text-white">
@@ -2371,6 +2425,258 @@ const Dashboard = () => {
                             </div>
                         </div>
                     </div>
+                </Modal>
+            )}
+            {criticalAlertModal && (
+                <Modal
+                    isOpen={!!criticalAlertModal}
+                    onClose={() => setCriticalAlertModal(null)}
+                    title={
+                        criticalAlertModal === 'harvest'
+                            ? 'Overdue Harvest'
+                            : criticalAlertModal === 'pending'
+                                ? 'Pending Activities'
+                                : activitiesThisMonthCount === 0
+                                    ? 'Low Activity'
+                                    : 'Monthly Activity'
+                    }
+                    maxWidth="max-w-lg"
+                >
+                    {(() => {
+                        const activityMeta = (a) => {
+                            const planting = plantingsList.find((p) => p.id === a.planting_id);
+                            const type = normalize(a?.activity_type).replaceAll('_', ' ') || 'Activity';
+                            const field = a.field_name || planting?.field_name || '—';
+                            const variety = a.planting_variety || planting?.variety || '';
+                            const place = variety ? `${field} · ${variety}` : field;
+                            return { type, place };
+                        };
+
+                        if (criticalAlertModal === 'harvest') {
+                            if (overdueHarvestPlantings.length === 0) {
+                                return (
+                                    <div className="flex flex-col items-center justify-center text-center py-8 px-4">
+                                        <CheckCircle
+                                            className="h-12 w-12 text-emerald-500/70 dark:text-emerald-400/70 mb-3"
+                                            strokeWidth={1.5}
+                                        />
+                                        <p className="text-sm font-medium text-gray-600 dark:text-slate-300">
+                                            All caught up — no overdue harvests.
+                                        </p>
+                                    </div>
+                                );
+                            }
+                            const harvestCount = overdueHarvestPlantings.length;
+                            return (
+                                <div>
+                                    <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-3">
+                                        {harvestCount} planting{harvestCount !== 1 ? 's' : ''} overdue
+                                    </p>
+                                    <ul className="space-y-2">
+                                        {overdueHarvestPlantings.map((p) => (
+                                            <li
+                                                key={p.id}
+                                                className="flex items-start gap-3 rounded-xl p-3 bg-amber-50 dark:bg-amber-950/30"
+                                            >
+                                                <div className="h-8 w-8 rounded-lg bg-white/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 flex items-center justify-center shrink-0 mt-0.5">
+                                                    <Wheat size={16} className="text-amber-700 dark:text-amber-400" />
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <p className="text-sm font-semibold text-gray-900 dark:text-white leading-snug">
+                                                            {p.variety || 'Planting'}
+                                                            <span className="font-medium text-gray-500 dark:text-slate-400">
+                                                                {p.field_name ? ` · ${p.field_name}` : ''}
+                                                            </span>
+                                                        </p>
+                                                        <span className="shrink-0 inline-flex items-center rounded-full bg-red-100 dark:bg-red-900/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
+                                                            {p.daysOverdue} day{p.daysOverdue !== 1 ? 's' : ''} overdue
+                                                        </span>
+                                                    </div>
+                                                    <p className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-200/80">
+                                                        Expected {p.expected_harvest ? formatDisplayDate(p.expected_harvest) : '—'}
+                                                    </p>
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            );
+                        }
+
+                        if (criticalAlertModal === 'pending') {
+                            if (pendingActivitiesThisMonth.length === 0) {
+                                return (
+                                    <p className="text-sm text-gray-500 dark:text-slate-400 text-center py-6">
+                                        No pending or ongoing activities this month.
+                                    </p>
+                                );
+                            }
+                            const pendingRows = [...pendingActivitiesThisMonth].sort((a, b) => {
+                                const ao = isOverdue(a) ? 1 : 0;
+                                const bo = isOverdue(b) ? 1 : 0;
+                                if (ao !== bo) return bo - ao;
+                                return (safeDate(a.activity_date)?.getTime() || 0) - (safeDate(b.activity_date)?.getTime() || 0);
+                            });
+                            const overdueN = pendingRows.filter((a) => isOverdue(a)).length;
+                            const upcomingN = pendingRows.length - overdueN;
+                            const summaryParts = [
+                                overdueN > 0 ? `${overdueN} overdue` : null,
+                                upcomingN > 0 ? `${upcomingN} upcoming` : null,
+                            ].filter(Boolean);
+
+                            return (
+                                <div>
+                                    {summaryParts.length > 0 && (
+                                        <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-3">
+                                            {summaryParts.join(' · ')}
+                                        </p>
+                                    )}
+                                    <ul className="space-y-2">
+                                        {pendingRows.map((a) => {
+                                            const overdue = isOverdue(a);
+                                            const { type, place } = activityMeta(a);
+                                            const typeKey = normalize(a.activity_type).replaceAll('_', ' ');
+                                            return (
+                                                <li
+                                                    key={a.id}
+                                                    className={`flex items-start gap-3 rounded-xl p-3 ${
+                                                        overdue
+                                                            ? 'bg-amber-50 dark:bg-amber-950/30'
+                                                            : 'bg-slate-50 dark:bg-slate-900/60'
+                                                    }`}
+                                                >
+                                                    <div className="h-8 w-8 rounded-lg bg-white/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 flex items-center justify-center shrink-0 mt-0.5">
+                                                        {getIconForType(typeKey)}
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex items-start justify-between gap-2">
+                                                            <p className="text-sm font-semibold text-gray-900 dark:text-white capitalize leading-snug">
+                                                                {type}
+                                                                <span className="font-medium text-gray-500 dark:text-slate-400"> · {place}</span>
+                                                            </p>
+                                                            {overdue && (
+                                                                <span className="shrink-0 inline-flex items-center rounded-full bg-red-100 dark:bg-red-900/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
+                                                                    Overdue
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <p className={`mt-0.5 text-xs ${overdue ? 'text-amber-900/80 dark:text-amber-200/80' : 'text-gray-500 dark:text-slate-400'}`}>
+                                                            {a.activity_date ? formatDisplayDate(a.activity_date) : '—'}
+                                                            {' · '}
+                                                            <span className="capitalize">{normalize(a.status) || 'pending'}</span>
+                                                        </p>
+                                                    </div>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            );
+                        }
+
+                        if (monthlyActivities.length === 0) {
+                            return (
+                                <p className="text-sm text-gray-500 dark:text-slate-400 text-center py-6">
+                                    No activities logged this month.
+                                </p>
+                            );
+                        }
+
+                        const monthlyStatusStyle = (status) => {
+                            const s = normalize(status);
+                            const badgeBase = 'shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide';
+                            if (s === 'completed') {
+                                return {
+                                    group: 1,
+                                    card: 'bg-emerald-50 dark:bg-emerald-950/25',
+                                    badge: `${badgeBase} bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300`,
+                                    label: 'Completed',
+                                };
+                            }
+                            if (s === 'ongoing') {
+                                return {
+                                    group: 0,
+                                    card: 'bg-slate-50 dark:bg-slate-900/60',
+                                    badge: `${badgeBase} bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-300`,
+                                    label: 'Ongoing',
+                                };
+                            }
+                            if (s === 'cancelled' || s === 'skipped') {
+                                return {
+                                    group: 2,
+                                    card: 'bg-slate-50 dark:bg-slate-900/60',
+                                    badge: `${badgeBase} bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300`,
+                                    label: s === 'skipped' ? 'Skipped' : 'Cancelled',
+                                };
+                            }
+                            return {
+                                group: 0,
+                                card: 'bg-slate-50 dark:bg-slate-900/60',
+                                badge: `${badgeBase} bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300`,
+                                label: 'Pending',
+                            };
+                        };
+
+                        const monthlyRows = [...monthlyActivities].sort((a, b) => {
+                            const ga = monthlyStatusStyle(a.status).group;
+                            const gb = monthlyStatusStyle(b.status).group;
+                            if (ga !== gb) return ga - gb;
+                            return (safeDate(b.activity_date)?.getTime() || 0) - (safeDate(a.activity_date)?.getTime() || 0);
+                        });
+                        const completedN = monthlyRows.filter((a) => normalize(a.status) === 'completed').length;
+                        const pendingN = monthlyRows.filter((a) => normalize(a.status) === 'pending').length;
+                        const ongoingN = monthlyRows.filter((a) => normalize(a.status) === 'ongoing').length;
+                        const cancelledN = monthlyRows.filter((a) => {
+                            const s = normalize(a.status);
+                            return s === 'cancelled' || s === 'skipped';
+                        }).length;
+                        const summaryParts = [
+                            completedN > 0 ? `${completedN} completed` : null,
+                            pendingN > 0 ? `${pendingN} pending` : null,
+                            ongoingN > 0 ? `${ongoingN} ongoing` : null,
+                            cancelledN > 0 ? `${cancelledN} cancelled` : null,
+                        ].filter(Boolean);
+
+                        return (
+                            <div>
+                                {summaryParts.length > 0 && (
+                                    <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-3">
+                                        {summaryParts.join(' · ')}
+                                    </p>
+                                )}
+                                <ul className="space-y-2">
+                                    {monthlyRows.map((a) => {
+                                        const { type, place } = activityMeta(a);
+                                        const typeKey = normalize(a.activity_type).replaceAll('_', ' ');
+                                        const style = monthlyStatusStyle(a.status);
+                                        return (
+                                            <li
+                                                key={a.id}
+                                                className={`flex items-start gap-3 rounded-xl p-3 ${style.card}`}
+                                            >
+                                                <div className="h-8 w-8 rounded-lg bg-white/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 flex items-center justify-center shrink-0 mt-0.5">
+                                                    {getIconForType(typeKey)}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <p className="text-sm font-semibold text-gray-900 dark:text-white capitalize leading-snug">
+                                                            {type}
+                                                            <span className="font-medium text-gray-500 dark:text-slate-400"> · {place}</span>
+                                                        </p>
+                                                        <span className={style.badge}>{style.label}</span>
+                                                    </div>
+                                                    <p className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">
+                                                        {a.activity_date ? formatDisplayDate(a.activity_date) : '—'}
+                                                    </p>
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </div>
+                        );
+                    })()}
                 </Modal>
             )}
             <ActivePlantingsModal
