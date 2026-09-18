@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Plus,
     Shovel, Sprout, FlaskConical,
     Droplets, Bug, Scissors,
     Wheat, Package, Tractor, AlertTriangle, Cpu, ChevronRight, Eye, CheckCircle,
-    ChevronDown, Loader2
+    ChevronDown, Loader2, Archive
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import Select from '../components/Select';
@@ -19,6 +19,7 @@ import MonthPicker from '../components/MonthPicker';
 import { useToast } from '../context/ToastContext';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES } from '../security/permissions';
+import { isCompletedPlanting } from '../utils/plantingCompletion';
 
 // ── Activity Type Icon + Color Map ────────
 const ACTIVITY_ICONS = {
@@ -35,6 +36,7 @@ const ACTIVITY_ICONS = {
     'crop monitoring':  { icon: Eye,           color: '#7c3aed', bg: '#f5f3ff' },
     'weeding':          { icon: Scissors,      color: '#7c3aed', bg: '#f5f3ff' },
     'harvesting':       { icon: Wheat,         color: '#ca8a04', bg: '#fefce8' },
+    'postharvest':      { icon: Package,       color: '#78716c', bg: '#fafaf9' },
     'other':            { icon: Package,       color: '#6b7280', bg: '#f9fafb' },
 };
 
@@ -76,6 +78,7 @@ const Activities = () => {
     const [formError, setFormError] = useState('');
     const [statusUpdatingId, setStatusUpdatingId] = useState(null);
     const [selectedPlotActivities, setSelectedPlotActivities] = useState(null);
+    const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [activityToComplete, setActivityToComplete] = useState(null);
     const [completeActualDate, setCompleteActualDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -231,8 +234,91 @@ const Activities = () => {
         }
     };
 
-    const isCompletedActivity = (act) => String(act?.status || '').toLowerCase() === 'completed';
     const visibleActivities = activities;
+
+    const plantingById = useMemo(() => {
+        const map = new Map();
+        for (const planting of plantings) {
+            map.set(planting.id, planting);
+        }
+        return map;
+    }, [plantings]);
+
+    const plantingForPlotGroup = useCallback((group) => {
+        const found = plantingById.get(group.plantingId);
+        if (found) return found;
+        const sample = group.activities?.[0];
+        return {
+            status: sample?.planting_status,
+            lifecycle_state: sample?.planting_lifecycle_state,
+        };
+    }, [plantingById]);
+
+    const plotGroups = useMemo(() => {
+        const acc = {};
+        for (const act of visibleActivities) {
+            const key = act.planting_id || 'unassigned';
+            if (!acc[key]) {
+                acc[key] = {
+                    plantingId: act.planting_id,
+                    plantingVariety: act.planting_variety || 'Unassigned Plot',
+                    fieldName: act.field_name || 'Unassigned Field',
+                    activities: []
+                };
+            }
+            acc[key].activities.push(act);
+        }
+        return Object.values(acc);
+    }, [visibleActivities]);
+
+    const activePlotGroups = useMemo(
+        () => plotGroups.filter((group) => !isCompletedPlanting(plantingForPlotGroup(group))),
+        [plotGroups, plantingForPlotGroup]
+    );
+    const archivedPlotGroups = useMemo(
+        () => plotGroups.filter((group) => isCompletedPlanting(plantingForPlotGroup(group))),
+        [plotGroups, plantingForPlotGroup]
+    );
+
+    const renderPlotCard = (group) => {
+        const headerLabel = group.plantingVariety;
+        const subLabel = group.fieldName;
+        const showCompletedBadge = isCompletedPlanting(plantingForPlotGroup(group));
+
+        return (
+            <div
+                key={group.plantingId || headerLabel}
+                className="rounded-xl border border-gray-100 bg-white overflow-hidden h-fit self-start hover:shadow-md transition-shadow"
+            >
+                <button
+                    type="button"
+                    onClick={() => setSelectedPlotActivities(group)}
+                    className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors"
+                >
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                                <p className="font-semibold text-gray-900 truncate">
+                                    {headerLabel}
+                                </p>
+                                {showCompletedBadge && (
+                                    <span className="inline-flex items-center rounded-full border border-green-200 bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-800">
+                                        Completed
+                                    </span>
+                                )}
+                            </div>
+                            <p className="mt-1 text-xs text-gray-500 truncate">
+                                {subLabel}
+                            </p>
+                        </div>
+                        <ChevronRight
+                            className="h-5 w-5 text-gray-400"
+                        />
+                    </div>
+                </button>
+            </div>
+        );
+    };
 
     return (
         <div className="space-y-6">
@@ -340,88 +426,73 @@ const Activities = () => {
                                         Click a plot card to expand and see its activity list.
                                     </p>
                                 </div>
-                                <div className="hidden sm:flex items-center gap-3 text-xs text-gray-500">
-                                    <span className="inline-flex items-center gap-2">
-                                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                        Manual
-                                    </span>
-                                    <span className="inline-flex items-center gap-2">
-                                        <span className="h-2 w-2 rounded-full bg-gray-400" />
-                                        System
-                                    </span>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsArchiveModalOpen(true)}
+                                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+                                    >
+                                        <Archive size={14} className="text-gray-500" />
+                                        View Archived
+                                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-700">
+                                            {archivedPlotGroups.length}
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 items-start">
-                                {Object.values(
-                                    visibleActivities.reduce((acc, act) => {
-                                        const key = act.planting_id || 'unassigned';
-                                        if (!acc[key]) {
-                                            acc[key] = {
-                                                plantingId: act.planting_id,
-                                                plantingVariety: act.planting_variety || 'Unassigned Plot',
-                                                fieldName: act.field_name || 'Unassigned Field',
-                                                activities: []
-                                            };
-                                        }
-                                        acc[key].activities.push(act);
-                                        return acc;
-                                    }, {})
-                                ).map((group) => {
-                                    const headerLabel = group.plantingVariety;
-                                    const isArchivedGroup = group.activities.length > 0 && group.activities.every(isCompletedActivity);
-                                    const subLabel = group.fieldName;
-
-                                    return (
-                                        <div
-                                            key={group.plantingId || headerLabel}
-                                            className="rounded-xl border border-gray-100 bg-white overflow-hidden h-fit self-start hover:shadow-md transition-shadow"
-                                        >
-                                            <button
-                                                type="button"
-                                                onClick={() => setSelectedPlotActivities(group)}
-                                                className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors"
-                                            >
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <div className="min-w-0">
-                                                        <div className="flex items-center gap-2">
-                                                            <p className="font-semibold text-gray-900 truncate">
-                                                                {headerLabel}
-                                                            </p>
-                                                            {isArchivedGroup && (
-                                                                <span className="inline-flex items-center rounded-full border border-green-200 bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-800">
-                                                                    Completed
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        <p className="mt-1 text-xs text-gray-500 truncate">
-                                                            {subLabel}
-                                                        </p>
-                                                    </div>
-                                                    <ChevronRight
-                                                        className="h-5 w-5 text-gray-400"
-                                                    />
-                                                </div>
-                                            </button>
-                                        </div>
-                                    );
-                                })}
-                            </div>
+                            {activePlotGroups.length === 0 ? (
+                                <p className="py-8 text-center text-sm text-gray-400">
+                                    No active plots. Completed and harvested plots are in Archived.
+                                </p>
+                            ) : (
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 items-start">
+                                    {activePlotGroups.map(renderPlotCard)}
+                                </div>
+                            )}
                         </>
                     )}
                 </div>
             )}
+
+            <Modal
+                isOpen={isArchiveModalOpen}
+                onClose={() => setIsArchiveModalOpen(false)}
+                title="Archived Plots"
+                maxWidth="max-w-3xl"
+            >
+                {archivedPlotGroups.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-gray-400">
+                        No completed or harvested plots yet.
+                    </p>
+                ) : (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 items-start">
+                        {archivedPlotGroups.map(renderPlotCard)}
+                    </div>
+                )}
+            </Modal>
 
             <Modal 
                 isOpen={!!selectedPlotActivities} 
                 onClose={() => setSelectedPlotActivities(null)} 
                 title={selectedPlotActivities ? `Activities for ${selectedPlotActivities.plantingVariety}` : 'Plot Activities'}
                 maxWidth="max-w-2xl"
+                overlayClassName="z-[60]"
             >
                 {selectedPlotActivities && (
                     <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                        <div className="flex items-center gap-3 text-xs text-gray-500">
+                            <span className="inline-flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                Manual
+                            </span>
+                            <span className="inline-flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full bg-gray-400" />
+                                System
+                            </span>
+                        </div>
                         {selectedPlotActivities.activities.map((act) => {
-                            const isSystem = !!act.is_system_generated;
+                            const isSystem = act.activity_source === 'SYSTEM_SCHEDULED';
                             const statusStr = String(act.status || '').toLowerCase();
                             const isTerminal = ['completed', 'cancelled', 'skipped'].includes(statusStr);
                             const rowBg = isSystem
