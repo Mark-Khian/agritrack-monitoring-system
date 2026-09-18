@@ -13,11 +13,14 @@ import {
     getPlantings, createPlanting, updatePlanting, deletePlanting, getVarieties,
     exportPlantingsCSV, exportPlantingsPDF, exportPlantingPDF
 } from '../services/api';
-import { SkeletonTable } from '../components/Skeleton';
+import { SkeletonCard, SkeletonTable } from '../components/Skeleton';
 import { formatDisplayDate } from '../utils/dateFormatter';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES } from '../security/permissions';
 import { isCompletedPlanting } from '../utils/plantingCompletion';
+import { patchSearchParams, pickAllowed } from '../utils/urlQueryState';
+
+const PLANTING_STATUS_TABS = ['all', 'active', 'completed'];
 
 /** Stable fingerprint of API planting rows (already RBAC-filtered) for realtime toast gating. */
 const plantingListFingerprint = (rows) => JSON.stringify(
@@ -39,30 +42,15 @@ const plantingListFingerprint = (rows) => JSON.stringify(
 /** Remote SSE clients reuse the existing update success toast wording/style. */
 const PLANTINGS_REALTIME_TOAST = 'Planting updated successfully!';
 
-const RICE_VARIETY_OPTIONS = {
-    'Irrigated / Lowland Varieties': [
-        'NSIC Rc110', 'Rc118', 'Rc120', 'Rc128', 'Rc130', 'Rc134', 'Rc160', 'Rc172', 'Rc194',
-        'NSIC Rc212', 'Rc214', 'Rc216', 'Rc218 SR', 'Rc220 SR', 'Rc222',
-        'NSIC Rc224', 'Rc226', 'Rc238', 'Rc240', 'Rc242 SR', 'Rc298', 'Rc300',
-        'NSIC Rc396', 'Rc398', 'Rc414', 'Rc482SR', 'Rc484SR', 'Rc508', 'Rc510',
-        'PSB RC1', 'RC2', 'RC4', 'RC6', 'RC8', 'RC10', 'RC18'
-    ],
-    'Rainfed / Dry-Seeded Varieties (DSR)': [
-        'NSIC 2020 Rc598', 'Rc596', 'Rc594', 'Rc592',
-        'NSIC 2011 Rc278'
-    ],
-    'Upland Varieties': [
-        'NSIC Rc29', 'Rc27', 'Rc25',
-        'NSIC Rc286', 'RC9', 'RC11',
-        'PSB RC3', 'RC5', 'RC7'
-    ]
-};
+const DEFAULT_VARIETY_CLASS = 'Irrigated / Lowland Varieties';
 
-const CATEGORY_HINTS = {
-    'Irrigated / Lowland Varieties': 'High yield, irrigated-friendly, best for well-watered paddies.',
-    'Rainfed / Dry-Seeded Varieties (DSR)': 'Recommended for rainfed and dry-seeded systems with controlled water use.',
-    'Upland Varieties': 'Best for upland or sloped areas with limited standing water.'
-};
+const RICE_VARIETY_OPTIONS = [
+    'NSIC Rc110', 'Rc118', 'Rc120', 'Rc128', 'Rc130', 'Rc134', 'Rc160', 'Rc172', 'Rc194',
+    'NSIC Rc212', 'Rc214', 'Rc216', 'Rc218 SR', 'Rc220 SR', 'Rc222',
+    'NSIC Rc224', 'Rc226', 'Rc238', 'Rc240', 'Rc242 SR', 'Rc298', 'Rc300',
+    'NSIC Rc396', 'Rc398', 'Rc414', 'Rc482SR', 'Rc484SR', 'Rc508', 'Rc510',
+    'PSB RC1', 'RC2', 'RC4', 'RC6', 'RC8', 'RC10', 'RC18'
+];
 
 /** Aligns with server: expected_harvest = planting_date + expected_growth_days + adjustment_days (calendar). */
 const computeExpectedHarvestDate = (plantingDate, expectedGrowthDays, adjustmentDays) => {
@@ -122,6 +110,8 @@ const getTabClass = (tabId, isActive) => {
 
 const Plantings = () => {
     const { can } = useAuth();
+    const canEditHarvestedPlanting = can(CAPABILITIES.PLANTING_UPDATE_HARVESTED);
+    const isPlantingFormReadOnly = (p) => isCompletedPlanting(p) && !canEditHarvestedPlanting;
     const [searchParams, setSearchParams] = useSearchParams();
     const navigate = useNavigate();
     const [cameFromDashboard, setCameFromDashboard] = useState(() => {
@@ -153,14 +143,17 @@ const Plantings = () => {
     const [detailsPlanting, setDetailsPlanting] = useState(null);
     const [deletingId, setDeletingId] = useState(null);
     const [formError, setFormError] = useState('');
-    const [statusFilter, setStatusFilter] = useState('active');
+    const statusFilter = pickAllowed(searchParams.get('status'), PLANTING_STATUS_TABS, 'active');
+    const setStatusFilter = (tabId) => {
+        patchSearchParams(setSearchParams, searchParams, { status: tabId });
+    };
     const [varietiesCatalog, setVarietiesCatalog] = useState([]);
     const [editVarietyBaseline, setEditVarietyBaseline] = useState(null);
     const [partialTemplateIndices, setPartialTemplateIndices] = useState([]);
 
     const [formData, setFormData] = useState({
         field_name: '',
-        variety_class: '', variety: '', variety_id: '',
+        variety_class: DEFAULT_VARIETY_CLASS, variety: '', variety_id: '',
         planting_date: '',
         expected_growth_days: '120',
         adjustment_days: '0',
@@ -168,16 +161,20 @@ const Plantings = () => {
         lifecycle_state: 'ACTIVE',
         cropping_season: '', status: 'active'
     });
-    const categoryOptions = Object.keys(RICE_VARIETY_OPTIONS);
 
     const varietiesForClass = useMemo(
-        () => varietiesCatalog.filter((v) => v.variety_class === formData.variety_class),
-        [varietiesCatalog, formData.variety_class]
+        () => varietiesCatalog.filter((v) => v.variety_class === DEFAULT_VARIETY_CLASS),
+        [varietiesCatalog]
     );
     const selectedVarietyOptions = useMemo(() => {
-        if (varietiesForClass.length > 0) return varietiesForClass.map((v) => v.name);
-        return formData.variety_class ? (RICE_VARIETY_OPTIONS[formData.variety_class] || []) : [];
-    }, [varietiesForClass, formData.variety_class]);
+        const names = varietiesForClass.length > 0
+            ? varietiesForClass.map((v) => v.name)
+            : [...RICE_VARIETY_OPTIONS];
+        if (formData.variety && !names.includes(formData.variety)) {
+            return [formData.variety, ...names];
+        }
+        return names;
+    }, [varietiesForClass, formData.variety]);
 
     const previewExpectedHarvest = useMemo(
         () => computeExpectedHarvestDate(
@@ -326,7 +323,7 @@ const Plantings = () => {
         if (item) {
             setFormData({
                 field_name: item.field_name || '',
-                variety_class: item.variety_class || '',
+                variety_class: item.variety_class || DEFAULT_VARIETY_CLASS,
                 variety: item.variety,
                 variety_id: item.variety_id != null ? String(item.variety_id) : '',
                 planting_date: item.planting_date?.slice(0, 10) || '',
@@ -340,7 +337,7 @@ const Plantings = () => {
                 status: item.status
             });
             setEditVarietyBaseline({
-                variety_class: item.variety_class || '',
+                variety_class: item.variety_class || DEFAULT_VARIETY_CLASS,
                 variety: item.variety,
                 variety_id: item.variety_id != null ? String(item.variety_id) : '',
             });
@@ -348,7 +345,7 @@ const Plantings = () => {
         } else {
             setFormData({
                 field_name: '',
-                variety_class: '',
+                variety_class: DEFAULT_VARIETY_CLASS,
                 variety: '',
                 variety_id: '',
                 planting_date: '',
@@ -398,9 +395,6 @@ const Plantings = () => {
         if (!formData.cropping_season) {
             errors.cropping_season = 'Season is required.';
         }
-        if (!formData.variety_class) {
-            errors.variety_class = 'Variety Class is required.';
-        }
         if (!formData.variety) {
             errors.variety = 'Rice Variety is required.';
         }
@@ -445,7 +439,7 @@ const Plantings = () => {
             if (editingItem) {
                 await updatePlanting(editingItem.id, {
                     field_name: normalizedFieldName,
-                    variety_class: formData.variety_class,
+                    variety_class: formData.variety_class || DEFAULT_VARIETY_CLASS,
                     variety: formData.variety,
                     variety_id: formData.variety_id ? Number(formData.variety_id) : undefined,
                     planting_date: formData.planting_date,
@@ -464,7 +458,7 @@ const Plantings = () => {
             } else {
                 await createPlanting({
                     field_name: normalizedFieldName,
-                    variety_class: formData.variety_class,
+                    variety_class: DEFAULT_VARIETY_CLASS,
                     variety: formData.variety,
                     variety_id: formData.variety_id ? Number(formData.variety_id) : undefined,
                     planting_date: formData.planting_date,
@@ -537,11 +531,12 @@ const Plantings = () => {
 
     const handleVarietyPick = (e) => {
         const name = e.target.value;
-        const row = varietiesForClass.find((v) => v.name === name);
+        const row = varietiesCatalog.find((v) => v.name === name);
         setFormData((prev) => ({
             ...prev,
             variety: name,
             variety_id: row ? String(row.id) : '',
+            variety_class: row?.variety_class || prev.variety_class || DEFAULT_VARIETY_CLASS,
             expected_growth_days: row ? String(row.default_expected_growth_days) : prev.expected_growth_days,
         }));
     };
@@ -740,11 +735,18 @@ const Plantings = () => {
                             </div>
                         </div>
                     )}
-                    <SkeletonTable
-                        rows={6}
-                        cols={7}
-                        columnHeaders={['Variety', 'Field', 'Season', 'Growth Stage', 'Planting Date', 'Expected Harvest', 'Actions']}
-                    />
+                    <div className="md:hidden space-y-3">
+                        {Array.from({ length: 4 }).map((_, index) => (
+                            <SkeletonCard key={index} lines={5} />
+                        ))}
+                    </div>
+                    <div className="hidden md:block">
+                        <SkeletonTable
+                            rows={6}
+                            cols={7}
+                            columnHeaders={['Variety', 'Field', 'Season', 'Dates', 'Growth Stage', 'Status', 'Actions']}
+                        />
+                    </div>
                 </div>
             ) : error ? (
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex items-center justify-between">
@@ -804,14 +806,25 @@ const Plantings = () => {
                                                         <Printer size={16} />
                                                     </button>
                                                 )}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleOpenModal(p)}
-                                                    className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600"
-                                                    title="View planting details"
-                                                >
-                                                    <Eye size={16} />
-                                                </button>
+                                                {canEditHarvestedPlanting ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleOpenModal(p)}
+                                                        className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600"
+                                                        title="Edit planting"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleOpenModal(p)}
+                                                        className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600"
+                                                        title="View planting details"
+                                                    >
+                                                        <Eye size={16} />
+                                                    </button>
+                                                )}
                                             </>
                                         )}
                                         {!isCompletedPlanting(p) && (
@@ -950,9 +963,15 @@ const Plantings = () => {
                                                                 <Printer size={16} />
                                                             </button>
                                                         )}
-                                                        <button onClick={() => handleOpenModal(p)} className="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors" title="View planting details">
-                                                            <Eye size={16} />
-                                                        </button>
+                                                        {canEditHarvestedPlanting ? (
+                                                            <button onClick={() => handleOpenModal(p)} className="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors" title="Edit planting">
+                                                                <Edit2 size={16} />
+                                                            </button>
+                                                        ) : (
+                                                            <button onClick={() => handleOpenModal(p)} className="p-2 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors" title="View planting details">
+                                                                <Eye size={16} />
+                                                            </button>
+                                                        )}
                                                     </>
                                                 )}
                                                 {!isCompletedPlanting(p) && (
@@ -988,14 +1007,14 @@ const Plantings = () => {
             <Modal
                 isOpen={isModalOpen}
                 onClose={handleCloseModal}
-                title={editingItem ? (isCompletedPlanting(editingItem) ? 'View Planting Details' : 'Edit Planting') : 'Log New Planting'}
+                title={editingItem ? (isPlantingFormReadOnly(editingItem) ? 'View Planting Details' : 'Edit Planting') : 'Log New Planting'}
                 maxWidth="max-w-md md:max-w-6xl lg:max-w-7xl"
             >
                 <form onSubmit={handleSave} noValidate className="space-y-4">
                     {formError && (
                         <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">{formError}</div>
                     )}
-                    {varietyFormDirty && editingItem && !isCompletedPlanting(editingItem) && (
+                    {varietyFormDirty && editingItem && !isPlantingFormReadOnly(editingItem) && (
                         <div className="bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 rounded-lg text-sm flex gap-2 items-start">
                             <AlertTriangle size={18} className="shrink-0 mt-0.5" />
                             <span>
@@ -1006,8 +1025,8 @@ const Plantings = () => {
                     <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
                         {/* Field name (managed within Plantings; no separate Fields module) */}
                         <div className="col-span-1 md:col-span-2 lg:col-span-2">
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Field Name {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}</label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Field Name {(!editingItem || !isPlantingFormReadOnly(editingItem)) && '*'}</label>
+                            {!!editingItem && isPlantingFormReadOnly(editingItem) ? (
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
                                     {formData.field_name}
                                 </div>
@@ -1042,51 +1061,9 @@ const Plantings = () => {
                                 Field details are tracked per planting record (Fields page removed).
                             </p>
                         </div>
-                        <div className="col-span-1 md:col-span-1 lg:col-span-2">
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Variety Class {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}</label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
-                                <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
-                                    {categoryOptions.find(o => o.value === formData.variety_class)?.label || formData.variety_class}
-                                </div>
-                            ) : (
-                                <>
-                                    <div id="form-field-variety_class">
-                                        <Select
-                                            id="variety-class-select"
-                                            value={formData.variety_class}
-                                            onChange={(e) => {
-                                                setFormData({
-                                                    ...formData,
-                                                    variety_class: e.target.value,
-                                                    variety: '',
-                                                    variety_id: '',
-                                                });
-                                                if (validationErrors.variety_class) {
-                                                    setValidationErrors(prev => ({ ...prev, variety_class: null }));
-                                                }
-                                            }}
-                                            options={categoryOptions}
-                                            placeholder="Select category"
-                                            required
-                                            className={validationErrors.variety_class ? 'border-red-500 focus:ring-red-500' : ''}
-                                        />
-                                    </div>
-                                    {validationErrors.variety_class && (
-                                        <p className="text-xs text-red-500 font-medium mt-1 flex items-center gap-1">
-                                            <AlertTriangle size={12} className="shrink-0" /> {validationErrors.variety_class}
-                                        </p>
-                                    )}
-                                </>
-                            )}
-                            {formData.variety_class && (
-                                <p className="text-xs text-gray-500 mt-1" title={CATEGORY_HINTS[formData.variety_class]}>
-                                    {CATEGORY_HINTS[formData.variety_class]}
-                                </p>
-                            )}
-                        </div>
                         <div className="col-span-1 md:col-span-2 lg:col-span-2">
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Rice Variety {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}</label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Rice Variety {(!editingItem || !isPlantingFormReadOnly(editingItem)) && '*'}</label>
+                            {!!editingItem && isPlantingFormReadOnly(editingItem) ? (
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
                                     {formData.variety}
                                 </div>
@@ -1103,8 +1080,7 @@ const Plantings = () => {
                                                 }
                                             }}
                                             options={selectedVarietyOptions}
-                                            placeholder={formData.variety_class ? 'Select variety' : 'Select category first'}
-                                            disabled={!formData.variety_class}
+                                            placeholder="Select variety"
                                             required
                                             maxDropdownH={220}
                                             className={validationErrors.variety ? 'border-red-500 focus:ring-red-500' : ''}
@@ -1129,8 +1105,8 @@ const Plantings = () => {
                         </div>
                         {/* Planting date */}
                         <div className="col-span-1 md:col-span-1 lg:col-span-2">
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Planting Date {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}</label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Planting Date {(!editingItem || !isPlantingFormReadOnly(editingItem)) && '*'}</label>
+                            {!!editingItem && isPlantingFormReadOnly(editingItem) ? (
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
                                     {formData.planting_date ? formatDisplayDate(formData.planting_date) : '—'}
                                 </div>
@@ -1164,9 +1140,9 @@ const Plantings = () => {
                                 className="text-sm font-medium text-gray-700 mb-1 block"
                                 title="Overriding may shift activity schedule for pending system-generated tasks."
                             >
-                                Expected growth (days) {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}
+                                Expected growth (days) {(!editingItem || !isPlantingFormReadOnly(editingItem)) && '*'}
                             </label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                            {!!editingItem && isPlantingFormReadOnly(editingItem) ? (
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
                                     {formData.expected_growth_days}
                                 </div>
@@ -1207,7 +1183,7 @@ const Plantings = () => {
                             >
                                 Adjustment (days)
                             </label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                            {!!editingItem && isPlantingFormReadOnly(editingItem) ? (
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
                                     {formData.adjustment_days}
                                 </div>
@@ -1242,7 +1218,7 @@ const Plantings = () => {
                         </div>
                         <div className="col-span-1 lg:col-span-2">
                             <label className="text-sm font-medium text-gray-700 mb-1 block">Expected Harvest</label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                            {!!editingItem && isPlantingFormReadOnly(editingItem) ? (
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
                                     {previewExpectedHarvest
                                         ? formatDisplayDate(previewExpectedHarvest)
@@ -1267,8 +1243,8 @@ const Plantings = () => {
 
                         {/* Establishment Method */}
                         <div className="col-span-1 lg:col-span-1">
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Establishment Method {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}</label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Establishment Method {(!editingItem || !isPlantingFormReadOnly(editingItem)) && '*'}</label>
+                            {!!editingItem && isPlantingFormReadOnly(editingItem) ? (
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
                                     {formData.establishment_method === 'TRANSPLANTED' ? 'Transplanted' : formData.establishment_method === 'DIRECT_SEEDED' ? 'Direct Seeded' : formData.establishment_method || '—'}
                                 </div>
@@ -1307,8 +1283,8 @@ const Plantings = () => {
 
                         {/* Field Condition */}
                         <div className="col-span-1 lg:col-span-1">
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Field Condition {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}</label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Field Condition {(!editingItem || !isPlantingFormReadOnly(editingItem)) && '*'}</label>
+                            {!!editingItem && isPlantingFormReadOnly(editingItem) ? (
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
                                     {formData.field_condition === 'IRRIGATED' ? 'Irrigated' : formData.field_condition === 'RAINFED' ? 'Rainfed' : formData.field_condition || '—'}
                                 </div>
@@ -1347,8 +1323,8 @@ const Plantings = () => {
 
                         {/* Season */}
                         <div className="col-span-1 lg:col-span-1">
-                            <label className="text-sm font-medium text-gray-700 mb-1 block">Season {(!editingItem || !isCompletedPlanting(editingItem)) && '*'}</label>
-                            {!!editingItem && isCompletedPlanting(editingItem) ? (
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Season {(!editingItem || !isPlantingFormReadOnly(editingItem)) && '*'}</label>
+                            {!!editingItem && isPlantingFormReadOnly(editingItem) ? (
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-800">
                                     {formData.cropping_season === 'WET_SEASON' ? 'Wet Season' : formData.cropping_season === 'DRY_SEASON' ? 'Dry Season' : formData.cropping_season}
                                 </div>
@@ -1396,10 +1372,10 @@ const Plantings = () => {
                     </div>
                     <div className="flex justify-end gap-2 mt-6">
                         <button type="button" onClick={handleCloseModal} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm transition-colors">
-                            {editingItem && isCompletedPlanting(editingItem) ? 'Close' : 'Cancel'}
+                            {editingItem && isPlantingFormReadOnly(editingItem) ? 'Close' : 'Cancel'}
                         </button>
                         {(!editingItem ? can(CAPABILITIES.PLANTING_CREATE) : can(CAPABILITIES.PLANTING_UPDATE))
-                            && !isCompletedPlanting(editingItem) && (
+                            && !isPlantingFormReadOnly(editingItem) && (
                             <button type="submit" disabled={saving} className="bg-green-700 hover:bg-green-600 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                                 {saving ? 'Saving...' : editingItem ? 'Save Changes' : 'Create Planting'}
                             </button>
