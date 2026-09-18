@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ScrollText } from 'lucide-react';
 import Badge from '../components/Badge';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Select from '../components/Select';
 import { SkeletonCard, SkeletonTable } from '../components/Skeleton';
 import { getAuditLogs } from '../services/api';
+import { parsePositiveInt, patchSearchParams, pickAllowed } from '../utils/urlQueryState';
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: 'success', label: 'Success' },
   { value: 'failed', label: 'Failed' },
 ];
+
+const AUDIT_STATUSES = ['', 'success', 'failed'];
 
 const actorRoleLabel = (role) => {
   if (!role) return 'Not Recorded';
@@ -57,15 +61,16 @@ const formatTimestamp = (value) => {
 };
 
 const AuditLog = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [page, setPage] = useState(1);
+  const page = parsePositiveInt(searchParams.get('page'), 1);
   const [total, setTotal] = useState(0);
-  const [limit, setLimit] = useState(25);
-  const [status, setStatus] = useState('');
-  const [action, setAction] = useState('');
-  const [actionDraft, setActionDraft] = useState('');
+  const limit = parsePositiveInt(searchParams.get('limit'), 25);
+  const status = pickAllowed(searchParams.get('status') || '', AUDIT_STATUSES, '');
+  const action = searchParams.get('action') || '';
+  const [actionDraft, setActionDraft] = useState(() => searchParams.get('action') || '');
   const [hiddenIds, setHiddenIds] = useState(() => new Set());
   const [pendingRemoveId, setPendingRemoveId] = useState(null);
 
@@ -88,14 +93,17 @@ const AuditLog = () => {
       const payload = response.data || {};
       setLogs(Array.isArray(payload.logs) ? payload.logs : []);
       setTotal(Number(payload.total) || 0);
-      setLimit(Number(payload.limit) || 25);
+      const serverLimit = parsePositiveInt(payload.limit, limit);
+      if (serverLimit !== limit) {
+        patchSearchParams(setSearchParams, searchParams, { limit: serverLimit });
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Unable to load audit logs.');
       setLogs([]);
     } finally {
       setLoading(false);
     }
-  }, [page, limit, status, action]);
+  }, [page, limit, status, action, searchParams, setSearchParams]);
 
   useEffect(() => {
     fetchLogs();
@@ -103,8 +111,11 @@ const AuditLog = () => {
 
   const applyActionFilter = (event) => {
     event.preventDefault();
-    setPage(1);
-    setAction(actionDraft.trim().replace(/\s+/g, '_').toUpperCase());
+    const nextAction = actionDraft.trim().replace(/\s+/g, '_').toUpperCase();
+    patchSearchParams(setSearchParams, searchParams, {
+      action: nextAction || null,
+      page: 1,
+    });
   };
 
   const hidePendingLog = () => {
@@ -161,8 +172,10 @@ const AuditLog = () => {
             <Select
               value={status}
               onChange={(event) => {
-                setPage(1);
-                setStatus(event.target.value);
+                patchSearchParams(setSearchParams, searchParams, {
+                  status: event.target.value || null,
+                  page: 1,
+                });
               }}
               options={STATUS_OPTIONS}
             />
@@ -262,7 +275,7 @@ const AuditLog = () => {
               <button
                 type="button"
                 disabled={page <= 1}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                onClick={() => patchSearchParams(setSearchParams, searchParams, { page: Math.max(1, page - 1) })}
                 className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 disabled:opacity-40"
               >
                 <ChevronLeft size={16} /> Previous
@@ -270,7 +283,7 @@ const AuditLog = () => {
               <button
                 type="button"
                 disabled={page >= pageCount}
-                onClick={() => setPage((current) => current + 1)}
+                onClick={() => patchSearchParams(setSearchParams, searchParams, { page: page + 1 })}
                 className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 disabled:opacity-40"
               >
                 Next <ChevronRight size={16} />

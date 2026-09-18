@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { getAllActivities, getNotes } from '../services/api';
 import { groupActivitiesByDate, formatDateKey } from '../utils/calendarUtils';
-
+import { patchSearchParams, pickAllowed } from '../utils/urlQueryState';
 import CalendarHeader from '../components/calendar/CalendarHeader';
 import MonthView from '../components/calendar/MonthView';
 import WeekView from '../components/calendar/WeekView';
@@ -14,6 +14,9 @@ import { useToast } from '../context/ToastContext';
 import { Calendar as CalendarIcon, Loader2, AlertCircle } from 'lucide-react';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES } from '../security/permissions';
+
+const CALENDAR_VIEWS = ['month', 'week', 'day'];
+const CALENDAR_STATUSES = ['all', 'pending', 'ongoing', 'completed', 'overdue'];
 
 const Calendar = () => {
   const { can } = useAuth();
@@ -30,16 +33,22 @@ const Calendar = () => {
     return new Date();
   });
 
-  const [viewMode, setViewMode] = useState('month'); // 'month' | 'week' | 'day'
+  const viewMode = pickAllowed(searchParams.get('view'), CALENDAR_VIEWS, 'month');
+  const setViewMode = (mode) => {
+    patchSearchParams(setSearchParams, searchParams, { view: mode });
+  };
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [calendarFetchError, setCalendarFetchError] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
 
-  // Filters & Search
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  // Filters & Search (q is debounced into the URL to avoid a write per keystroke)
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '');
+  const statusFilter = pickAllowed(searchParams.get('status'), CALENDAR_STATUSES, 'all');
+  const setStatusFilter = (status) => {
+    patchSearchParams(setSearchParams, searchParams, { status });
+  };
 
   // Interactivity state
   const [selectedDateKey, setSelectedDateKey] = useState(() => searchParams.get('date') || null);
@@ -91,6 +100,14 @@ const Calendar = () => {
       setSelectedDateKey(null);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const nextQ = searchQuery.trim();
+      patchSearchParams(setSearchParams, searchParams, { q: nextQ || null });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchQuery, searchParams, setSearchParams]);
 
   // Navigation actions
   const handlePrev = () => {
