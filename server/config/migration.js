@@ -402,6 +402,25 @@ const runMigrations = async (db) => {
             console.log('✅ Added users.archived_at.');
         }
 
+        if (!(await checkColumn('varieties', 'is_active'))) {
+            console.log('🔹 Adding is_active to varieties...');
+            await db.query(
+                'ALTER TABLE varieties ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER max_growth_days'
+            );
+            console.log('✅ Added varieties.is_active.');
+        }
+        await db.query(
+            `UPDATE varieties SET is_active = 0
+             WHERE variety_class IN (
+                'Rainfed / Dry-Seeded Varieties (DSR)',
+                'Upland Varieties'
+             )`
+        );
+        await db.query(
+            `UPDATE varieties SET is_active = 1
+             WHERE variety_class = 'Irrigated / Lowland Varieties'`
+        );
+
         console.log('🎉 Migrations completed successfully!');
     } catch (err) {
         console.error('❌ Migration failed:', err.message);

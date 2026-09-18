@@ -8,12 +8,6 @@ import { CAPABILITIES } from '../security/permissions';
 import PlantingDetailsModal from './PlantingDetailsModal';
 import { isCurrentActivePlanting } from '../utils/plantingCompletion';
 
-const CLASSES = [
-    'Irrigated / Lowland Varieties',
-    'Rainfed / Dry-Seeded Varieties (DSR)',
-    'Upland Varieties'
-];
-
 const FULL_STAGE_NAMES = ['Seedling', 'Vegetative', 'Reproductive', 'Ripening', 'Harvest'];
 const LIFECYCLE_STAGE_LABELS = ['SEEDLING', 'VEGETATIVE', 'REPROD.', 'RIPENING', 'HARVEST'];
 const STAGE_COLORS = [
@@ -128,23 +122,6 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
     // Filter to active plantings only
     const activePlantings = plantingsList.filter((p) => isCurrentActivePlanting(p));
 
-    // Group active plantings by variety class
-    const groupedPlantings = {
-        'Irrigated / Lowland Varieties': [],
-        'Rainfed / Dry-Seeded Varieties (DSR)': [],
-        'Upland Varieties': []
-    };
-
-    activePlantings.forEach((p) => {
-        const varietyClass = p.variety_class || 'Irrigated / Lowland Varieties';
-        if (groupedPlantings[varietyClass]) {
-            groupedPlantings[varietyClass].push(p);
-        } else {
-            // Default fallback
-            groupedPlantings['Irrigated / Lowland Varieties'].push(p);
-        }
-    });
-
     const hasAnyActive = activePlantings.length > 0;
 
     return (
@@ -175,7 +152,7 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
                                 All Active Plantings
                             </h2>
                             <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">
-                                Current active crop cycles grouped by variety class
+                                Current active crop cycles
                             </p>
                         </div>
                         <button
@@ -221,17 +198,8 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
                         )}
 
                         {!error && hasAnyActive && (
-                            CLASSES.map((varietyClass) => {
-                                const list = groupedPlantings[varietyClass] || [];
-                                if (list.length === 0) return null; // Omit empty classes
-
-                                return (
-                                    <div key={varietyClass} className="space-y-3">
-                                        <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400/90 pl-1">
-                                            {varietyClass}
-                                        </h3>
-                                        <div className="grid gap-3">
-                                            {list.map((p) => {
+                            <div className="grid gap-3">
+                                {activePlantings.map((p) => {
                                                 const plantingDate = safeDate(p.planting_date);
                                                 const expectedHarvestDate = safeDate(p.expected_harvest);
                                                 const totalLifecycleDays = plantingDate && expectedHarvestDate
@@ -304,11 +272,8 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
                                                         </div>
                                                     </div>
                                                 );
-                                            })}
-                                        </div>
-                                    </div>
-                                );
-                            })
+                                })}
+                            </div>
                         )}
                     </div>
                 </motion.div>

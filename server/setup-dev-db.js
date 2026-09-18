@@ -153,7 +153,8 @@ const localAccountPassword = (envKey) => {
         '009_relax_legacy_activity_date.sql',
         '010_add_login_challenges.sql',
         '011_add_activity_logs_indexes.sql',
-        '012_add_users_archived_at.sql'
+        '012_add_users_archived_at.sql',
+        '013_varieties_is_active.sql'
     ]) {
         await applySqlFile(file);
     }

@@ -7,7 +7,7 @@ const {
     TEMPLATE_COUNT,
 } = require('../utils/activityScheduler');
 const { calendarDaysBetween, expectedHarvestFromPlan } = require('../utils/plantingDates');
-const { ROLES } = require('../security/rbac');
+const { ROLES, CAPABILITIES, assertHarvestedWrite } = require('../security/rbac');
 
 const {
     loadPresentationContext,
@@ -31,23 +31,21 @@ const VARIETY_MAP = {
         'NSIC Rc224', 'Rc226', 'Rc238', 'Rc240', 'Rc242 SR', 'Rc298', 'Rc300',
         'NSIC Rc396', 'Rc398', 'Rc414', 'Rc482SR', 'Rc484SR', 'Rc508', 'Rc510',
         'PSB RC1', 'RC2', 'RC4', 'RC6', 'RC8', 'RC10', 'RC18'
-    ],
-    'Rainfed / Dry-Seeded Varieties (DSR)': [
-        'NSIC 2020 Rc598', 'Rc596', 'Rc594', 'Rc592',
-        'NSIC 2011 Rc278'
-    ],
-    'Upland Varieties': [
-        'NSIC Rc29', 'Rc27', 'Rc25',
-        'NSIC Rc286', 'RC9', 'RC11',
-        'PSB RC3', 'RC5', 'RC7'
     ]
 };
+
+const DEFAULT_VARIETY_CLASS = 'Irrigated / Lowland Varieties';
 
 const isValidVarietyCombination = (varietyClass, variety) => {
     const varieties = VARIETY_MAP[varietyClass];
     if (!Array.isArray(varieties)) return false;
     return varieties.includes(variety);
 };
+
+const isUnchangedLegacyVariety = (current, varietyClass, variety) => (
+    String(current?.variety_class || '') === String(varietyClass || '')
+    && String(current?.variety || '') === String(variety || '')
+);
 
 const parseManualOverrideFlag = (v) => {
     if (v === undefined || v === null || v === '') return undefined;
@@ -285,7 +283,7 @@ const createPlanting = async (req, res) => {
         cropping_season, establishment_method, field_condition
     } = req.body;
     const normalizedFieldName = (field_name || '').trim();
-    const normalizedVarietyClass = (variety_class || '').trim();
+    const normalizedVarietyClass = (variety_class || '').trim() || DEFAULT_VARIETY_CLASS;
     const normalizedVariety = (variety || '').trim();
 
     const lifecycleState = 'ACTIVE';
@@ -295,9 +293,6 @@ const createPlanting = async (req, res) => {
     try {
         if (!normalizedFieldName) {
             return res.status(400).json({ message: 'Field name is required.' });
-        }
-        if (!normalizedVarietyClass) {
-            return res.status(400).json({ message: 'Variety class is required.' });
         }
         if (!normalizedVariety) {
             return res.status(400).json({ message: 'Rice variety is required.' });
@@ -478,9 +473,9 @@ const updatePlanting = async (req, res) => {
         }
 
         if (cur.lifecycle_state === 'HARVESTED' || cur.status === 'completed') {
-            return res.status(400).json({
-                message: 'Harvested plantings are read-only except for analytics exports.'
-            });
+            if (!assertHarvestedWrite(req.user.role, CAPABILITIES.PLANTING_UPDATE_HARVESTED)) {
+                return res.status(403).json({ message: 'Access denied. Insufficient privilege.' });
+            }
         }
         if (cur.lifecycle_state === 'ABANDONED') {
             return res.status(400).json({ message: 'Abandoned plantings cannot be updated.' });
@@ -492,7 +487,8 @@ const updatePlanting = async (req, res) => {
         if (!finalVarietyClass || !finalVariety) {
             return res.status(400).json({ message: 'Variety class and rice variety are required.' });
         }
-        if (!isValidVarietyCombination(finalVarietyClass, finalVariety)) {
+        if (!isValidVarietyCombination(finalVarietyClass, finalVariety)
+            && !isUnchangedLegacyVariety(cur, finalVarietyClass, finalVariety)) {
             return res.status(400).json({ message: 'Invalid rice variety for selected class.' });
         }
 
