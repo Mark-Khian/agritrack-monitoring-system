@@ -811,19 +811,19 @@ const Dashboard = () => {
         const pendingOverdue = overduePendingActivitiesThisMonthCount > 0;
         const lowActivity = activitiesThisMonthCount === 0;
         const rowBase =
-            'flex items-start gap-3 rounded-xl p-4 lg:p-3 w-full text-left cursor-pointer transition-colors';
+            'flex items-center gap-3 rounded-xl p-4 lg:p-3 w-full text-left cursor-pointer transition-colors lg:flex-1 lg:min-h-0';
 
         return (
         <div className={`rounded-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-5 sm:p-6 lg:p-5 shadow-sm flex flex-col w-full h-auto ${extraClassName}`}>
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">Critical Alerts</h2>
 
-            <div className="mt-4 lg:mt-3 space-y-3 lg:space-y-2.5">
+            <div className="mt-4 lg:mt-3 flex flex-col gap-3 lg:gap-2.5 lg:flex-1 lg:min-h-0">
                 <button
                     type="button"
                     onClick={() => setCriticalAlertModal('harvest')}
                     className={`${rowBase} ${harvestAlert ? 'bg-red-50 dark:bg-red-950/30 hover:bg-red-100/80 dark:hover:bg-red-950/50' : 'bg-gray-50 dark:bg-slate-900/50 hover:bg-gray-100 dark:hover:bg-slate-800'}`}
                 >
-                    <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${harvestAlert ? 'text-red-600' : 'text-gray-500 dark:text-slate-400'}`} />
+                    <AlertTriangle className={`h-5 w-5 shrink-0 ${harvestAlert ? 'text-red-600' : 'text-gray-500 dark:text-slate-400'}`} />
                     <div>
                         <p className="font-bold text-gray-900 dark:text-white">Overdue Harvest</p>
                         <p className={`mt-1 text-xs ${harvestAlert ? 'text-red-700 dark:text-red-300' : 'text-gray-600 dark:text-slate-400'}`}>
@@ -839,7 +839,7 @@ const Dashboard = () => {
                     onClick={() => setCriticalAlertModal('pending')}
                     className={`${rowBase} ${pendingOverdue ? 'bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100/80 dark:hover:bg-amber-950/50' : 'bg-gray-50 dark:bg-slate-900/50 hover:bg-gray-100 dark:hover:bg-slate-800'}`}
                 >
-                    <Clock className={`mt-0.5 h-5 w-5 shrink-0 ${pendingOverdue ? 'text-amber-700 dark:text-amber-400' : 'text-gray-600 dark:text-slate-400'}`} />
+                    <Clock className={`h-5 w-5 shrink-0 ${pendingOverdue ? 'text-amber-700 dark:text-amber-400' : 'text-gray-600 dark:text-slate-400'}`} />
                     <div>
                         <p className="font-bold text-gray-900 dark:text-white">Pending Activities</p>
                         <p className={`mt-1 text-xs ${pendingOverdue ? 'text-amber-900/80 dark:text-amber-200/80' : 'text-gray-600 dark:text-slate-400'}`}>
@@ -855,7 +855,7 @@ const Dashboard = () => {
                     onClick={() => setCriticalAlertModal('monthly')}
                     className={`${rowBase} ${lowActivity ? 'bg-yellow-50 dark:bg-yellow-950/20 hover:bg-yellow-100/80 dark:hover:bg-yellow-950/40' : 'bg-gray-50 dark:bg-slate-900/50 hover:bg-gray-100 dark:hover:bg-slate-800'}`}
                 >
-                    <Info className={`mt-0.5 h-5 w-5 shrink-0 ${lowActivity ? 'text-yellow-700 dark:text-yellow-400' : 'text-gray-600 dark:text-slate-400'}`} />
+                    <Info className={`h-5 w-5 shrink-0 ${lowActivity ? 'text-yellow-700 dark:text-yellow-400' : 'text-gray-600 dark:text-slate-400'}`} />
                     <div>
                         <p className="font-bold text-gray-900 dark:text-white">
                             {lowActivity ? 'Low Activity' : 'Monthly Activity'}
