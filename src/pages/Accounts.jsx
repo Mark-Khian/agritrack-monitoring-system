@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Ban,
+  Eye,
+  EyeOff,
   KeyRound,
   Loader2,
   Plus,
@@ -74,6 +76,96 @@ const validateChosenPassword = (password, confirmPassword) => {
 
 const accountName = (account) => (
   account.name || account.display_name || account.full_name || account.username
+);
+
+const AccountPasswordInput = ({ id, label, toggleLabel, value, onChange, disabled }) => {
+  const [visible, setVisible] = useState(false);
+  const inputRef = useRef(null);
+  const selectionRef = useRef(null);
+
+  const toggleVisible = () => {
+    const input = inputRef.current;
+    if (input && document.activeElement === input) {
+      let start = null;
+      let end = null;
+      try {
+        start = input.selectionStart;
+        end = input.selectionEnd;
+      } catch {
+        start = null;
+        end = null;
+      }
+      selectionRef.current = { start, end };
+    } else {
+      selectionRef.current = null;
+    }
+    setVisible((current) => !current);
+  };
+
+  useLayoutEffect(() => {
+    const selection = selectionRef.current;
+    const input = inputRef.current;
+    if (!selection || !input) return;
+    input.focus();
+    if (selection.start == null || selection.end == null) return;
+    try {
+      input.setSelectionRange(selection.start, selection.end);
+    } catch {
+      // Some browsers do not expose a caret while the value is masked.
+    }
+  }, [visible]);
+
+  return (
+    <div>
+      <label htmlFor={id} className="text-sm font-medium text-gray-700 mb-1 block">
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          ref={inputRef}
+          id={id}
+          type={visible ? 'text' : 'password'}
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          autoComplete="new-password"
+          className="w-full border border-gray-300 rounded-lg pl-4 pr-11 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+          required
+        />
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={toggleVisible}
+          disabled={disabled}
+          aria-label={visible ? `Hide ${toggleLabel}` : `Show ${toggleLabel}`}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 disabled:opacity-50"
+        >
+          {visible ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const PasswordFields = ({ idPrefix, values, onChange, disabled }) => (
+  <>
+    <AccountPasswordInput
+      id={`${idPrefix}-password`}
+      label="Password *"
+      toggleLabel="password"
+      value={values.password}
+      onChange={(event) => onChange({ ...values, password: event.target.value })}
+      disabled={disabled}
+    />
+    <AccountPasswordInput
+      id={`${idPrefix}-confirm`}
+      label="Confirm Password *"
+      toggleLabel="confirm password"
+      value={values.confirmPassword}
+      onChange={(event) => onChange({ ...values, confirmPassword: event.target.value })}
+      disabled={disabled}
+    />
+  </>
 );
 
 const Accounts = () => {
@@ -295,41 +387,6 @@ const Accounts = () => {
       </div>
     );
   };
-
-  const PasswordFields = ({ idPrefix, values, onChange, disabled }) => (
-    <>
-      <div>
-        <label htmlFor={`${idPrefix}-password`} className="text-sm font-medium text-gray-700 mb-1 block">
-          Password *
-        </label>
-        <input
-          id={`${idPrefix}-password`}
-          type="password"
-          value={values.password}
-          onChange={(event) => onChange({ ...values, password: event.target.value })}
-          disabled={disabled}
-          autoComplete="new-password"
-          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
-          required
-        />
-      </div>
-      <div>
-        <label htmlFor={`${idPrefix}-confirm`} className="text-sm font-medium text-gray-700 mb-1 block">
-          Confirm Password *
-        </label>
-        <input
-          id={`${idPrefix}-confirm`}
-          type="password"
-          value={values.confirmPassword}
-          onChange={(event) => onChange({ ...values, confirmPassword: event.target.value })}
-          disabled={disabled}
-          autoComplete="new-password"
-          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
-          required
-        />
-      </div>
-    </>
-  );
 
   return (
     <div className="space-y-6">
