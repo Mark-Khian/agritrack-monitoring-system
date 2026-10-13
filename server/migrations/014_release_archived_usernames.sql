@@ -116,18 +116,18 @@ SET @active_username_present := (
 );
 SET @active_username_compatible := (
     SELECT COUNT(*)
-    FROM INFORMATION_SCHEMA.COLUMNS generated
+    FROM INFORMATION_SCHEMA.COLUMNS `generated`
     JOIN INFORMATION_SCHEMA.COLUMNS source
-      ON source.TABLE_SCHEMA = generated.TABLE_SCHEMA
-     AND source.TABLE_NAME = generated.TABLE_NAME
+      ON source.TABLE_SCHEMA = `generated`.TABLE_SCHEMA
+     AND source.TABLE_NAME = `generated`.TABLE_NAME
      AND source.COLUMN_NAME = 'username'
-    WHERE generated.TABLE_SCHEMA = DATABASE()
-      AND generated.TABLE_NAME = 'users'
-      AND generated.COLUMN_NAME = 'active_username'
-      AND generated.COLUMN_TYPE = source.COLUMN_TYPE
-      AND generated.IS_NULLABLE = 'YES'
-      AND generated.EXTRA = 'STORED GENERATED'
-      AND LOWER(REPLACE(REPLACE(generated.GENERATION_EXPRESSION, '`', ''), ' ', ''))
+    WHERE `generated`.TABLE_SCHEMA = DATABASE()
+      AND `generated`.TABLE_NAME = 'users'
+      AND `generated`.COLUMN_NAME = 'active_username'
+      AND `generated`.COLUMN_TYPE = source.COLUMN_TYPE
+      AND `generated`.IS_NULLABLE = 'YES'
+      AND `generated`.EXTRA = 'STORED GENERATED'
+      AND LOWER(REPLACE(REPLACE(`generated`.GENERATION_EXPRESSION, '`', ''), ' ', ''))
           = 'if(archived_atisnull,username,null)'
 );
 SET @sql := IF(
@@ -146,18 +146,18 @@ SET @active_email_present := (
 );
 SET @active_email_compatible := (
     SELECT COUNT(*)
-    FROM INFORMATION_SCHEMA.COLUMNS generated
+    FROM INFORMATION_SCHEMA.COLUMNS `generated`
     JOIN INFORMATION_SCHEMA.COLUMNS source
-      ON source.TABLE_SCHEMA = generated.TABLE_SCHEMA
-     AND source.TABLE_NAME = generated.TABLE_NAME
+      ON source.TABLE_SCHEMA = `generated`.TABLE_SCHEMA
+     AND source.TABLE_NAME = `generated`.TABLE_NAME
      AND source.COLUMN_NAME = 'email'
-    WHERE generated.TABLE_SCHEMA = DATABASE()
-      AND generated.TABLE_NAME = 'users'
-      AND generated.COLUMN_NAME = 'active_email'
-      AND generated.COLUMN_TYPE = source.COLUMN_TYPE
-      AND generated.IS_NULLABLE = 'YES'
-      AND generated.EXTRA = 'STORED GENERATED'
-      AND LOWER(REPLACE(REPLACE(generated.GENERATION_EXPRESSION, '`', ''), ' ', ''))
+    WHERE `generated`.TABLE_SCHEMA = DATABASE()
+      AND `generated`.TABLE_NAME = 'users'
+      AND `generated`.COLUMN_NAME = 'active_email'
+      AND `generated`.COLUMN_TYPE = source.COLUMN_TYPE
+      AND `generated`.IS_NULLABLE = 'YES'
+      AND `generated`.EXTRA = 'STORED GENERATED'
+      AND LOWER(REPLACE(REPLACE(`generated`.GENERATION_EXPRESSION, '`', ''), ' ', ''))
           = 'if(archived_atisnull,email,null)'
 );
 SET @sql := IF(
