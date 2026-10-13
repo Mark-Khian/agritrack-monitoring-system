@@ -422,6 +422,91 @@ describe('Phase 5 centralized RBAC', () => {
         await worker.get('/api/v1/activities').expect(200);
         await worker.get('/api/v1/notes').expect(200);
 
+        const workerLog = await mutation(worker, 'post', '/api/v1/activities')
+            .send({
+                planting_id: fixtureIds.ACTIVE,
+                activity_type: 'crop_monitoring',
+                planned_date: '2026-09-12',
+                notes: 'Phase 5 worker activity log',
+                role: 'ADMIN',
+            })
+            .expect(201);
+        assert.ok(workerLog.body.activityId);
+        const logged = await rowSnapshot('activities', workerLog.body.activityId);
+        assert.equal(logged.planting_id, fixtureIds.ACTIVE);
+        assert.equal(logged.status, 'PENDING');
+
+        // An actual date on create records a completed activity. The status
+        // field is not accepted on this route; only actual_date completes it.
+        const completedOnCreate = await mutation(worker, 'post', '/api/v1/activities')
+            .send({
+                planting_id: fixtureIds.ACTIVE,
+                activity_type: 'crop_monitoring',
+                planned_date: '2026-09-12',
+                actual_date: '2026-09-12',
+                status: 'PENDING',
+                role: 'ADMIN',
+            })
+            .expect(201);
+        const completedRow = await rowSnapshot('activities', completedOnCreate.body.activityId);
+        assert.equal(completedRow.status, 'COMPLETED');
+        assert.equal(
+            completedRow.actual_date instanceof Date
+                ? completedRow.actual_date.toISOString().slice(0, 10)
+                : String(completedRow.actual_date).slice(0, 10),
+            '2026-09-12'
+        );
+
+        await mutation(worker, 'post', '/api/v1/activities')
+            .send({
+                planting_id: fixtureIds.PLANNED,
+                activity_type: 'crop_monitoring',
+                planned_date: '2026-09-12',
+                role: 'ADMIN',
+            })
+            .expect(404);
+        await mutation(worker, 'post', '/api/v1/activities')
+            .send({
+                planting_id: fixtureIds.ABANDONED,
+                activity_type: 'crop_monitoring',
+                planned_date: '2026-09-12',
+            })
+            .expect(404);
+
+        const maturingLog = await mutation(worker, 'post', '/api/v1/activities')
+            .send({
+                planting_id: fixtureIds.MATURING,
+                activity_type: 'crop_monitoring',
+                planned_date: '2026-09-12',
+                status: 'COMPLETED',
+                role: 'ADMIN',
+            })
+            .expect(201);
+        assert.equal((await rowSnapshot('activities', maturingLog.body.activityId)).status, 'PENDING');
+
+        const harvestReadyLog = await mutation(worker, 'post', '/api/v1/activities')
+            .send({
+                planting_id: fixtureIds.READY_FOR_HARVEST,
+                activity_type: 'crop_monitoring',
+                planned_date: '2026-09-12',
+            })
+            .expect(201);
+        assert.equal((await rowSnapshot('activities', harvestReadyLog.body.activityId)).status, 'PENDING');
+
+        await mutation(worker, 'post', '/api/v1/activities')
+            .send({
+                planting_id: harvestPlantingId,
+                activity_type: 'crop_monitoring',
+                planned_date: '2026-09-12',
+            })
+            .expect(404);
+
+        await mutation(worker, 'put', `/api/v1/activities/${workerLog.body.activityId}`)
+            .send({ notes: 'should not update' })
+            .expect(403);
+        await mutation(worker, 'delete', `/api/v1/activities/${workerLog.body.activityId}`)
+            .expect(403);
+
         await mutation(worker, 'patch', `/api/v1/activities/${workerProgressActivityId}/progress`)
             .send({ status: 'COMPLETED', actual_date: '2026-09-10' })
             .expect(200);
@@ -469,7 +554,6 @@ describe('Phase 5 centralized RBAC', () => {
             ['post', '/api/v1/plantings', { role: 'ADMIN' }],
             ['put', `/api/v1/plantings/${secretaryPlantingId}`, { status: 'completed' }],
             ['delete', `/api/v1/plantings/${secretaryPlantingId}`],
-            ['post', '/api/v1/activities', { role: 'ADMIN' }],
             ['put', `/api/v1/activities/${activityId}`, { status: 'COMPLETED' }],
             ['delete', `/api/v1/activities/${activityId}`],
             ['get', '/api/v1/harvests'],

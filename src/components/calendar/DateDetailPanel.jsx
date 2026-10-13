@@ -65,13 +65,13 @@ const DateDetailPanel = ({
               <p className="text-xs text-gray-400 dark:text-slate-600">Select another date or add a new farming activity.</p>
             </div>
           ) : (
-            activities.map((act) => {
+            activities.map((act, index) => {
               const style = getActivityColor(act);
               const icon = getActivityIcon(act.activity_type || act.activity_name, 16);
 
               return (
                 <div
-                  key={act.id || act.activity_id || Math.random()}
+                  key={act.id || act.activity_id || `activity-${index}`}
                   onClick={() => onSelectActivity(act)}
                   className={`group relative p-4 rounded-2xl border transition-all duration-200 hover:scale-[1.02] cursor-pointer shadow-md ${style.bg} ${style.border}`}
                 >

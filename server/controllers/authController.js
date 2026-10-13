@@ -77,7 +77,8 @@ const login = async (req, res) => {
         const [users] = await db.query(
             `SELECT *
              FROM users
-             WHERE username = ? OR email = ?
+             WHERE archived_at IS NULL
+               AND (username = ? OR email = ?)
              LIMIT 2`,
             [username, username]
         );

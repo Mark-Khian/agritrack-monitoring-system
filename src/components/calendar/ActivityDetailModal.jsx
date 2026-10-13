@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import {
   updateActivity,
-  updateActivityProgress,
-  deleteActivity
+  updateActivityProgress
 } from '../../services/api';
 import {
   getActivityColor,
@@ -22,8 +21,7 @@ const ActivityDetailModal = ({
   canManage = false,
   canComplete = false
 }) => {
-  if (!activity) return null;
-
+  const statusStr = activity?.status ? String(activity.status).toLowerCase() : 'pending';
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -31,15 +29,15 @@ const ActivityDetailModal = ({
     () => new Date().toISOString().slice(0, 10)
   );
   const [progressNotes, setProgressNotes] = useState('');
+  const [formData, setFormData] = useState({
+    activity_name: activity?.activity_name || activity?.activity_type || '',
+    scheduled_date: activity?.planned_date || activity?.scheduled_date || activity?.activity_date || '',
+    scheduled_time: activity?.scheduled_time || '',
+    status: statusStr,
+    notes: activity?.notes || ''
+  });
 
-    const statusStr = activity.status ? String(activity.status).toLowerCase() : 'pending';
-    const [formData, setFormData] = useState({
-      activity_name: activity.activity_name || activity.activity_type || '',
-      scheduled_date: activity.planned_date || activity.scheduled_date || activity.activity_date || '',
-      scheduled_time: activity.scheduled_time || '',
-      status: statusStr,
-      notes: activity.notes || ''
-    });
+  if (!activity) return null;
   
     const isTerminal = ['completed', 'cancelled', 'skipped'].includes(statusStr);
 

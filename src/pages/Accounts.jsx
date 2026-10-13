@@ -16,7 +16,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import Modal from '../components/Modal';
 import Select from '../components/Select';
 import { SkeletonCard, SkeletonTable } from '../components/Skeleton';
-import { useToast } from '../context/ToastContext';
+import useToast from '../context/useToast';
 import {
   archiveUser,
   createUser,
@@ -78,7 +78,7 @@ const accountName = (account) => (
   account.name || account.display_name || account.full_name || account.username
 );
 
-const AccountPasswordInput = ({ id, label, toggleLabel, value, onChange, disabled }) => {
+const AccountPasswordInput = ({ id, label, toggleLabel, placeholder, value, onChange, disabled }) => {
   const [visible, setVisible] = useState(false);
   const inputRef = useRef(null);
   const selectionRef = useRef(null);
@@ -127,9 +127,10 @@ const AccountPasswordInput = ({ id, label, toggleLabel, value, onChange, disable
           type={visible ? 'text' : 'password'}
           value={value}
           onChange={onChange}
+          placeholder={placeholder}
           disabled={disabled}
           autoComplete="new-password"
-          className="w-full border border-gray-300 rounded-lg pl-4 pr-11 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+          className="w-full border border-gray-300 rounded-lg pl-4 pr-11 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none placeholder:text-gray-400"
           required
         />
         <button
@@ -153,6 +154,7 @@ const PasswordFields = ({ idPrefix, values, onChange, disabled }) => (
       id={`${idPrefix}-password`}
       label="Password *"
       toggleLabel="password"
+      placeholder="Enter password"
       value={values.password}
       onChange={(event) => onChange({ ...values, password: event.target.value })}
       disabled={disabled}
@@ -161,6 +163,7 @@ const PasswordFields = ({ idPrefix, values, onChange, disabled }) => (
       id={`${idPrefix}-confirm`}
       label="Confirm Password *"
       toggleLabel="confirm password"
+      placeholder="Confirm password"
       value={values.confirmPassword}
       onChange={(event) => onChange({ ...values, confirmPassword: event.target.value })}
       disabled={disabled}

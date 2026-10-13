@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   getMonthGrid,
-  formatDateKey,
-  isToday,
   groupActivitiesByDate
 } from '../../utils/calendarUtils';
 import {

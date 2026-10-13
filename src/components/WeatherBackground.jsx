@@ -1,5 +1,10 @@
 import React from 'react';
 
+const rainUnit = (index, salt) => {
+    const value = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453;
+    return value - Math.floor(value);
+};
+
 /**
  * WeatherBackground
  * Reusable animated background for Philippine weather applications.
@@ -13,14 +18,13 @@ const WeatherBackground = ({ data }) => {
         if (!data || !data.weather || !data.weather[0]) return 'neutral';
         
         const id = data.weather[0].id;
-        const main = data.weather[0].main || '';
-        const condition = main.toLowerCase();
-        
+
         // Day/night detection based on location time
-        const dt = data.dt || Math.floor(Date.now() / 1000);
+        const fallbackNow = new Date();
+        const dt = data.dt || Math.floor(fallbackNow.getTime() / 1000);
         const sunrise = data.sys?.sunrise;
         const sunset = data.sys?.sunset;
-        const isDay = (sunrise && sunset) ? (dt >= sunrise && dt < sunset) : (new Date().getHours() >= 6 && new Date().getHours() < 19);
+        const isDay = (sunrise && sunset) ? (dt >= sunrise && dt < sunset) : (fallbackNow.getHours() >= 6 && fallbackNow.getHours() < 19);
 
         // Thunderstorm (including squalls & tornadoes)
         if ((id >= 200 && id < 300) || id === 771 || id === 781) {
@@ -69,10 +73,10 @@ const WeatherBackground = ({ data }) => {
 
     // 3. Raindrops positions
     const raindrops = Array.from({ length: 25 }, (_, i) => ({
-        left: `${(i * 4) + Math.random() * 3}%`,
-        delay: `${Math.random() * 1.2}s`,
-        duration: `${0.6 + Math.random() * 0.4}s`,
-        height: `${15 + Math.random() * 15}px`
+        left: `${(i * 4) + rainUnit(i, 1) * 3}%`,
+        delay: `${rainUnit(i, 2) * 1.2}s`,
+        duration: `${0.6 + rainUnit(i, 3) * 0.4}s`,
+        height: `${15 + rainUnit(i, 4) * 15}px`
     }));
 
     return (

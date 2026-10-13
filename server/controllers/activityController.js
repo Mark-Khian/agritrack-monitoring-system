@@ -2,6 +2,14 @@ const db = require('../config/db');
 const logActivity = require('../middleware/logger');
 const { utcTodayYmd } = require('../utils/plantingDates');
 const { broadcastNotificationsChanged } = require('../utils/notificationHub');
+const { ROLES } = require('../security/rbac');
+
+// Same current-planting set as the Farm Worker planting list.
+const WORKER_LOGGABLE_LIFECYCLE_STATES = Object.freeze([
+    'ACTIVE',
+    'MATURING',
+    'READY_FOR_HARVEST',
+]);
 
 const deriveActivityStatus = (activity) => {
     let s = (activity.status || 'PENDING').toUpperCase();
@@ -150,14 +158,17 @@ const createActivity = async (req, res) => {
     } = req.body;
 
     try {
-        // Check if planting exists and is active
+        // Check if planting exists and is active.
+        // Farm Workers may only log against plantings they are allowed to read.
+        const workerScoped = req.user?.role === ROLES.FARM_WORKER;
         const [planting] = await db.query(
             `SELECT plantings.id
              FROM plantings
              WHERE plantings.id = ?
                AND plantings.status = 'active'
-               AND plantings.deleted_at IS NULL`,
-            [planting_id]
+               AND plantings.deleted_at IS NULL
+               ${workerScoped ? `AND plantings.lifecycle_state IN (${WORKER_LOGGABLE_LIFECYCLE_STATES.map(() => '?').join(', ')})` : ''}`,
+            workerScoped ? [planting_id, ...WORKER_LOGGABLE_LIFECYCLE_STATES] : [planting_id]
         );
         if (planting.length === 0)
             return res.status(404).json({

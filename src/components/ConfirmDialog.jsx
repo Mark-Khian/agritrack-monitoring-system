@@ -15,9 +15,16 @@ const ConfirmDialog = ({
     hideCloseButton = false,
     children = null,
     confirmDisabled = false,
+    overlayClassName,
 }) => {
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={title} hideCloseButton={hideCloseButton}>
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={title}
+            hideCloseButton={hideCloseButton}
+            overlayClassName={overlayClassName}
+        >
             <div className="flex flex-col items-center text-center">
                 <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-6 ${iconBg}`}>
                     {icon}

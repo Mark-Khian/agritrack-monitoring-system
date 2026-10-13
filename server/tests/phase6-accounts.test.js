@@ -651,18 +651,39 @@ describe('Phase 6 account administration and Admin-managed passwords', () => {
             await mutation(admin, 'patch', `/api/v1/users/${account.id}/archive`)
                 .send({})
                 .expect(409);
-            await mutation(admin, 'post', '/api/v1/users')
+            const reusePassword = 'reuse_archived_ok';
+            const reused = await mutation(admin, 'post', '/api/v1/users')
                 .send(withPassword({
                     name: 'Reuse Archived',
                     username: account.username,
                     role: account.role,
-                }, 'reuse_archived_ok'))
+                }, reusePassword))
+                .expect(201);
+            issuedSecrets.push(reusePassword);
+            assertNoSecretKeys(reused.body);
+            assert.notEqual(reused.body.user.id, account.id);
+            assert.equal(reused.body.user.username, account.username);
+            const archivedRow = await userRow(account.id);
+            assert.equal(archivedRow.username, account.username);
+            assert.ok(archivedRow.archived_at);
+            const replacement = await login({ username: account.username, password: reusePassword });
+            await replacement.agent.get('/api/v1/auth/me').expect(200);
+            await login({ username: account.username, password: account.password }, 401);
+            await mutation(admin, 'post', '/api/v1/users')
+                .send(withPassword({
+                    name: 'Still Taken',
+                    username: account.username,
+                    role: account.role,
+                }, reusePassword))
                 .expect(409);
+            account.replacementId = reused.body.user.id;
         }
 
         const list = await admin.get('/api/v1/users').expect(200);
         assert.equal(list.body.users.some((user) => user.id === archiveSec.id), false);
         assert.equal(list.body.users.some((user) => user.id === archiveWrk.id), false);
+        assert.ok(list.body.users.some((user) => user.id === archiveSec.replacementId));
+        assert.ok(list.body.users.some((user) => user.id === archiveWrk.replacementId));
         assert.ok(list.body.users.some((user) => user.id === secretary.id));
         assert.ok(list.body.users.some((user) => user.id === worker.id));
 

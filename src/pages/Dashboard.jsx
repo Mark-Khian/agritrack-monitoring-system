@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -35,7 +35,6 @@ import {
 import {
     getPlantings,
     getHarvests,
-    getActivities,
     getAllActivities,
     getWeather
 } from '../services/api';
@@ -168,21 +167,15 @@ const Dashboard = () => {
     const [_plantingStatusData, setPlantingStatusData] = useState(initialCache?._plantingStatusData || []);
     const [plantingsList, setPlantingsList] = useState(initialCache?.plantingsList || []);
     const [harvestsList, setHarvestsList] = useState(initialCache?.harvestsList || []);
-    const [activitiesPerMonth, setActivitiesPerMonth] = useState(initialCache?.activitiesPerMonth || []);
+    const [_activitiesPerMonth, setActivitiesPerMonth] = useState(initialCache?.activitiesPerMonth || []);
     const [_harvestYield, setHarvestYield] = useState(initialCache?._harvestYield || []);
     const [_cropDistribution, setCropDistribution] = useState(initialCache?._cropDistribution || []);
     const [loading, setLoading] = useState(!initialCache);
 
-    // Plot activity explorer state 
-    const [expandedPlantingIds, setExpandedPlantingIds] = useState({});
-    const [plotActivitiesByPlantingId, setPlotActivitiesByPlantingId] = useState({});
-    const [plotActivitiesLoadingByPlantingId, setPlotActivitiesLoadingByPlantingId] = useState({});
     const plotOverviewTab = pickAllowed(searchParams.get('plots'), DASHBOARD_PLOT_TABS, 'active');
     const setPlotOverviewTab = (tab) => {
         patchSearchParams(setSearchParams, searchParams, { plots: tab });
     };
-    const [expandedHarvestIds, setExpandedHarvestIds] = useState({});
-    const [expandedTaskIds, setExpandedTaskIds] = useState({});
     const [plotSearch, setPlotSearch] = useState('');
     const [selectedPlotDetails, setSelectedPlotDetails] = useState(null);
     const [criticalAlertModal, setCriticalAlertModal] = useState(null);
@@ -318,8 +311,11 @@ const Dashboard = () => {
         fetchAll();
     }, [canReadHarvests, user?.role]);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = useMemo(() => {
+        const date = new Date();
+        date.setHours(0, 0, 0, 0);
+        return date;
+    }, []);
 
     const safeDate = (value) => {
         if (!value) return null;
@@ -338,11 +334,11 @@ const Dashboard = () => {
         return (status === 'pending' || status === 'ongoing') && d < today;
     };
 
-    const isActivityInCurrentMonth = (activity) => {
+    const isActivityInCurrentMonth = useCallback((activity) => {
         const d = safeDate(activity?.activity_date);
         if (!d) return false;
         return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
-    };
+    }, [today]);
 
     const overdueHarvestPlantings = useMemo(() => {
         return (plantingsList || [])
@@ -362,7 +358,7 @@ const Dashboard = () => {
                 return { ...p, daysOverdue };
             })
             .sort((a, b) => b.daysOverdue - a.daysOverdue);
-    }, [plantingsList]);
+    }, [plantingsList, today]);
 
     const pendingActivitiesThisMonth = useMemo(() => {
         return (activitiesList || []).filter((a) => {
@@ -370,11 +366,11 @@ const Dashboard = () => {
             const s = normalize(a?.status);
             return s === 'pending' || s === 'ongoing';
         });
-    }, [activitiesList]);
+    }, [activitiesList, isActivityInCurrentMonth]);
 
     const monthlyActivities = useMemo(() => {
         return (activitiesList || []).filter((a) => isActivityInCurrentMonth(a));
-    }, [activitiesList]);
+    }, [activitiesList, isActivityInCurrentMonth]);
 
     const overdueHarvestCount = overdueHarvestPlantings.length;
     const pendingActivitiesThisMonthCount = pendingActivitiesThisMonth.length;
@@ -600,53 +596,6 @@ const Dashboard = () => {
         ? Math.max(0, Math.round((today - plantingDate) / (1000 * 60 * 60 * 24)))
         : 0;
 
-    const togglePlotActivities = async (plantingId) => {
-        if (!plantingId) return;
-
-        const isCurrentlyExpanded = !!expandedPlantingIds[plantingId];
-        setExpandedPlantingIds((prev) => ({
-            ...prev,
-            [plantingId]: !isCurrentlyExpanded,
-        }));
-
-        if (isCurrentlyExpanded) return;
-
-        // Lazy-load activities only when the plot is expanded for the first time.
-        if (plotActivitiesByPlantingId[plantingId]) return;
-
-        setPlotActivitiesLoadingByPlantingId((prev) => ({ ...prev, [plantingId]: true }));
-        try {
-            const res = await getActivities({
-                planting_id: plantingId,
-                include_system_generated: 1,
-                limit: 100
-            });
-            const list = res?.data?.data || [];
-            setPlotActivitiesByPlantingId((prev) => ({ ...prev, [plantingId]: list }));
-        } catch (err) {
-            console.error('Plot activities fetch error:', err?.message || err);
-            setPlotActivitiesByPlantingId((prev) => ({ ...prev, [plantingId]: [] }));
-        } finally {
-            setPlotActivitiesLoadingByPlantingId((prev) => ({ ...prev, [plantingId]: false }));
-        }
-    };
-
-    const getActivityStatusBadge = (activity) => {
-        const status = normalize(activity?.status);
-        const overdue = isOverdue(activity);
-
-        if (status === 'completed') {
-            return { label: 'Completed', className: 'bg-green-100 text-green-700' };
-        }
-        if (overdue) {
-            return { label: 'Overdue', className: 'bg-red-100 text-red-700' };
-        }
-        if (status === 'ongoing') {
-            return { label: 'Ongoing', className: 'bg-amber-100 text-amber-800' };
-        }
-        return { label: 'Pending', className: 'bg-amber-100 text-amber-800' };
-    };
-
     const getMaturityDays = (plot) => {
         if (Number.isFinite(Number(plot?.maturity_days)) && Number(plot.maturity_days) > 0) {
             return Number(plot.maturity_days);
@@ -746,28 +695,6 @@ const Dashboard = () => {
         })
         .slice()
         .sort((a, b) => new Date(b.harvest_date || 0) - new Date(a.harvest_date || 0));
-
-    const downloadHarvestCsv = (harvest) => {
-        const rows = [
-            ['Plot', 'Crop Type', 'Yield (kg)', 'Harvest Date', 'Performed By', 'Notes'],
-            [
-                `${harvest.field_name || '—'} (${harvest.planting_variety || '—'})`,
-                harvest.planting_variety || '—',
-                harvest.yield_kg || '0',
-                harvest.harvest_date ? formatDisplayDate(harvest.harvest_date) : '—',
-                harvest.performed_by_name || '—',
-                (harvest.notes || '').replaceAll('"', '""')
-            ]
-        ];
-        const csv = rows.map((r) => r.map((v) => `"${String(v)}"`).join(',')).join('\n');
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `harvest-${harvest.id || 'record'}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-    };
 
     const statCards = [
         { label: 'Active Plantings', value: stats.plantings, icon: Sprout, accent: '#16a34a', iconBg: '#f0fdf4', path: '/plantings', iconColor: '#16a34a', hoverBg: 'bg-green-50 dark:bg-green-500/10' },

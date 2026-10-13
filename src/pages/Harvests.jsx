@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, Edit2, Trash2, Wheat, AlertTriangle, ChevronDown, FileDown, Printer, X, Check, Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useToast } from '../context/ToastContext';
+import useToast from '../context/useToast';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Badge from '../components/Badge';
@@ -69,7 +69,6 @@ const Harvests = () => {
     const [loading, setLoading] = useState(true);
     const [listsReady, setListsReady] = useState(false);
     const toast = useToast();
-    const [downloadingRowId, setDownloadingRowId] = useState(null);
     const [isExportDrawerOpen, setIsExportDrawerOpen] = useState(false);
     const [exportFormat, setExportFormat] = useState('csv');
     const [bulkExporting, setBulkExporting] = useState(false);
@@ -110,26 +109,6 @@ const Harvests = () => {
             setSelectedHarvestIds([]);
         }
     }, [isExportDrawerOpen]);
-
-    const handleSingleExportPDF = async (id) => {
-        setDownloadingRowId(id);
-        try {
-            const res = await exportHarvestsPDF({ harvestId: id });
-            const url = window.URL.createObjectURL(res.data);
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `harvest_report_${id}.pdf`);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            toast.success('Completed Crop Records PDF exported successfully.');
-        } catch (err) {
-            console.error('Export failed:', err);
-            toast.error('Failed to export Completed Crop Records PDF. Please try again.');
-        } finally {
-            setDownloadingRowId(null);
-        }
-    };
 
     const handleBulkExport = async (e) => {
         e?.preventDefault();
@@ -191,7 +170,7 @@ const Harvests = () => {
                     const text = await err.response.data.text();
                     const json = JSON.parse(text);
                     msg = json.message || msg;
-                } catch (e) {
+                } catch {
                     // Ignore JSON parse error
                 }
             }
@@ -768,7 +747,7 @@ const Harvests = () => {
                                     disabled={bulkExporting || selectedHarvestIds.length === 0}
                                     className="w-full bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-semibold transition-all inline-flex items-center justify-center gap-2"
                                 >
-                                    {bulkExporting || downloadingRowId !== null ? (
+                                    {bulkExporting ? (
                                         <>
                                             <Loader2 size={16} className="animate-spin" />
                                             <span>Generating Export...</span>

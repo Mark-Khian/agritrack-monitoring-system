@@ -1,7 +1,6 @@
 import React from 'react';
 import {
-  ChevronLeft, ChevronRight, Calendar as CalendarIcon,
-  Plus, RefreshCw, Filter, Layers
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import Select from '../Select';
 
@@ -12,11 +11,6 @@ const CalendarHeader = ({
   onPrev,
   onNext,
   onToday,
-  onRefresh,
-  isRefreshing,
-  onNewActivity,
-  searchQuery,
-  setSearchQuery,
   statusFilter,
   setStatusFilter
 }) => {

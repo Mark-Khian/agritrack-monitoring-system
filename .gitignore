@@ -32,6 +32,9 @@ dist-ssr
 server/ssl/
 server/backups/*.sql
 
+# Local evaluation seed output. README stays tracked; JSON manifests do not.
+server/backups/evaluation-seed-manifests/*.json
+
 # JWT RSA Key Pair - NEVER commit cryptographic keys
 server/private.key
 server/public.key

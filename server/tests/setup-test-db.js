@@ -67,7 +67,8 @@ const TEST_DB = 'crop_management_rearch_test';
         '010_add_login_challenges.sql',
         '011_add_activity_logs_indexes.sql',
         '012_add_users_archived_at.sql',
-        '013_varieties_is_active.sql'
+        '013_varieties_is_active.sql',
+        '014_release_archived_usernames.sql'
     ];
 
     for (const file of MIGRATIONS) {

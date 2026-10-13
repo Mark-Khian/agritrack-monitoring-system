@@ -74,7 +74,10 @@ const ROLE_CAPABILITIES = Object.freeze({
     CAPABILITIES.NOTE_MANAGE,
     CAPABILITIES.ANALYTICS_READ,
   ]),
-  [ROLES.FARM_WORKER]: COMMON,
+  [ROLES.FARM_WORKER]: Object.freeze([
+    ...COMMON,
+    CAPABILITIES.ACTIVITY_CREATE,
+  ]),
 });
 
 export const normalizeRole = (role) => {

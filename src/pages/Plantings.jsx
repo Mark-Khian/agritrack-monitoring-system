@@ -4,19 +4,19 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal';
 import PlantingDetailsModal from '../components/PlantingDetailsModal';
-import { useToast } from '../context/ToastContext';
+import useToast from '../context/useToast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Badge from '../components/Badge';
 import Select from '../components/Select';
 import MonthPicker from '../components/MonthPicker';
 import {
     getPlantings, createPlanting, updatePlanting, deletePlanting, getVarieties,
-    exportPlantingsCSV, exportPlantingsPDF, exportPlantingPDF
+    exportPlantingsCSV, exportPlantingsPDF
 } from '../services/api';
 import { SkeletonCard, SkeletonTable } from '../components/Skeleton';
 import { formatDisplayDate } from '../utils/dateFormatter';
 import useAuth from '../context/useAuth';
-import { CAPABILITIES } from '../security/permissions';
+import { CAPABILITIES, ROLES, normalizeRole } from '../security/permissions';
 import { isCompletedPlanting } from '../utils/plantingCompletion';
 import { patchSearchParams, pickAllowed } from '../utils/urlQueryState';
 
@@ -108,8 +108,12 @@ const getTabClass = (tabId, isActive) => {
     }
 };
 
+const isNestedInteractiveClick = (event) =>
+    Boolean(event.target.closest('button, a, input, select, textarea, label'));
+
 const Plantings = () => {
-    const { can } = useAuth();
+    const { user, can } = useAuth();
+    const isFarmWorker = normalizeRole(user?.role) === ROLES.FARM_WORKER;
     const canEditHarvestedPlanting = can(CAPABILITIES.PLANTING_UPDATE_HARVESTED);
     const isPlantingFormReadOnly = (p) => isCompletedPlanting(p) && !canEditHarvestedPlanting;
     const [searchParams, setSearchParams] = useSearchParams();
@@ -193,13 +197,6 @@ const Plantings = () => {
             String(formData.variety_id || '') !== String(editVarietyBaseline.variety_id ?? '')
         );
     }, [editingItem, editVarietyBaseline, formData.variety_class, formData.variety, formData.variety_id]);
-
-    const togglePartialTemplate = (idx) => {
-        setPartialTemplateIndices((prev) =>
-            prev.includes(idx) ? prev.filter((x) => x !== idx) : [...prev, idx].sort((a, b) => a - b)
-        );
-    };
-
 
     const fetchData = useCallback(async () => {
         try {
@@ -468,7 +465,6 @@ const Plantings = () => {
                         : undefined,
                     adjustment_days: Number(formData.adjustment_days || 0),
                     growth_plan_manual_override: !!formData.growth_plan_manual_override,
-                    cropping_season: formData.cropping_season,
                     establishment_method: formData.establishment_method,
                     field_condition: formData.field_condition,
                     lifecycle_state: formData.lifecycle_state,
@@ -553,8 +549,6 @@ const Plantings = () => {
         });
     }, [plantings, statusFilter]);
 
-    const [downloadingRowId, setDownloadingRowId] = useState(null);
-
     // Bulk Export state
     const [isExportDrawerOpen, setIsExportDrawerOpen] = useState(false);
     const [exportFormat, setExportFormat] = useState('csv'); // csv or pdf
@@ -570,27 +564,6 @@ const Plantings = () => {
             setSelectedPlantingIds([]);
         }
     }, [isExportDrawerOpen]);
-
-    const handleSingleExportPDF = async (id) => {
-        setDownloadingRowId(id);
-        try {
-            const res = await exportPlantingPDF(id);
-            const url = window.URL.createObjectURL(res.data);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `planting_report_${id}.pdf`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            setIsExportDrawerOpen(false);
-            globalToast.success('Completed Crop Records PDF exported successfully.');
-        } catch (err) {
-            console.error('Failed to export single planting report:', err);
-            globalToast.error('Failed to download report. Please try again.');
-        } finally {
-            setDownloadingRowId(null);
-        }
-    };
 
     const handleBulkExport = async (e) => {
         e?.preventDefault();
@@ -650,7 +623,7 @@ const Plantings = () => {
                     const text = await err.response.data.text();
                     const json = JSON.parse(text);
                     msg = json.message || msg;
-                } catch (e) {
+                } catch {
                     // Ignore JSON parse error
                 }
             }
@@ -743,8 +716,10 @@ const Plantings = () => {
                     <div className="hidden md:block">
                         <SkeletonTable
                             rows={6}
-                            cols={7}
-                            columnHeaders={['Variety', 'Field', 'Season', 'Dates', 'Growth Stage', 'Status', 'Actions']}
+                            cols={isFarmWorker ? 6 : 7}
+                            columnHeaders={isFarmWorker
+                                ? ['Variety', 'Field', 'Season', 'Dates', 'Growth Stage', 'Status']
+                                : ['Variety', 'Field', 'Season', 'Dates', 'Growth Stage', 'Status', 'Actions']}
                         />
                     </div>
                 </div>
@@ -774,7 +749,19 @@ const Plantings = () => {
                         {visiblePlantings.map((p) => (
                             <div
                                 key={p.id}
-                                className="rounded-2xl border border-gray-100 bg-white shadow-sm p-4 dark:border-slate-700"
+                                className={`rounded-2xl border border-gray-100 bg-white shadow-sm p-4 dark:border-slate-700 ${isFarmWorker ? 'cursor-pointer' : ''}`}
+                                onClick={isFarmWorker ? (event) => {
+                                    if (isNestedInteractiveClick(event)) return;
+                                    setDetailsPlanting(p);
+                                } : undefined}
+                                onKeyDown={isFarmWorker ? (event) => {
+                                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                                    if (event.target !== event.currentTarget) return;
+                                    event.preventDefault();
+                                    setDetailsPlanting(p);
+                                } : undefined}
+                                tabIndex={isFarmWorker ? 0 : undefined}
+                                aria-label={isFarmWorker ? `View planting details for ${p.variety || 'planting'}` : undefined}
                             >
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
@@ -790,6 +777,7 @@ const Plantings = () => {
                                             {p.variety_class || 'Unclassified'}
                                         </p>
                                     </div>
+                                    {!isFarmWorker && (
                                     <div className="flex items-center gap-1 shrink-0">
                                         {isCompletedPlanting(p) && (
                                             <>
@@ -852,6 +840,7 @@ const Plantings = () => {
                                             </>
                                         )}
                                     </div>
+                                    )}
                                 </div>
 
                                 <div className="mt-3 border-t border-gray-100 dark:border-slate-700 pt-3 space-y-2.5 text-sm">
@@ -906,12 +895,29 @@ const Plantings = () => {
                                         <th className="px-6 py-3">Dates</th>
                                         <th className="px-6 py-3">Growth Stage</th>
                                         <th className="px-6 py-3">Status</th>
-                                        <th className="px-6 py-3 text-right">Actions</th>
+                                        {!isFarmWorker && (
+                                            <th className="px-6 py-3 text-right">Actions</th>
+                                        )}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {visiblePlantings.map((p) => (
-                                        <tr key={p.id} className="border-b border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700/30 transition-colors duration-200">
+                                        <tr
+                                            key={p.id}
+                                            className={`border-b border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700/30 transition-colors duration-200 ${isFarmWorker ? 'cursor-pointer' : ''}`}
+                                            onClick={isFarmWorker ? (event) => {
+                                                if (isNestedInteractiveClick(event)) return;
+                                                setDetailsPlanting(p);
+                                            } : undefined}
+                                            onKeyDown={isFarmWorker ? (event) => {
+                                                if (event.key !== 'Enter' && event.key !== ' ') return;
+                                                if (event.target !== event.currentTarget) return;
+                                                event.preventDefault();
+                                                setDetailsPlanting(p);
+                                            } : undefined}
+                                            tabIndex={isFarmWorker ? 0 : undefined}
+                                            aria-label={isFarmWorker ? `View planting details for ${p.variety || 'planting'}` : undefined}
+                                        >
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2">
                                                     <div className="font-bold text-gray-900 dark:text-slate-100 flex flex-wrap items-center gap-1.5">
@@ -948,6 +954,7 @@ const Plantings = () => {
                                             </td>
                                             <td className="px-6 py-4"><Badge status={p.growth_stage} /></td>
                                             <td className="px-6 py-4"><Badge status={p.status} /></td>
+                                            {!isFarmWorker && (
                                             <td className="px-6 py-4 text-right space-x-2">
                                                 {isCompletedPlanting(p) && (
                                                     <>
@@ -989,6 +996,7 @@ const Plantings = () => {
                                                     </>
                                                 )}
                                             </td>
+                                            )}
                                         </tr>
                                     ))}
                                 </tbody>
@@ -1538,10 +1546,10 @@ const Plantings = () => {
                             <div className="p-6 border-t border-gray-100 bg-gray-50 flex flex-col gap-2">
                                 <button
                                     onClick={handleBulkExport}
-                                    disabled={bulkExporting || downloadingRowId !== null || selectedPlantingIds.length === 0}
+                                    disabled={bulkExporting || selectedPlantingIds.length === 0}
                                     className="w-full bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-semibold transition-all inline-flex items-center justify-center gap-2"
                                 >
-                                    {bulkExporting || downloadingRowId !== null ? (
+                                    {bulkExporting ? (
                                         <>
                                             <Loader2 size={16} className="animate-spin" />
                                             <span>Generating Export...</span>

@@ -172,12 +172,6 @@ const groupForecastByDay = (list) => {
     }).slice(0, 5);
 };
 
-const hoverStyle = {
-    background: 'rgba(255,255,255,0.22)',
-    transform: 'translateY(-3px)',
-    boxShadow: '0 6px 18px rgba(0,0,0,0.2)',
-};
-
 const formatLocationDisplay = (name) => {
     if (!name) return '';
     return name.replace(/\s\/\s/g, ', ').replace(/,\sPH$/, ', Philippines');

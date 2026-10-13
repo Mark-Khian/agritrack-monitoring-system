@@ -16,9 +16,9 @@ import { formatDisplayDate } from '../utils/dateFormatter';
 import { SkeletonTable } from '../components/Skeleton';
 import ConfirmDialog from '../components/ConfirmDialog';
 import MonthPicker from '../components/MonthPicker';
-import { useToast } from '../context/ToastContext';
+import useToast from '../context/useToast';
 import useAuth from '../context/useAuth';
-import { CAPABILITIES } from '../security/permissions';
+import { CAPABILITIES, ROLES, normalizeRole } from '../security/permissions';
 import { isCompletedPlanting } from '../utils/plantingCompletion';
 
 // ── Activity Type Icon + Color Map ────────
@@ -64,7 +64,9 @@ const getActivityIcon = (type) => {
 
 const Activities = () => {
     const navigate = useNavigate();
-    const { can } = useAuth();
+    const { user, can } = useAuth();
+    const role = normalizeRole(user?.role);
+    const canViewArchivedPlots = role === ROLES.ADMIN || role === ROLES.SECRETARY;
     const [activities, setActivities] = useState([]);
     const [plantings, setPlantings] = useState([]);  // active plantings for dropdown
     const [loading, setLoading] = useState(true);
@@ -359,10 +361,14 @@ const Activities = () => {
                         <div>
                             <p className="font-semibold">No active planting yet</p>
                             <p className="text-amber-700/80 text-xs mt-1">
-                                Activities can only be logged against an <strong>active</strong> planting record. Create one in <strong>Plantings</strong>, then try again.
+                                Activities can only be logged against an <strong>active</strong> planting record.
+                                {can(CAPABILITIES.PLANTING_CREATE) && (
+                                    <> Create one in <strong>Plantings</strong>, then try again.</>
+                                )}
                             </p>
                         </div>
                     </div>
+                    {can(CAPABILITIES.PLANTING_CREATE) && (
                     <button
                         type="button"
                         onClick={() => navigate('/plantings')}
@@ -370,6 +376,7 @@ const Activities = () => {
                     >
                         + Create Planting
                     </button>
+                    )}
                 </div>
             )}
 
@@ -426,19 +433,21 @@ const Activities = () => {
                                         Click a plot card to expand and see its activity list.
                                     </p>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsArchiveModalOpen(true)}
-                                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
-                                    >
-                                        <Archive size={14} className="text-gray-500" />
-                                        View Archived
-                                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-700">
-                                            {archivedPlotGroups.length}
-                                        </span>
-                                    </button>
-                                </div>
+                                {canViewArchivedPlots && (
+                                    <div className="flex items-center gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsArchiveModalOpen(true)}
+                                            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+                                        >
+                                            <Archive size={14} className="text-gray-500" />
+                                            View Archived
+                                            <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-700">
+                                                {archivedPlotGroups.length}
+                                            </span>
+                                        </button>
+                                    </div>
+                                )}
                             </div>
 
                             {activePlotGroups.length === 0 ? (
@@ -663,6 +672,7 @@ const Activities = () => {
                 iconBg="bg-green-100 text-green-700"
                 icon={<CheckCircle size={32} />}
                 confirmDisabled={!completeActualDate}
+                overlayClassName="z-[70]"
             >
                 <div className="space-y-3">
                     <div>

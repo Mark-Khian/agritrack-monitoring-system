@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, Legend,
@@ -160,16 +160,19 @@ const ErrorChart = ({ message }) => (
     </div>
 );
 
-const EmptyChart = ({ icon: Icon = Inbox, message }) => (
-    <div className="h-[220px] flex flex-col items-center justify-center text-center px-6">
-        <div className="w-12 h-12 rounded-2xl bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 flex items-center justify-center mb-3">
-            <Icon size={22} className="text-gray-400 dark:text-slate-500" strokeWidth={1.75} />
+const EmptyChart = ({ icon = Inbox, message }) => {
+    const Icon = icon;
+    return (
+        <div className="h-[220px] flex flex-col items-center justify-center text-center px-6">
+            <div className="w-12 h-12 rounded-2xl bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 flex items-center justify-center mb-3">
+                <Icon size={22} className="text-gray-400 dark:text-slate-500" strokeWidth={1.75} />
+            </div>
+            <p className="text-sm font-medium text-gray-500 dark:text-slate-400 max-w-[240px] leading-snug">
+                {message || 'No data available yet.'}
+            </p>
         </div>
-        <p className="text-sm font-medium text-gray-500 dark:text-slate-400 max-w-[240px] leading-snug">
-            {message || 'No data available yet.'}
-        </p>
-    </div>
-);
+    );
+};
 
 /** Sit the tooltip above and slightly beside the active point instead of covering it. */
 const ChartTooltipFrame = ({ children }) => (
@@ -661,9 +664,6 @@ const GrowthStagesDonut = ({ data, isDark }) => {
 const Analytics = () => {
     const { isDark } = useTheme();
     const [searchParams, setSearchParams] = useSearchParams();
-    const gridStroke = isDark ? '#334155' : '#e2e8f0';
-    const tickFill = isDark ? '#cbd5e1' : '#9ca3af';
-    const tickStyle = { fill: tickFill, fontSize: 10.5 };
     const areaDotStroke = isDark ? '#1e293b' : '#fff';
 
     const dateRange = pickAllowed(searchParams.get('range'), ANALYTICS_RANGES, '7d');
@@ -728,9 +728,12 @@ const Analytics = () => {
         }
     }, [plantingFilters, plantingsError, harvestsError, activitiesError]);
 
+    const fetchAllDataRef = useRef(fetchAllData);
+    fetchAllDataRef.current = fetchAllData;
+
     useEffect(() => {
-        fetchAllData(false);
-    }, [plantingFilters]); // Only depend on filters for initial load
+        fetchAllDataRef.current(false);
+    }, [plantingFilters]);
 
     const handleRetry = () => {
         fetchAllData(true);
@@ -748,10 +751,6 @@ const Analytics = () => {
     const filteredActivities = useMemo(
         () => filterByDateRange(activities, 'actual_date', dateRange),
         [activities, dateRange]
-    );
-    const filteredPlantings = useMemo(
-        () => filterByDateRange(plantings, 'planting_date', dateRange),
-        [plantings, dateRange]
     );
 
     const totals = useMemo(() => {

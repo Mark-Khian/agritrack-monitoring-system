@@ -208,6 +208,7 @@ const MonthPicker = ({
                 ref={triggerRef}
                 type="button"
                 disabled={disabled}
+                aria-required={required || undefined}
                 className={baseClass}
                 onClick={open ? closePanel : openPanel}
             >

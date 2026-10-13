@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sprout, MapPin, Loader2, Calendar } from 'lucide-react';
 import { getPlantings } from '../services/api';
@@ -50,6 +50,8 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
     const { can } = useAuth();
     const canEditPlantings = can(CAPABILITIES.PLANTING_UPDATE);
     const [plantingsList, setPlantingsList] = useState(activePlantingsCache || []);
+    const plantingsCountRef = useRef(plantingsList.length);
+    plantingsCountRef.current = plantingsList.length;
     const [loading, setLoading] = useState(isOpen && !activePlantingsCache);
     const [error, setError] = useState(null);
     const [detailsPlanting, setDetailsPlanting] = useState(null);
@@ -64,7 +66,7 @@ const ActivePlantingsModal = ({ isOpen, onClose }) => {
         if (!isOpen) return;
 
         const loadPlantings = async () => {
-            if (plantingsList.length === 0) {
+            if (plantingsCountRef.current === 0) {
                 setLoading(true);
             }
             setError(null);

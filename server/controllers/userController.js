@@ -75,9 +75,13 @@ const listUsers = async (req, res) => {
     }
 };
 
+const ACTIVE_IDENTITY_SQL = 'archived_at IS NULL AND (username = ? OR email = ?)';
+const LOCK_ACTIVE_IDENTITY_SQL =
+    'SELECT id FROM users WHERE archived_at IS NULL AND (username = ? OR email = ?) LIMIT 1 FOR UPDATE';
+
 const usernameExists = async (executor, username) => {
     const [rows] = await executor.query(
-        `SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1`,
+        `SELECT id FROM users WHERE ${ACTIVE_IDENTITY_SQL} LIMIT 1`,
         [username, username]
     );
     return rows.length > 0;
@@ -97,7 +101,7 @@ const createUser = async (req, res) => {
             await connection.beginTransaction();
 
             const [conflicts] = await connection.query(
-                `SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1 FOR UPDATE`,
+                LOCK_ACTIVE_IDENTITY_SQL,
                 [username, username]
             );
             if (conflicts.length > 0) {

@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const getQualityGradeStyles = (grade) => {
+const getQualityGradeStyles = (grade) => {
     const g = String(grade || '').trim().toUpperCase();
     if (g === 'A') {
         return { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-800 dark:text-green-300', border: 'border-green-200 dark:border-green-800', label: 'Grade A' };

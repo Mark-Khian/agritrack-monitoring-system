@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { getAllActivities, getNotes } from '../services/api';
 import { groupActivitiesByDate, formatDateKey } from '../utils/calendarUtils';
@@ -10,7 +10,7 @@ import DayView from '../components/calendar/DayView';
 import DateDetailPanel from '../components/calendar/DateDetailPanel';
 import ActivityDetailModal from '../components/calendar/ActivityDetailModal';
 import NoteModal from '../components/calendar/NoteModal';
-import { useToast } from '../context/ToastContext';
+import useToast from '../context/useToast';
 import { Calendar as CalendarIcon, Loader2, AlertCircle } from 'lucide-react';
 import useAuth from '../context/useAuth';
 import { CAPABILITIES } from '../security/permissions';
@@ -144,33 +144,37 @@ const Calendar = () => {
     setSelectedDateKey(formatDateKey(today));
   };
 
+  const keyboardNavRef = useRef({});
+  keyboardNavRef.current = { handlePrev, handleNext, handleToday, setViewMode };
+
   // Keyboard navigation shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       // Don't trigger when user typing in input fields
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
 
+      const nav = keyboardNavRef.current;
       if (e.key === 'Escape') {
         setSelectedDateKey(null);
         setSelectedActivity(null);
       } else if (e.key === 't' || e.key === 'T') {
-        handleToday();
+        nav.handleToday();
       } else if (e.key === 'm' || e.key === 'M') {
-        setViewMode('month');
+        nav.setViewMode('month');
       } else if (e.key === 'w' || e.key === 'W') {
-        setViewMode('week');
+        nav.setViewMode('week');
       } else if (e.key === 'd' || e.key === 'D') {
-        setViewMode('day');
+        nav.setViewMode('day');
       } else if (e.key === 'ArrowLeft') {
-        handlePrev();
+        nav.handlePrev();
       } else if (e.key === 'ArrowRight') {
-        handleNext();
+        nav.handleNext();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentDate, viewMode]);
+  }, []);
 
   // Filter activities based on query & status
   const filteredActivities = useMemo(() => {
